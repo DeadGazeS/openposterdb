@@ -11,7 +11,7 @@ pub struct Config {
     pub ratings_max_age_secs: u64,
     pub image_stale_secs: u64,
     pub image_quality: u8,
-    pub mdblist_api_key: Option<String>,
+    pub mdblist_api_keys: Vec<String>,
     pub image_mem_cache_mb: u64,
     pub static_dir: Option<String>,
     pub cors_origin: Option<String>,
@@ -35,7 +35,7 @@ impl std::fmt::Debug for Config {
             .field("ratings_max_age_secs", &self.ratings_max_age_secs)
             .field("image_stale_secs", &self.image_stale_secs)
             .field("image_quality", &self.image_quality)
-            .field("mdblist_api_key", &self.mdblist_api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("mdblist_api_key", &self.mdblist_api_keys.first().map(|_| "[REDACTED]"))
             .field("image_mem_cache_mb", &self.image_mem_cache_mb)
             .field("static_dir", &self.static_dir)
             .field("cors_origin", &self.cors_origin)
@@ -64,6 +64,18 @@ fn optional_secret(key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn optional_secrets(key: &str) -> Vec<String> {
+    env::var(key)
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 impl Config {
     pub fn from_env() -> Self {
         let config = Self {
@@ -88,7 +100,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(85),
-            mdblist_api_key: optional_secret("MDBLIST_API_KEY"),
+            mdblist_api_keys: optional_secrets("MDBLIST_API_KEY"),
             image_mem_cache_mb: env::var("IMAGE_MEM_CACHE_MB")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -112,7 +124,7 @@ impl Config {
         };
 
         if config.omdb_api_key.is_none()
-            && config.mdblist_api_key.is_none()
+            && config.mdblist_api_keys.is_empty()
             && config.trakt_client_id.is_none()
         {
             panic!(
@@ -170,7 +182,7 @@ mod tests {
         let cfg = Config::from_env();
         assert_eq!(cfg.tmdb_api_key, "tmdb_test");
         assert_eq!(cfg.omdb_api_key.as_deref(), Some("omdb_test"));
-        assert!(cfg.mdblist_api_key.is_none());
+        assert!(cfg.mdblist_api_keys.is_empty());
         assert_eq!(cfg.cache_dir, "./cache");
         assert_eq!(cfg.db_dir, "./db");
         assert_eq!(cfg.listen_addr, "0.0.0.0:3000");
@@ -193,7 +205,7 @@ mod tests {
 
         let cfg = Config::from_env();
         assert!(cfg.omdb_api_key.is_none());
-        assert_eq!(cfg.mdblist_api_key.as_deref(), Some("mdblist_test"));
+        assert_eq!(cfg.mdblist_api_keys, vec!["mdblist_test"]);
     }
 
     #[test]
@@ -210,7 +222,7 @@ mod tests {
 
         let cfg = Config::from_env();
         assert_eq!(cfg.omdb_api_key.as_deref(), Some("omdb_test"), "value is trimmed");
-        assert!(cfg.mdblist_api_key.is_none(), "empty key treated as absent");
+        assert!(cfg.mdblist_api_keys.is_empty(), "empty key treated as absent");
         assert!(cfg.trakt_client_id.is_none(), "whitespace-only key treated as absent");
     }
 
@@ -294,6 +306,20 @@ mod tests {
         assert!(!cfg.enable_cdn_redirects);
         assert!(!cfg.external_cache_only);
         assert!(!cfg.disable_public_pages);
+    }
+
+    #[test]
+    #[serial]
+    fn test_mdblist_comma_separated_keys() {
+        unsafe { clear_config_env() };
+        unsafe { env::set_var("TMDB_API_KEY", "tmdb_test") };
+        unsafe { env::set_var("MDBLIST_API_KEY", "key1, key2 ,key3") };
+
+        let cfg = Config::from_env();
+        assert_eq!(
+            cfg.mdblist_api_keys,
+            vec!["key1", "key2", "key3"],
+        );
     }
 
     #[test]
