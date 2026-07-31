@@ -16,6 +16,7 @@ fn hash_key(key: &str) -> String {
         .collect()
 }
 
+#[derive(Clone)]
 struct ApiKey {
     raw: Zeroizing<String>,
     hashed: String,
