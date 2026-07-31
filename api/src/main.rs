@@ -10,6 +10,7 @@ use tracing_subscriber::EnvFilter;
 use openposterdb_api::cache::MemCacheEntry;
 use openposterdb_api::config::Config;
 use openposterdb_api::handlers;
+use openposterdb_api::services::api_key_pool::ApiKeyPool;
 use openposterdb_api::services::db;
 use openposterdb_api::services::fanart::FanartClient;
 use openposterdb_api::services::mdblist::MdblistClient;
@@ -54,10 +55,17 @@ async fn main() {
         .as_ref()
         .map(|key| OmdbClient::new(key.clone(), http.clone()));
 
-    let mdblist = config
-        .mdblist_api_key
-        .as_ref()
-        .map(|key| MdblistClient::new(key.clone(), http.clone()));
+    let mdblist = if config.mdblist_api_keys.is_empty() {
+        None
+    } else {
+        let pool = ApiKeyPool::new(config.mdblist_api_keys.clone());
+        tracing::info!(
+            key_count = pool.len(),
+            primary_key = %pool.active_key_hash(),
+            "mdblist client initialized"
+        );
+        Some(MdblistClient::new(pool, http.clone()))
+    };
 
     let fanart = config
         .fanart_api_key
@@ -77,7 +85,7 @@ async fn main() {
 
     // Log startup configuration
     tracing::info!(
-        mdblist = config.mdblist_api_key.is_some(),
+        mdblist = !config.mdblist_api_keys.is_empty(),
         omdb = config.omdb_api_key.is_some(),
         fanart = config.fanart_api_key.is_some(),
         trakt = config.trakt_client_id.is_some(),

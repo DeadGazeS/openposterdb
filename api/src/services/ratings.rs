@@ -1198,15 +1198,17 @@ async fn fetch_mdblist_ratings(
     let resp = match mdblist_lookup_for(resolved)? {
         MdblistLookup::Imdb(imdb_id) => match client.get_ratings(imdb_id, &resolved.media_type).await {
             Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(imdb_id, media_type = ?resolved.media_type, "mdblist rating fetch failed: {e}");
+            Err(_) => {
+                let key = client.active_key_hash();
+                tracing::warn!(imdb_id, key = %key, media_type = ?resolved.media_type, "mdblist rating fetch failed");
                 return None;
             }
         },
         MdblistLookup::Tmdb(tmdb_id) => match client.get_ratings_by_tmdb(tmdb_id, &resolved.media_type).await {
             Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(tmdb_id, media_type = ?resolved.media_type, "mdblist tmdb rating fetch failed: {e}");
+            Err(_) => {
+                let key = client.active_key_hash();
+                tracing::warn!(tmdb_id, key = %key, media_type = ?resolved.media_type, "mdblist tmdb rating fetch failed");
                 return None;
             }
         },

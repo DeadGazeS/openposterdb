@@ -1,3 +1,4 @@
+pub mod api_key_pool;
 pub mod db;
 pub mod fanart;
 pub mod lang;
