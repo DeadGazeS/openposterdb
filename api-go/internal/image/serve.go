@@ -24,8 +24,8 @@ var loadedFont *sfnt.Font
 const (
 	// labelFontFaceSize is the point size for rating source labels.
 	labelFontFaceSize = 26.0
-	// valueFontFaceSize is the point size for rating values, ~10% larger.
-	valueFontFaceSize = 28.6
+	// valueFontFaceSize is the point size for rating values, ~15% larger than the label.
+	valueFontFaceSize = 30.0
 )
 
 func LoadFont(path string) error {
