@@ -17,9 +17,9 @@ import (
 )
 
 func deriveCipherKey(jwtSecret []byte) []byte {
-	hkdf := hkdf.New(sha256.New, jwtSecret, nil, []byte("openposterdb-service-keys"))
+	h := hkdf.New(sha256.New, jwtSecret, nil, []byte("openposterdb-service-keys"))
 	key := make([]byte, 32)
-	if _, err := io.ReadFull(hkdf, key); err != nil {
+	if _, err := io.ReadFull(h, key); err != nil {
 		panic("HKDF expand should not fail for 32 bytes: " + err.Error())
 	}
 	return key
@@ -60,19 +60,20 @@ func MaskKey(key string) string {
 		return "****"
 	}
 	prefix := key[:n]
-	suffixRunes := []rune(key)
-	for i, j := 0, len(suffixRunes)-1; i < j; i, j = i+1, j-1 {
-		suffixRunes[i], suffixRunes[j] = suffixRunes[j], suffixRunes[i]
+	rev := []rune(key)
+	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
+		rev[i], rev[j] = rev[j], rev[i]
 	}
-	suffix := string(suffixRunes[:n])
-	suffixRunes = []rune(suffix)
-	for i, j := 0, len(suffixRunes)-1; i < j; i, j = i+1, j-1 {
-		suffixRunes[i], suffixRunes[j] = suffixRunes[j], suffixRunes[i]
+	suffix := string(rev[:n])
+	revSuf := []rune(suffix)
+	for i, j := 0, len(revSuf)-1; i < j; i, j = i+1, j-1 {
+		revSuf[i], revSuf[j] = revSuf[j], revSuf[i]
 	}
-	return fmt.Sprintf("%s...%s", prefix, string(suffixRunes))
+	return fmt.Sprintf("%s...%s", prefix, string(revSuf))
 }
 
 type keyCache struct {
+	tmdb    []string
 	mdblist []string
 	omdb    []string
 	fanart  []string
@@ -80,15 +81,16 @@ type keyCache struct {
 }
 
 type ServiceKeyManager struct {
-	DB          *sql.DB
-	GCM         cipher.AEAD
-	HTTP        *http.Client
-	Keys        keyCache
-	mu          sync.RWMutex
-	EnvMDBList  bool
-	EnvOMDB     bool
-	EnvFanart   bool
-	EnvTrakt    bool
+	DB         *sql.DB
+	GCM        cipher.AEAD
+	HTTP       *http.Client
+	Keys       keyCache
+	mu         sync.RWMutex
+	EnvTMDB    bool
+	EnvMDBList bool
+	EnvOMDB    bool
+	EnvFanart  bool
+	EnvTrakt   bool
 }
 
 type ServiceKeyStatus struct {
@@ -98,6 +100,7 @@ type ServiceKeyStatus struct {
 }
 
 type ServiceKeysResponse struct {
+	TMDB    ServiceKeyStatus `json:"tmdb"`
 	MDBList ServiceKeyStatus `json:"mdblist"`
 	OMDB    ServiceKeyStatus `json:"omdb"`
 	Fanart  ServiceKeyStatus `json:"fanart"`
@@ -105,6 +108,7 @@ type ServiceKeysResponse struct {
 }
 
 type ServiceKeysUpdate struct {
+	TMDB    *string `json:"tmdb"`
 	MDBList *string `json:"mdblist"`
 	OMDB    *string `json:"omdb"`
 	Fanart  *string `json:"fanart"`
@@ -112,7 +116,7 @@ type ServiceKeysUpdate struct {
 }
 
 func NewServiceKeyManager(db *sql.DB, jwtSecret []byte, httpClient *http.Client,
-	envMDBList []string, envOMDB, envFanart, envTrakt string) *ServiceKeyManager {
+	envTMDB string, envMDBList []string, envOMDB, envFanart, envTrakt string) *ServiceKeyManager {
 
 	cipherKey := deriveCipherKey(jwtSecret)
 	aesCipher, err := aes.NewCipher(cipherKey)
@@ -129,17 +133,17 @@ func NewServiceKeyManager(db *sql.DB, jwtSecret []byte, httpClient *http.Client,
 	}
 
 	envMDBListLocked := len(envMDBList) > 0
-	envOMDBLocked := envOMDB != ""
-	envFanartLocked := envFanart != ""
-	envTraktLocked := envTrakt != ""
 
-	if envOMDBLocked {
+	if envTMDB != "" {
+		cache.tmdb = []string{envTMDB}
+	}
+	if envOMDB != "" {
 		cache.omdb = []string{envOMDB}
 	}
-	if envFanartLocked {
+	if envFanart != "" {
 		cache.fanart = []string{envFanart}
 	}
-	if envTraktLocked {
+	if envTrakt != "" {
 		cache.trakt = []string{envTrakt}
 	}
 
@@ -148,14 +152,20 @@ func NewServiceKeyManager(db *sql.DB, jwtSecret []byte, httpClient *http.Client,
 		GCM:        gcm,
 		HTTP:       httpClient,
 		Keys:       cache,
+		EnvTMDB:    envTMDB != "",
 		EnvMDBList: envMDBListLocked,
-		EnvOMDB:    envOMDBLocked,
-		EnvFanart:  envFanartLocked,
-		EnvTrakt:   envTraktLocked,
+		EnvOMDB:    envOMDB != "",
+		EnvFanart:  envFanart != "",
+		EnvTrakt:   envTrakt != "",
 	}
 }
 
 func (m *ServiceKeyManager) Init() {
+	if !m.EnvTMDB {
+		if v := m.loadFromDB("tmdb"); v != nil && len(*v) > 0 {
+			m.Keys.tmdb = *v
+		}
+	}
 	if !m.EnvMDBList {
 		if v := m.loadFromDB("mdblist"); v != nil {
 			m.Keys.mdblist = *v
@@ -200,6 +210,15 @@ func (m *ServiceKeyManager) loadFromDB(service string) *[]string {
 	return &keys
 }
 
+func (m *ServiceKeyManager) TMDBKey() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.Keys.tmdb) > 0 {
+		return m.Keys.tmdb[0]
+	}
+	return ""
+}
+
 func (m *ServiceKeyManager) MDBListKeys() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -226,6 +245,8 @@ func (m *ServiceKeyManager) TraktClientIDs() []string {
 
 func (m *ServiceKeyManager) EnvLocked(service string) bool {
 	switch service {
+	case "tmdb":
+		return m.EnvTMDB
 	case "mdblist":
 		return m.EnvMDBList
 	case "omdb":
@@ -242,6 +263,7 @@ func (m *ServiceKeyManager) GetStatus() ServiceKeysResponse {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return ServiceKeysResponse{
+		TMDB:    m.statusFor("tmdb", m.Keys.tmdb),
 		MDBList: m.statusFor("mdblist", m.Keys.mdblist),
 		OMDB:    m.statusFor("omdb", m.Keys.omdb),
 		Fanart:  m.statusFor("fanart", m.Keys.fanart),
@@ -268,6 +290,13 @@ func (m *ServiceKeyManager) UpdateKeys(update *ServiceKeysUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if !m.EnvTMDB && update.TMDB != nil {
+		keys := parseKeys(*update.TMDB)
+		if err := m.storeKey("tmdb", *update.TMDB); err != nil {
+			return err
+		}
+		m.Keys.tmdb = keys
+	}
 	if !m.EnvMDBList && update.MDBList != nil {
 		keys := parseKeys(*update.MDBList)
 		if err := m.storeKey("mdblist", *update.MDBList); err != nil {

@@ -383,6 +383,7 @@ func (r *Router) registerRoutes() {
 			var update services.ServiceKeysUpdate
 			decodeJSON(req, &update)
 			s.ServiceKeys.UpdateKeys(&update)
+			s.SetupTMDB(s.ServiceKeys.TMDBKey())
 			s.SetupOMDB(s.ServiceKeys.OMDBKeys())
 			s.SetupMDBList(s.ServiceKeys.MDBListKeys())
 			s.SetupFanart(s.ServiceKeys.FanartKeys())
@@ -412,6 +413,14 @@ func (r *Router) registerRoutes() {
 		abs, _ := filepath.Abs(s.Config.StaticDir)
 		r.staticDir = abs
 		r.fs = http.FileServer(http.Dir(abs))
+	}
+}
+
+func (s *AppState) SetupTMDB(key string) {
+	if key != "" {
+		s.TMDB = services.NewTmdbClient(key, s.HTTPClient)
+	} else {
+		s.TMDB = nil
 	}
 }
 
