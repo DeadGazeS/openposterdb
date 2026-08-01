@@ -214,7 +214,7 @@ func SetupHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, pa
 }
 
 func LoginHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, interface{}, []*http.Cookie) {
-	_, returnedUsername, passwordHash, err := services.FindAdminUserByUsername(db, username)
+	userID, returnedUsername, passwordHash, err := services.FindAdminUserByUsername(db, username)
 	if err != nil || returnedUsername == "" {
 		VerifyPassword(password, dummyHash)
 		slog.Warn("Login failed: unknown username")
@@ -229,7 +229,7 @@ func LoginHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, pa
 
 	slog.Info("Admin login successful", "user", username)
 
-	accessToken, rawRefresh, err := IssueTokenPair(db, jwtSecret, 0, username)
+	accessToken, rawRefresh, err := IssueTokenPair(db, jwtSecret, userID, username)
 	if err != nil {
 		return 500, map[string]string{"error": "Authentication failed"}, nil
 	}
