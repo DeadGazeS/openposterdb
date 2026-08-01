@@ -1,19 +1,19 @@
 services:
   openposterdb:
-    image: pnrxa/openposterdb:latest
+    image: ghcr.io/deadgazes/openposterdb
+    container_name: openposterdb
+    restart: unless-stopped
     ports:
       - "3000:3000"
     env_file:
       - .env
     volumes:
       - openposterdb-data:/data
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:3000/api/auth/status"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      start_period: 5s
-      retries: 3
+      retries: 20
 
 volumes:
   openposterdb-data:
