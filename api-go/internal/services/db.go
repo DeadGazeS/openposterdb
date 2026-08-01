@@ -176,39 +176,33 @@ func ParseBadgeShape(s string) BadgeShape {
 	}
 }
 
-// --- BadgeBackground ---
+// --- BadgeAlpha ---
 
-type BadgeBackground string
+// BadgeAlpha is the badge background opacity as a percentage (0–100).
+// 0 = fully transparent (no background), 100 = opaque.
+type BadgeAlpha int32
 
-const (
-	BadgeBackgroundDefault     BadgeBackground = "d"
-	BadgeBackgroundDark        BadgeBackground = "k"
-	BadgeBackgroundTransparent BadgeBackground = "t"
-	BadgeBackgroundNone        BadgeBackground = "n"
-)
+func DefaultBadgeAlpha() BadgeAlpha { return 80 }
 
-func ParseBadgeBackground(s string) BadgeBackground {
-	switch s {
-	case "k":
-		return BadgeBackgroundDark
-	case "t":
-		return BadgeBackgroundTransparent
-	case "n":
-		return BadgeBackgroundNone
-	default:
-		return BadgeBackgroundDefault
+func ClampBadgeAlpha(v int32) BadgeAlpha {
+	if v < 0 {
+		return 0
 	}
+	if v > 100 {
+		return 100
+	}
+	return BadgeAlpha(v)
 }
 
 // --- BadgeAppearance ---
 
 type BadgeAppearance struct {
-	Shape      BadgeShape
-	Background BadgeBackground
+	Shape BadgeShape
+	Alpha BadgeAlpha
 }
 
 func DefaultBadgeAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: BadgeShapeRounded, Background: BadgeBackgroundDefault}
+	return BadgeAppearance{Shape: BadgeShapeRounded, Alpha: DefaultBadgeAlpha()}
 }
 
 // --- BadgePosition ---
@@ -528,7 +522,6 @@ func DefaultLogoBadgeStyle() BadgeStyle         { return BadgeStyleVertical }
 func DefaultBackdropBadgeStyle() BadgeStyle     { return BadgeStyleVertical }
 func DefaultLabelStyle() LabelStyle             { return LabelStyleOfficial }
 func DefaultBadgeShape() BadgeShape             { return BadgeShapeRounded }
-func DefaultBadgeBackground() BadgeBackground    { return BadgeBackgroundDefault }
 func DefaultPosterBadgeDirection() BadgeDirection { return BadgeDirectionDefault }
 func DefaultBackdropPosition() BadgePosition    { return PositionTopRight }
 func DefaultBackdropBadgeDirection() BadgeDirection { return BadgeDirectionDefault }
@@ -632,10 +625,14 @@ type RenderSettings struct {
 	LogoBadgeShape            BadgeShape      `json:"logo_badge_shape"`
 	BackdropBadgeShape        BadgeShape      `json:"backdrop_badge_shape"`
 	EpisodeBadgeShape         BadgeShape      `json:"episode_badge_shape"`
-	PosterBadgeBackground     BadgeBackground `json:"poster_badge_background"`
-	LogoBadgeBackground       BadgeBackground `json:"logo_badge_background"`
-	BackdropBadgeBackground   BadgeBackground `json:"backdrop_badge_background"`
-	EpisodeBadgeBackground    BadgeBackground `json:"episode_badge_background"`
+	PosterBadgeAlpha          BadgeAlpha      `json:"poster_badge_alpha"`
+	LogoBadgeAlpha            BadgeAlpha      `json:"logo_badge_alpha"`
+	BackdropBadgeAlpha        BadgeAlpha      `json:"backdrop_badge_alpha"`
+	EpisodeBadgeAlpha         BadgeAlpha      `json:"episode_badge_alpha"`
+
+	// Colors holds per-rating-source color overrides. Only non-default colors
+	// are stored; empty means "use the source default".
+	Colors map[string]SourceColorSet `json:"colors"`
 }
 
 func DefaultRenderSettings() RenderSettings {
@@ -677,27 +674,27 @@ func DefaultRenderSettings() RenderSettings {
 		LogoBadgeShape:            BadgeShapeRounded,
 		BackdropBadgeShape:        BadgeShapeRounded,
 		EpisodeBadgeShape:         BadgeShapeRounded,
-		PosterBadgeBackground:     BadgeBackgroundDefault,
-		LogoBadgeBackground:       BadgeBackgroundDefault,
-		BackdropBadgeBackground:   BadgeBackgroundDefault,
-		EpisodeBadgeBackground:    BadgeBackgroundDefault,
+		PosterBadgeAlpha:          DefaultBadgeAlpha(),
+		LogoBadgeAlpha:            DefaultBadgeAlpha(),
+		BackdropBadgeAlpha:        DefaultBadgeAlpha(),
+		EpisodeBadgeAlpha:         DefaultBadgeAlpha(),
 	}
 }
 
 func (s *RenderSettings) PosterAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.PosterBadgeShape, Background: s.PosterBadgeBackground}
+	return BadgeAppearance{Shape: s.PosterBadgeShape, Alpha: s.PosterBadgeAlpha}
 }
 
 func (s *RenderSettings) LogoAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.LogoBadgeShape, Background: s.LogoBadgeBackground}
+	return BadgeAppearance{Shape: s.LogoBadgeShape, Alpha: s.LogoBadgeAlpha}
 }
 
 func (s *RenderSettings) BackdropAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.BackdropBadgeShape, Background: s.BackdropBadgeBackground}
+	return BadgeAppearance{Shape: s.BackdropBadgeShape, Alpha: s.BackdropBadgeAlpha}
 }
 
 func (s *RenderSettings) EpisodeAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.EpisodeBadgeShape, Background: s.EpisodeBadgeBackground}
+	return BadgeAppearance{Shape: s.EpisodeBadgeShape, Alpha: s.EpisodeBadgeAlpha}
 }
 
 func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
@@ -744,10 +741,11 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		LogoBadgeShape:           BadgeShape(stringOr(globals, "logo_badge_shape", string(defaults.LogoBadgeShape))),
 		BackdropBadgeShape:       BadgeShape(stringOr(globals, "backdrop_badge_shape", string(defaults.BackdropBadgeShape))),
 		EpisodeBadgeShape:        BadgeShape(stringOr(globals, "episode_badge_shape", string(defaults.EpisodeBadgeShape))),
-		PosterBadgeBackground:    BadgeBackground(stringOr(globals, "poster_badge_background", string(defaults.PosterBadgeBackground))),
-		LogoBadgeBackground:      BadgeBackground(stringOr(globals, "logo_badge_background", string(defaults.LogoBadgeBackground))),
-		BackdropBadgeBackground:  BadgeBackground(stringOr(globals, "backdrop_badge_background", string(defaults.BackdropBadgeBackground))),
-		EpisodeBadgeBackground:   BadgeBackground(stringOr(globals, "episode_badge_background", string(defaults.EpisodeBadgeBackground))),
+		PosterBadgeAlpha:         ClampBadgeAlpha(int32Or(globals, "poster_badge_alpha", int32(defaults.PosterBadgeAlpha))),
+		LogoBadgeAlpha:           ClampBadgeAlpha(int32Or(globals, "logo_badge_alpha", int32(defaults.LogoBadgeAlpha))),
+		BackdropBadgeAlpha:       ClampBadgeAlpha(int32Or(globals, "backdrop_badge_alpha", int32(defaults.BackdropBadgeAlpha))),
+		EpisodeBadgeAlpha:        ClampBadgeAlpha(int32Or(globals, "episode_badge_alpha", int32(defaults.EpisodeBadgeAlpha))),
+		Colors:                  parseSourceColors(globals),
 	}
 }
 
@@ -789,7 +787,7 @@ func int32ClampOr(v int32) int32 {
 // key/value form stored in global_settings. Used by the admin settings update
 // path so the stored representation always reflects the current settings.
 func RenderSettingsToMap(s *RenderSettings) map[string]string {
-	return map[string]string{
+	m := map[string]string{
 		"image_source":              string(s.ImageSource),
 		"lang":                      s.Lang,
 		"textless":                  boolStr(s.Textless),
@@ -826,11 +824,15 @@ func RenderSettingsToMap(s *RenderSettings) map[string]string {
 		"logo_badge_shape":          string(s.LogoBadgeShape),
 		"backdrop_badge_shape":      string(s.BackdropBadgeShape),
 		"episode_badge_shape":       string(s.EpisodeBadgeShape),
-		"poster_badge_background":   string(s.PosterBadgeBackground),
-		"logo_badge_background":     string(s.LogoBadgeBackground),
-		"backdrop_badge_background": string(s.BackdropBadgeBackground),
-		"episode_badge_background":  string(s.EpisodeBadgeBackground),
+		"poster_badge_alpha":         int32Str(int32(s.PosterBadgeAlpha)),
+		"logo_badge_alpha":           int32Str(int32(s.LogoBadgeAlpha)),
+		"backdrop_badge_alpha":       int32Str(int32(s.BackdropBadgeAlpha)),
+		"episode_badge_alpha":        int32Str(int32(s.EpisodeBadgeAlpha)),
 	}
+	for k, v := range colorsToMap(s.Colors) {
+		m[k] = v
+	}
+	return m
 }
 
 // ValidateRenderSettings validates the effective render settings, returning an
@@ -869,6 +871,43 @@ func boolStr(b bool) string {
 
 func int32Str(v int32) string {
 	return fmt.Sprintf("%d", v)
+}
+
+func parseSourceColors(globals map[string]string) map[string]SourceColorSet {
+	var out map[string]SourceColorSet
+	for _, key := range AllColorKeys() {
+		var set SourceColorSet
+		set.Accent = globals["color_"+key+"_accent"]
+		set.Value = globals["color_"+key+"_value"]
+		set.Border = globals["color_"+key+"_border"]
+		set.Text = globals["color_"+key+"_text"]
+		if set.HasAny() {
+			if out == nil {
+				out = make(map[string]SourceColorSet)
+			}
+			out[key] = set
+		}
+	}
+	return out
+}
+
+func colorsToMap(colors map[string]SourceColorSet) map[string]string {
+	out := map[string]string{}
+	for key, set := range colors {
+		if set.Accent != "" {
+			out["color_"+key+"_accent"] = set.Accent
+		}
+		if set.Value != "" {
+			out["color_"+key+"_value"] = set.Value
+		}
+		if set.Border != "" {
+			out["color_"+key+"_border"] = set.Border
+		}
+		if set.Text != "" {
+			out["color_"+key+"_text"] = set.Text
+		}
+	}
+	return out
 }
 
 // --- Admin user CRUD ---
@@ -1044,6 +1083,23 @@ func FindAPIKeyByID(db *sql.DB, id int64) (*APIKey, error) {
 	return &k, nil
 }
 
+// FindAPIKeyByName returns the API key with the given name, or nil. Used by the
+// settings importer to update an existing key instead of recreating it.
+func FindAPIKeyByName(db *sql.DB, name string) (*APIKey, error) {
+	var k APIKey
+	err := db.QueryRow(
+		"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at FROM api_keys WHERE name = ?",
+		name,
+	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
 func ListAPIKeys(db *sql.DB) ([]APIKey, error) {
 	rows, err := db.Query("SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at FROM api_keys")
 	if err != nil {
@@ -1198,6 +1254,44 @@ func SetGlobalSettingsBatch(db *sql.DB, settings map[string]string) error {
 	return tx.Commit()
 }
 
+// RemoveGlobalSettings deletes the given keys from global_settings. Used to
+// drop settings that are no longer set (e.g. per-source color overrides that
+// were reset to their default), since SetGlobalSettingsBatch only upserts.
+func RemoveGlobalSettings(db *sql.DB, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, key := range keys {
+		if _, err := tx.Exec("DELETE FROM global_settings WHERE key = ?", key); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// PruneStaleColorSettings deletes per-source color rows (color_<key>_<attr>)
+// that exist in the current globals but are absent from the new batch. This
+// keeps reset colors / toggled-off borders from resurrecting on the next load,
+// because the batch only carries non-default overrides.
+func PruneStaleColorSettings(db *sql.DB, globals, batch map[string]string) error {
+	var stale []string
+	for key := range globals {
+		if !strings.HasPrefix(key, "color_") {
+			continue
+		}
+		if _, ok := batch[key]; !ok {
+			stale = append(stale, key)
+		}
+	}
+	return RemoveGlobalSettings(db, stale)
+}
+
 // --- Per-key settings ---
 
 type APIKeySettings struct {
@@ -1236,10 +1330,10 @@ type APIKeySettings struct {
 	LogoBadgeShape           string `json:"logo_badge_shape"`
 	BackdropBadgeShape       string `json:"backdrop_badge_shape"`
 	EpisodeBadgeShape        string `json:"episode_badge_shape"`
-	PosterBadgeBackground    string `json:"poster_badge_background"`
-	LogoBadgeBackground      string `json:"logo_badge_background"`
-	BackdropBadgeBackground  string `json:"backdrop_badge_background"`
-	EpisodeBadgeBackground   string `json:"episode_badge_background"`
+	PosterBadgeAlpha         int32  `json:"poster_badge_alpha"`
+	LogoBadgeAlpha           int32  `json:"logo_badge_alpha"`
+	BackdropBadgeAlpha       int32  `json:"backdrop_badge_alpha"`
+	EpisodeBadgeAlpha        int32  `json:"episode_badge_alpha"`
 	BackdropEdgeInsetX       int32  `json:"backdrop_edge_inset_x"`
 	BackdropEdgeInsetY       int32  `json:"backdrop_edge_inset_y"`
 }
@@ -1257,7 +1351,7 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 		episode_ratings_limit, episode_badge_style, episode_label_style, episode_badge_size,
 		episode_position, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
-		poster_badge_background, logo_badge_background, backdrop_badge_background, episode_badge_background,
+		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
 		backdrop_edge_inset_x, backdrop_edge_inset_y
 		FROM api_key_settings WHERE api_key_id = ?`, apiKeyID).Scan(
 		&s.APIKeyID, &s.ImageSource, &s.Lang, &s.Textless, &s.RatingsLimit, &s.RatingsOrder, &s.RatingsExclude,
@@ -1270,7 +1364,7 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 		&s.EpisodeRatingsLimit, &s.EpisodeBadgeStyle, &s.EpisodeLabelStyle, &s.EpisodeBadgeSize,
 		&s.EpisodePosition, &s.EpisodeBadgeDirection, &s.EpisodeBlur,
 		&s.PosterBadgeShape, &s.LogoBadgeShape, &s.BackdropBadgeShape, &s.EpisodeBadgeShape,
-		&s.PosterBadgeBackground, &s.LogoBadgeBackground, &s.BackdropBadgeBackground, &s.EpisodeBadgeBackground,
+		&s.PosterBadgeAlpha, &s.LogoBadgeAlpha, &s.BackdropBadgeAlpha, &s.EpisodeBadgeAlpha,
 		&s.BackdropEdgeInsetX, &s.BackdropEdgeInsetY,
 	)
 	if err == sql.ErrNoRows {
@@ -1291,9 +1385,9 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		episode_ratings_limit, episode_badge_style, episode_label_style, episode_badge_size,
 		episode_position, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
-		poster_badge_background, logo_badge_background, backdrop_badge_background, episode_badge_background,
+		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
 		backdrop_edge_inset_x, backdrop_edge_inset_y
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(api_key_id) DO UPDATE SET
 		image_source = excluded.image_source,
 		lang = excluded.lang,
@@ -1329,10 +1423,10 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		logo_badge_shape = excluded.logo_badge_shape,
 		backdrop_badge_shape = excluded.backdrop_badge_shape,
 		episode_badge_shape = excluded.episode_badge_shape,
-		poster_badge_background = excluded.poster_badge_background,
-		logo_badge_background = excluded.logo_badge_background,
-		backdrop_badge_background = excluded.backdrop_badge_background,
-		episode_badge_background = excluded.episode_badge_background,
+		poster_badge_alpha = excluded.poster_badge_alpha,
+		logo_badge_alpha = excluded.logo_badge_alpha,
+		backdrop_badge_alpha = excluded.backdrop_badge_alpha,
+		episode_badge_alpha = excluded.episode_badge_alpha,
 		backdrop_edge_inset_x = excluded.backdrop_edge_inset_x,
 		backdrop_edge_inset_y = excluded.backdrop_edge_inset_y`,
 		s.APIKeyID, s.ImageSource, s.Lang, s.Textless, s.RatingsLimit, s.RatingsOrder, s.RatingsExclude,
@@ -1345,7 +1439,7 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		s.EpisodeRatingsLimit, s.EpisodeBadgeStyle, s.EpisodeLabelStyle, s.EpisodeBadgeSize,
 		s.EpisodePosition, s.EpisodeBadgeDirection, s.EpisodeBlur,
 		s.PosterBadgeShape, s.LogoBadgeShape, s.BackdropBadgeShape, s.EpisodeBadgeShape,
-		s.PosterBadgeBackground, s.LogoBadgeBackground, s.BackdropBadgeBackground, s.EpisodeBadgeBackground,
+		s.PosterBadgeAlpha, s.LogoBadgeAlpha, s.BackdropBadgeAlpha, s.EpisodeBadgeAlpha,
 		s.BackdropEdgeInsetX, s.BackdropEdgeInsetY,
 	)
 	return err
@@ -1399,10 +1493,10 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 			LogoBadgeShape:         BadgeShape(perKey.LogoBadgeShape),
 			BackdropBadgeShape:     BadgeShape(perKey.BackdropBadgeShape),
 			EpisodeBadgeShape:      BadgeShape(perKey.EpisodeBadgeShape),
-			PosterBadgeBackground:  BadgeBackground(perKey.PosterBadgeBackground),
-			LogoBadgeBackground:    BadgeBackground(perKey.LogoBadgeBackground),
-			BackdropBadgeBackground: BadgeBackground(perKey.BackdropBadgeBackground),
-			EpisodeBadgeBackground: BadgeBackground(perKey.EpisodeBadgeBackground),
+			PosterBadgeAlpha:         ClampBadgeAlpha(perKey.PosterBadgeAlpha),
+			LogoBadgeAlpha:           ClampBadgeAlpha(perKey.LogoBadgeAlpha),
+			BackdropBadgeAlpha:       ClampBadgeAlpha(perKey.BackdropBadgeAlpha),
+			EpisodeBadgeAlpha:        ClampBadgeAlpha(perKey.EpisodeBadgeAlpha),
 		}
 	}
 

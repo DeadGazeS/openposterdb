@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -544,4 +545,43 @@ func indexOf(slice []string, item string) int {
 		}
 	}
 	return len(slice)
+}
+
+// MarshalRatingBadges serializes a badge list as a compact JSON object mapping
+// source key → value (e.g. {"imdb":"8.7","tmdb":"92%"}). Used to persist the
+// preview title's ratings in available_ratings so they are fetched only once.
+func MarshalRatingBadges(badges []RatingBadge) string {
+	m := make(map[string]string, len(badges))
+	for _, b := range badges {
+		if b.Source != nil {
+			m[b.Source.Key] = b.Value
+		}
+	}
+	if len(m) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// UnmarshalRatingBadges parses the format produced by MarshalRatingBadges,
+// rebuilding each badge from its source key. Returns nil for empty input.
+func UnmarshalRatingBadges(sources string) []RatingBadge {
+	if sources == "" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(sources), &m); err != nil {
+		return nil
+	}
+	badges := make([]RatingBadge, 0, len(m))
+	for key, value := range m {
+		if src := SourceFromKey(key); src != nil {
+			badges = append(badges, RatingBadge{Source: src, Value: value})
+		}
+	}
+	return badges
 }

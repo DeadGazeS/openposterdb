@@ -1,7 +1,9 @@
 package services
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"sort"
 )
 
 // --- Cache key suffix construction ---
@@ -26,8 +28,8 @@ func BadgeShapeCacheSuffix(shape string) string {
 	return ".sh" + shape
 }
 
-func BadgeBackgroundCacheSuffix(background string) string {
-	return ".bg" + background
+func BadgeAlphaCacheSuffix(alpha int32) string {
+	return fmt.Sprintf(".ba%d", alpha)
 }
 
 func EdgeInsetCacheSuffix(position BadgePosition, insetX, insetY int32) string {
@@ -69,6 +71,7 @@ func SettingsCacheSuffix(settings *RenderSettings, kind string, imageSizeStr *st
 func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, imageSizeStr *string, ratingsSuffix string) string {
 	isSuffix := ImageSizeCacheSuffix(imageSizeStr)
 
+	var result string
 	switch kind {
 	case "poster":
 		ps := PositionCacheSuffix(string(settings.PosterPosition))
@@ -77,21 +80,21 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		bd := BadgeDirectionCacheSuffix(string(settings.PosterBadgeDirection))
 		bsz := settings.PosterBadgeSize.CacheSuffix()
 		shp := BadgeShapeCacheSuffix(string(settings.PosterBadgeShape))
-		bgd := BadgeBackgroundCacheSuffix(string(settings.PosterBadgeBackground))
+		bgd := BadgeAlphaCacheSuffix(int32(settings.PosterBadgeAlpha))
 		split := ""
 		if settings.PosterBadgeSplit {
 			split = ".x1"
 		}
 		fit := settings.PosterFit.CacheSuffix()
-		return ratingsSuffix + ps + bs + ls + bd + bsz + shp + bgd + split + fit + isSuffix
+		result = ratingsSuffix + ps + bs + ls + bd + bsz + shp + bgd + split + fit + isSuffix
 
 	case "logo":
 		bs := BadgeStyleCacheSuffix(string(settings.LogoBadgeStyle.ForShape(settings.LogoBadgeShape)))
 		ls := LabelStyleCacheSuffix(string(settings.LogoLabelStyle))
 		bsz := settings.LogoBadgeSize.CacheSuffix()
 		shp := BadgeShapeCacheSuffix(string(settings.LogoBadgeShape))
-		bgd := BadgeBackgroundCacheSuffix(string(settings.LogoBadgeBackground))
-		return ratingsSuffix + bs + ls + bsz + shp + bgd + isSuffix
+		bgd := BadgeAlphaCacheSuffix(int32(settings.LogoBadgeAlpha))
+		result = ratingsSuffix + bs + ls + bsz + shp + bgd + isSuffix
 
 	case "backdrop":
 		ps := PositionCacheSuffix(string(settings.BackdropPosition))
@@ -100,9 +103,9 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		bd := BadgeDirectionCacheSuffix(string(settings.BackdropBadgeDirection))
 		bsz := settings.BackdropBadgeSize.CacheSuffix()
 		shp := BadgeShapeCacheSuffix(string(settings.BackdropBadgeShape))
-		bgd := BadgeBackgroundCacheSuffix(string(settings.BackdropBadgeBackground))
+		bgd := BadgeAlphaCacheSuffix(int32(settings.BackdropBadgeAlpha))
 		ei := EdgeInsetCacheSuffix(settings.BackdropPosition, settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
-		return ratingsSuffix + ps + bs + ls + bd + bsz + shp + bgd + ei + isSuffix
+		result = ratingsSuffix + ps + bs + ls + bd + bsz + shp + bgd + ei + isSuffix
 
 	case "episode":
 		ps := PositionCacheSuffix(string(settings.EpisodePosition))
@@ -111,13 +114,36 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		bd := BadgeDirectionCacheSuffix(string(settings.EpisodeBadgeDirection))
 		bsz := settings.EpisodeBadgeSize.CacheSuffix()
 		shp := BadgeShapeCacheSuffix(string(settings.EpisodeBadgeShape))
-		bgd := BadgeBackgroundCacheSuffix(string(settings.EpisodeBadgeBackground))
+		bgd := BadgeAlphaCacheSuffix(int32(settings.EpisodeBadgeAlpha))
 		blur := ""
 		if settings.EpisodeBlur {
 			blur = ".blur"
 		}
-		return ratingsSuffix + ps + bs + ls + bd + bsz + shp + bgd + blur + isSuffix
+		result = ratingsSuffix + ps + bs + ls + bd + bsz + shp + bgd + blur + isSuffix
 	}
 
-	return ""
+	// Recolored sources affect the rendered image, so fold them into the cache
+	// key. Defaults produce no token, keeping existing keys stable.
+	if len(settings.Colors) > 0 {
+		result += ".col" + ColorsCacheToken(settings.Colors)
+	}
+	return result
+}
+
+// ColorsCacheToken returns a short stable token for a set of color overrides.
+func ColorsCacheToken(colors map[string]SourceColorSet) string {
+	if len(colors) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(colors))
+	for k := range colors {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		c := colors[k]
+		fmt.Fprintf(h, "%s:%s|%s|%s|%s\n", k, c.Accent, c.Value, c.Border, c.Text)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))[:8]
 }

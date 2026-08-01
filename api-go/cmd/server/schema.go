@@ -226,8 +226,14 @@ var migrations = []migration{
 		"duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_background TEXT NOT NULL DEFAULT 'd'",
+		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_alpha INTEGER NOT NULL DEFAULT 80",
 		"duplicate column",
+	},
+	{
+		// Migrate pre-alpha DBs: drop the old enum column (data replaced by the
+		// new alpha default).
+		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_background",
+		"no such column",
 	},
 	{
 		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_background TEXT NOT NULL DEFAULT 'd'",
