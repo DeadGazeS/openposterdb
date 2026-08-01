@@ -375,7 +375,7 @@ func (r *Router) registerRoutes() {
 		preview.HandleEpisode(w, req)
 	})))
 
-	r.mux.HandleFunc("/api/admin/service-keys", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.HandleFunc("/api/admin/settings/services", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			writeJSON(w, 200, s.ServiceKeys.GetStatus())
