@@ -7,7 +7,7 @@ A self-hosted, drop-in replacement for [RPDB (Rating Poster Database)](https://r
 ## Self-hosting
 
 ```bash
-cp api/.env.example .env
+cp api-go/.env.example .env
 # Set TMDB_API_KEY, MDBLIST_API_KEY (or OMDB_API_KEY), and JWT_SECRET in .env
 docker compose up -d
 ```
