@@ -27,9 +27,15 @@ const defaultSettings: RenderSettings = {
   poster_badge_direction: 'd',
   poster_badge_split: false,
   poster_fit: 'native',
-  poster_badge_size: 'm',
-  logo_badge_size: 'm',
-  backdrop_badge_size: 'm',
+  poster_text_size: 100,
+  logo_text_size: 100,
+  backdrop_text_size: 100,
+  poster_badge_size: 100,
+  logo_badge_size: 100,
+  backdrop_badge_size: 100,
+  poster_logo_size: 100,
+  logo_logo_size: 100,
+  backdrop_logo_size: 100,
   backdrop_position: 'tr',
   backdrop_badge_direction: 'v',
   backdrop_edge_inset_x: 0,
@@ -37,7 +43,9 @@ const defaultSettings: RenderSettings = {
   episode_ratings_limit: 1,
   episode_badge_style: 'v',
   episode_label_style: 'o',
-  episode_badge_size: 'l',
+  episode_text_size: 100,
+  episode_badge_size: 100,
+  episode_logo_size: 100,
   episode_position: 'tr',
   episode_badge_direction: 'v',
   episode_blur: false,
@@ -95,7 +103,7 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'bc', 'h', 'i', 'd', 'm', '', false, 'r', 80, 'native', {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'bc', 'h', 'i', 'd', 100, '', false, 'r', 80, 'native', 100, 100, {})
   })
 
   it('calls fetchPreview with correct params for custom settings', async () => {
@@ -103,7 +111,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ ratings_limit: 5, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), '', false, 'r', 80, 'native', {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', false, 'r', 80, 'native', 100, 100, {})
   })
 
   it('sets preview src from blob after fetch', async () => {
@@ -130,7 +138,7 @@ describe('RenderSettingsForm', () => {
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), '', false, 'r', 80, 'native', {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', false, 'r', 80, 'native', 100, 100, {})
   })
 
   it('shows loading state while preview loads', async () => {
@@ -187,7 +195,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_position: 'l' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'l', 'h', 'i', 'd', 'm', '', false, 'r', 80, 'native', {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'l', 'h', 'i', 'd', 100, '', false, 'r', 80, 'native', 100, 100, {})
   })
 
   it('hides fanart checkbox when fanart_available is false', () => {
@@ -291,7 +299,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_badge_direction: 'v' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'bc', 'h', 'i', 'v', 'm', '', false, 'r', 80, 'native', {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'bc', 'h', 'i', 'v', 100, '', false, 'r', 80, 'native', 100, 100, {})
   })
 
   // --- Episode preview ---
@@ -344,13 +352,15 @@ describe('RenderSettingsForm', () => {
       expect.any(String), // ratings_order
       'v', // episode_badge_style
       'o', // episode_label_style
-      'l', // episode_badge_size
+      100, // episode_text_size
       'tr', // episode_position
       'v', // episode_badge_direction
       false, // episode_blur
       '', // ratings_exclude
-      'r', // episode_badge_shape
+       'r', // episode_badge_shape
       80, // episode_badge_alpha
+      100, // episode_badge_size
+      100, // episode_logo_size
       {},
     )
   })
@@ -432,14 +442,16 @@ describe('RenderSettingsForm', () => {
       expect.any(String), // ratings_order
       'v', // backdrop_badge_style
       'i', // backdrop_label_style
-      'm', // backdrop_badge_size
+      100, // backdrop_text_size
       'tr', // backdrop_position
       'v', // backdrop_badge_direction
       '', // ratings_exclude
-      'r', // backdrop_badge_shape
+       'r', // backdrop_badge_shape
       80, // backdrop_badge_alpha
       12, // backdrop_edge_inset_x
       7, // backdrop_edge_inset_y
+      100, // backdrop_badge_size
+      100, // backdrop_logo_size
       {},
     )
   })

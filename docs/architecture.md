@@ -35,22 +35,22 @@ Cache keys uniquely identify a rendered image. They are used as keys in the in-m
 
 **Poster:**
 ```
-{id_type}/{id_value}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{badge_size_suffix}{shape_suffix}{background_suffix}{split_suffix}{fit_suffix}{size_suffix}
+{id_type}/{id_value}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{split_suffix}{fit_suffix}{size_suffix}
 ```
 
 **Fanart poster:**
 ```
-{id_type}/{id_value}{variant}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{badge_size_suffix}{shape_suffix}{background_suffix}{split_suffix}{fit_suffix}{size_suffix}
+{id_type}/{id_value}{variant}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{split_suffix}{fit_suffix}{size_suffix}
 ```
 
 **Logo:**
 ```
-{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{style_suffix}{label_suffix}{badge_size_suffix}{shape_suffix}{background_suffix}{size_suffix}
+{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{style_suffix}{label_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{size_suffix}
 ```
 
 **Backdrop:**
 ```
-{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{badge_size_suffix}{shape_suffix}{background_suffix}{edge_inset_suffix}{size_suffix}
+{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{edge_inset_suffix}{size_suffix}
 ```
 
 ### Suffix reference
@@ -118,7 +118,9 @@ Settings are stored as short single-character or two-character codes:
 | `badge_style` | `h`, `v` | Horizontal, Vertical |
 | `label_style` | `t`, `i`, `o` | Text, Icon, Official |
 | `badge_direction` | `d`, `h`, `v` | Default (auto-resolved by position), Horizontal, Vertical |
-| `badge_size` | `xs`, `s`, `m`, `l`, `xl` | Extra-small (0.5×), Small (0.75×), Medium (1.0×), Large (1.25×), Extra-large (1.5×) |
+| `text_size` | `50`–`200` | Rating text font size as a percentage of the default (100 = default) |
+| `badge_size` | `50`–`200` | Overall badge size as a percentage of the default (100 = default) |
+| `logo_size` | `50`–`200` | Rating source logo size as a percentage of the default (100 = default) |
 | `badge_shape` | `r`, `p` | Rounded (default), Pill |
 | `badge_background` | `d`, `k`, `t`, `n` | Default (coloured label + dark value), Dark, Transparent, None |
 | `position` | `bc`, `tc`, `l`, `r`, `tl`, `tr`, `bl`, `br` | Bottom-center, Top-center, Left, Right, corners |
@@ -126,26 +128,26 @@ Settings are stored as short single-character or two-character codes:
 ### Example cache keys
 
 ```
-# TMDB poster, 3 ratings (MAL, IMDb, Letterboxd), bottom-center, horizontal badges, official labels, horizontal direction, medium badge size, medium image
-imdb/tt0111161@mil.pbc.sh.lo.dh.bm.zm
+# TMDB poster, 3 ratings (MAL, IMDb, Letterboxd), bottom-center, horizontal badges, official labels, horizontal direction, default text size, medium image
+imdb/tt0111161@mil.pbc.sh.lo.dh.zm
 
-# Same poster at large image size with large badge size
-imdb/tt0111161@mil.pbc.sh.lo.dh.bl.zl
+# Same poster at large image size with larger text (145%)
+imdb/tt0111161@mil.pbc.sh.lo.dh.ts145.zl
 
 # Fanart textless poster
-imdb/tt0111161_f_tl@mil.pbc.sh.lo.dh.bm.zm
+imdb/tt0111161_f_tl@mil.pbc.sh.lo.dh.zm
 
 # Logo from TMDB with English language, 3 ratings, horizontal badges, text labels
-imdb/tt0111161_l_t_en@mil.sh.lt.bm.zm
+imdb/tt0111161_l_t_en@mil.sh.lt.zm
 
 # Logo from Fanart.tv with English language
-imdb/tt0111161_l_f_en@mil.sh.lt.bm.zm
+imdb/tt0111161_l_f_en@mil.sh.lt.zm
 
-# Backdrop from TMDB with top-right position, vertical direction, vertical badges, official labels, extra-large badge size, large image
-imdb/tt0111161_b_t@mil.ptr.sv.lo.dv.bxl.zl
+# Backdrop from TMDB with top-right position, vertical direction, vertical badges, official labels, 150% text size, large image
+imdb/tt0111161_b_t@mil.ptr.sv.lo.dv.ts150.zl
 
-# Episode with 1 rating, top-right position, vertical direction, vertical badges, official labels, medium badge size, blur enabled
-imdb/tt0959621_e@i.ptr.sv.lo.dv.bm.blur.zm
+# Episode with 1 rating, top-right position, vertical direction, vertical badges, official labels, default text size, blur enabled
+imdb/tt0959621_e@i.ptr.sv.lo.dv.blur.zm
 ```
 
 ### Cross-ID cache

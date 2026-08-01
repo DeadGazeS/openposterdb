@@ -74,9 +74,9 @@ describe('selfApi', () => {
       backdrop_label_style: 't',
       poster_badge_direction: 'd',
       poster_badge_split: false,
-      poster_badge_size: 'l',
-      logo_badge_size: 's',
-      backdrop_badge_size: 'xl',
+      poster_text_size: 150,
+      logo_text_size: 95,
+      backdrop_text_size: 170,
     })
 
     const [url, options] = fetchMock.mock.calls[0]
@@ -101,9 +101,9 @@ describe('selfApi', () => {
       backdrop_label_style: 't',
       poster_badge_direction: 'd',
       poster_badge_split: false,
-      poster_badge_size: 'l',
-      logo_badge_size: 's',
-      backdrop_badge_size: 'xl',
+      poster_text_size: 150,
+      logo_text_size: 95,
+      backdrop_text_size: 170,
     })
   })
 
@@ -274,13 +274,13 @@ describe('selfApi', () => {
       backdrop_label_style: 't',
       poster_badge_direction: 'd',
       poster_badge_split: false,
-      poster_badge_size: 'l',
-      logo_badge_size: 's',
-      backdrop_badge_size: 'xl',
+      poster_text_size: 150,
+      logo_text_size: 95,
+      backdrop_text_size: 170,
       episode_ratings_limit: 1,
       episode_badge_style: 'v',
       episode_label_style: 'o',
-      episode_badge_size: 'l',
+      episode_text_size: 100,
       episode_position: 'tr',
       episode_badge_direction: 'v',
       episode_blur: false,
@@ -291,7 +291,7 @@ describe('selfApi', () => {
     expect(body.episode_ratings_limit).toBe(1)
     expect(body.episode_badge_style).toBe('v')
     expect(body.episode_label_style).toBe('o')
-    expect(body.episode_badge_size).toBe('l')
+    expect(body.episode_text_size).toBe(100)
     expect(body.episode_position).toBe('tr')
     expect(body.episode_badge_direction).toBe('v')
     expect(body.episode_blur).toBe(false)

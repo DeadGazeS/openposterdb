@@ -33,9 +33,15 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     poster_badge_direction: 'd',
     poster_badge_split: false,
     poster_fit: 'native',
-    poster_badge_size: 'm',
-    logo_badge_size: 'm',
-    backdrop_badge_size: 'm',
+    poster_text_size: 100,
+    logo_text_size: 100,
+    backdrop_text_size: 100,
+    poster_badge_size: 100,
+    logo_badge_size: 100,
+    backdrop_badge_size: 100,
+    poster_logo_size: 100,
+    logo_logo_size: 100,
+    backdrop_logo_size: 100,
     backdrop_position: 'bc',
     backdrop_badge_direction: 'd',
     backdrop_edge_inset_x: 0,
@@ -43,7 +49,9 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     episode_ratings_limit: 3,
     episode_badge_style: 'v',
     episode_label_style: 'o',
-    episode_badge_size: 'm',
+    episode_text_size: 100,
+    episode_badge_size: 100,
+    episode_logo_size: 100,
     episode_position: 'bc',
     episode_badge_direction: 'd',
     episode_blur: false,
@@ -84,7 +92,7 @@ function mountCard(freeApiKeyEnabled = true, defaults: FreeKeyDefaults | null = 
           // Mirror Vue's real v-model coercion: a `type="number"` input yields a
           // Number (the real shadcn Input wraps a native input, so the card's
           // refs receive numbers — string-only handling would break at runtime).
-          template: '<input :value="modelValue" :placeholder="placeholder" @input="onInput" />',
+          template: '<input :id="id" :value="modelValue" :placeholder="placeholder" @input="onInput" />',
           props: ['modelValue', 'type', 'placeholder', 'required', 'id'],
           emits: ['update:modelValue'],
           methods: {
@@ -272,7 +280,7 @@ describe('FreeApiKeyCard', () => {
   it('idPlaceholder changes per idType', async () => {
     const wrapper = mountCard(true)
 
-    const getPlaceholder = () => wrapper.find('input:not([type="checkbox"])').attributes('placeholder')
+    const getPlaceholder = () => wrapper.find('input#free-id-value').attributes('placeholder')
     expect(getPlaceholder()).toBe('tt0013442')
 
     await setSelectById(wrapper, 'free-id-type', 'tmdb')
@@ -316,14 +324,18 @@ describe('FreeApiKeyCard', () => {
     // Override poster's per-type render settings away from their defaults.
     await setSelectById(wrapper, 'free-badge-style', 'h')
     await setSelectById(wrapper, 'free-label-style', 't')
-    await setSelectById(wrapper, 'free-badge-size', 'l')
+    await wrapper.find('input[aria-label*="Badge text size"]').setValue('150')
+    await wrapper.find('input[aria-label*="Badge size"]').setValue('180')
+    await wrapper.find('input[aria-label*="Rating logo size"]').setValue('120')
     await setSelectById(wrapper, 'free-ratings-limit', '7')
     // A global control (lang) that should survive the switch.
     await setSelectById(wrapper, 'free-lang', 'en')
     const posterCurl = findCurlCode(wrapper).text()
     expect(posterCurl).toContain('badge_style=h')
     expect(posterCurl).toContain('label_style=t')
-    expect(posterCurl).toContain('badge_size=l')
+    expect(posterCurl).toContain('text_size=150')
+    expect(posterCurl).toContain('badge_size=180')
+    expect(posterCurl).toContain('logo_size=120')
     expect(posterCurl).toContain('ratings_limit=7')
 
     // Switching type re-applies the new type's defaults: per-type overrides drop,
@@ -332,7 +344,9 @@ describe('FreeApiKeyCard', () => {
     const backdropCurl = findCurlCode(wrapper).text()
     expect(backdropCurl).not.toContain('badge_style=')
     expect(backdropCurl).not.toContain('label_style=')
+    expect(backdropCurl).not.toContain('text_size=')
     expect(backdropCurl).not.toContain('badge_size=')
+    expect(backdropCurl).not.toContain('logo_size=')
     expect(backdropCurl).not.toContain('ratings_limit=')
     expect(backdropCurl).toContain('lang=en')
   })
@@ -522,7 +536,7 @@ describe('FreeApiKeyCard', () => {
     const wrapper = mountCard(true, makeDefaults({
       poster_badge_style: 'v',
       poster_label_style: 't',
-      poster_badge_size: 'l',
+      poster_text_size: 150,
       ratings_limit: 5,
       image_source: 'f',
       lang: 'de',
@@ -530,7 +544,7 @@ describe('FreeApiKeyCard', () => {
     const text = wrapper.text()
     expect(text).toContain('Badge style: default (Vertical)')
     expect(text).toContain('Label style: default (Text)')
-    expect(text).toContain('Badge size: default (Large)')
+    expect(wrapper.find('input#free-text-size').attributes('placeholder')).toContain('150%')
     expect(text).toContain('Max badges: default (5)')
     expect(text).toContain('Source: default (Fanart.tv)')
     expect(text).toContain('Language: any (de)')

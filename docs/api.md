@@ -71,7 +71,9 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `?ratings_exclude={keys}`: comma-separated rating source keys to hide entirely (same valid keys as `ratings_order`). Excluded sources are dropped *before* ordering and limiting, so an excluded source frees its badge slot for the next preferred source rather than leaving a gap. Example: `?ratings_exclude=rt` shows your ratings but never RT Critics
 - `?badge_style={h|v|d}`: badge layout — `h` (horizontal), `v` (vertical), `d` (default)
 - `?label_style={t|i|o}`: label rendering — `t` (text), `i` (icon), `o` (official provider logos)
-- `?badge_size={xs|s|m|l|xl}`: badge scale — extra-small, small, medium, large, extra-large
+- `?text_size={50-200}`: rating text font size as a percentage of the default (100 = default)
+- `?badge_size={50-200}`: overall badge size as a percentage of the default (100 = default). Scales the badge frame (padding, spacing, borders); the badge always auto-sizes to fit its content so text/logos never overflow
+- `?logo_size={50-200}`: rating source logo size as a percentage of the default (100 = default)
 - `?badge_shape={r|p}`: badge corner shape — `r` (rounded, default), `p` (pill, fully rounded ends). Pills always render as a horizontal icon/label-left, value-right lozenge, even on image types whose default style is vertical (logos, backdrops, episodes)
 - `?badge_background={d|k|t|n}`: badge background — `d` (default: source-coloured label + dark value), `k` (dark: uniformly dark), `t` (transparent: semi-transparent so the artwork shows through), `n` (none: no background, label/value drawn directly on the image with a drop shadow)
 - `?image_source={t|f}`: image source — `t` (TMDB, default), `f` (Fanart.tv). Applies to all image types. The non-selected source is used as fallback
@@ -85,7 +87,7 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 
 Old RPDB parameter names `?poster_source=` and `?fanart_textless=` are accepted as aliases.
 
-**Scope notes:** `textless`, `split`, and `fit` are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. `badge_direction` and `position` are silently ignored on logo endpoints. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `badge_size`, `badge_shape`, `badge_background`, `image_source`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
+**Scope notes:** `textless`, `split`, and `fit` are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. `badge_direction` and `position` are silently ignored on logo endpoints. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `text_size`, `badge_size`, `logo_size`, `badge_shape`, `badge_background`, `image_source`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
 
 ## Image sizes
 
