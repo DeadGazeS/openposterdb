@@ -1,10 +1,13 @@
 package image
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"sync"
 	"testing"
+
+	"openposterdb/internal/services"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
@@ -48,4 +51,45 @@ func TestConcurrentRendering(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestSampleRenderHasBadges(t *testing.T) {
+	loadTestFont(t)
+	badges := []services.RatingBadge{
+		{Source: services.SourceImdb, Value: "10.0"},
+		{Source: services.SourceTmdb, Value: "77%"},
+		{Source: services.SourceRt, Value: "100%"},
+	}
+	badges = services.ApplyRatingPreferences(badges, "imdb,tmdb,rt", "", 3)
+	position := services.PositionBottomCenter
+	badgeDirection := services.BadgeDirectionHorizontal
+	badgeStyle := services.BadgeStyleHorizontal.Resolve(badgeDirection)
+	labelStyle := services.LabelStyleText
+	appearance := services.DefaultBadgeAppearance()
+	valueFace := GetValueFontFace()
+	labelFace := GetFontFace()
+	out, err := RenderPosterSync(SamplePosterPNG, badges, valueFace, labelFace, 85,
+		position, badgeStyle, labelStyle, appearance, badgeDirection,
+		580, 1.2, services.BadgeSizeMedium, false, services.PosterFitNative, nil)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	b := img.Bounds()
+	bright := 0
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bb, _ := img.At(x, y).RGBA()
+			if r>>8 > 150 || g>>8 > 150 || bb>>8 > 150 {
+				bright++
+			}
+		}
+	}
+	if bright == 0 {
+		t.Fatal("rendered poster has no bright (badge) pixels")
+	}
+	t.Logf("bright pixels: %d", bright)
 }

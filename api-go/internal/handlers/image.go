@@ -38,7 +38,7 @@ type ImageQuery struct {
 	BadgeSize        *string `json:"badge_size"`
 	BadgeDirection   *string `json:"badge_direction"`
 	BadgeShape       *string `json:"badge_shape"`
-	BadgeBackground  *string `json:"badge_background"`
+	BadgeAlpha       *int32  `json:"badge_alpha"`
 	Position         *string `json:"position"`
 	ImageSource      *string `json:"image_source"`
 	Textless         *bool   `json:"textless"`
@@ -52,7 +52,7 @@ type ImageQuery struct {
 func (q *ImageQuery) HasOverrides() bool {
 	return q.RatingsLimit != nil || q.RatingsOrder != nil || q.RatingsExclude != nil ||
 		q.BadgeStyle != nil || q.LabelStyle != nil || q.BadgeSize != nil ||
-		q.BadgeDirection != nil || q.BadgeShape != nil || q.BadgeBackground != nil ||
+		q.BadgeDirection != nil || q.BadgeShape != nil || q.BadgeAlpha != nil ||
 		q.Position != nil || q.ImageSource != nil || q.Textless != nil ||
 		q.Blur != nil || q.Split != nil || q.Fit != nil ||
 		q.EdgeInsetX != nil || q.EdgeInsetY != nil
@@ -150,17 +150,17 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 	}
 
-	if query.BadgeBackground != nil {
-		bg := services.BadgeBackground(*query.BadgeBackground)
+	if query.BadgeAlpha != nil {
+		alpha := services.ClampBadgeAlpha(*query.BadgeAlpha)
 		switch kind {
 		case "poster":
-			s.PosterBadgeBackground = bg
+			s.PosterBadgeAlpha = alpha
 		case "logo":
-			s.LogoBadgeBackground = bg
+			s.LogoBadgeAlpha = alpha
 		case "backdrop":
-			s.BackdropBadgeBackground = bg
+			s.BackdropBadgeAlpha = alpha
 		case "episode":
-			s.EpisodeBadgeBackground = bg
+			s.EpisodeBadgeAlpha = alpha
 		}
 	}
 
@@ -275,9 +275,9 @@ type FreeKeySettingsResponse struct {
 	PosterBadgeShape         string `json:"poster_badge_shape"`
 	LogoBadgeShape           string `json:"logo_badge_shape"`
 	BackdropBadgeShape       string `json:"backdrop_badge_shape"`
-	PosterBadgeBackground    string `json:"poster_badge_background"`
-	LogoBadgeBackground      string `json:"logo_badge_background"`
-	BackdropBadgeBackground  string `json:"backdrop_badge_background"`
+	PosterBadgeAlpha         int32  `json:"poster_badge_alpha"`
+	LogoBadgeAlpha           int32  `json:"logo_badge_alpha"`
+	BackdropBadgeAlpha       int32  `json:"backdrop_badge_alpha"`
 	BackdropPosition         string `json:"backdrop_position"`
 	BackdropBadgeDirection   string `json:"backdrop_badge_direction"`
 	BackdropEdgeInsetX       int32  `json:"backdrop_edge_inset_x"`
@@ -290,7 +290,7 @@ type FreeKeySettingsResponse struct {
 	EpisodeBadgeDirection    string `json:"episode_badge_direction"`
 	EpisodeBlur              bool   `json:"episode_blur"`
 	EpisodeBadgeShape        string `json:"episode_badge_shape"`
-	EpisodeBadgeBackground    string `json:"episode_badge_background"`
+	EpisodeBadgeAlpha         int32  `json:"episode_badge_alpha"`
 }
 
 func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsResponse {
@@ -319,9 +319,9 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		PosterBadgeShape:         string(s.PosterBadgeShape),
 		LogoBadgeShape:           string(s.LogoBadgeShape),
 		BackdropBadgeShape:       string(s.BackdropBadgeShape),
-		PosterBadgeBackground:    string(s.PosterBadgeBackground),
-		LogoBadgeBackground:      string(s.LogoBadgeBackground),
-		BackdropBadgeBackground:  string(s.BackdropBadgeBackground),
+		PosterBadgeAlpha:         int32(s.PosterBadgeAlpha),
+		LogoBadgeAlpha:           int32(s.LogoBadgeAlpha),
+		BackdropBadgeAlpha:       int32(s.BackdropBadgeAlpha),
 		BackdropPosition:         string(s.BackdropPosition),
 		BackdropBadgeDirection:   string(s.BackdropBadgeDirection),
 		BackdropEdgeInsetX:       s.BackdropEdgeInsetX,
@@ -334,7 +334,7 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		EpisodeBadgeDirection:    string(s.EpisodeBadgeDirection),
 		EpisodeBlur:              s.EpisodeBlur,
 		EpisodeBadgeShape:        string(s.EpisodeBadgeShape),
-		EpisodeBadgeBackground:    string(s.EpisodeBadgeBackground),
+		EpisodeBadgeAlpha:         int32(s.EpisodeBadgeAlpha),
 	}
 }
 
@@ -552,8 +552,11 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 	if v := q.Get("badge_shape"); v != "" {
 		query.BadgeShape = &v
 	}
-	if v := q.Get("badge_background"); v != "" {
-		query.BadgeBackground = &v
+	if v := q.Get("badge_alpha"); v != "" {
+		var n int32
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			query.BadgeAlpha = &n
+		}
 	}
 	if v := q.Get("position"); v != "" {
 		query.Position = &v

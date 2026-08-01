@@ -89,10 +89,11 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"logo_badge_shape":           string(s.LogoBadgeShape),
 			"backdrop_badge_shape":       string(s.BackdropBadgeShape),
 			"episode_badge_shape":        string(s.EpisodeBadgeShape),
-			"poster_badge_background":    string(s.PosterBadgeBackground),
-			"logo_badge_background":      string(s.LogoBadgeBackground),
-			"backdrop_badge_background":  string(s.BackdropBadgeBackground),
-			"episode_badge_background":   string(s.EpisodeBadgeBackground),
+			"poster_badge_alpha":         int32(s.PosterBadgeAlpha),
+			"logo_badge_alpha":           int32(s.LogoBadgeAlpha),
+			"backdrop_badge_alpha":       int32(s.BackdropBadgeAlpha),
+			"episode_badge_alpha":        int32(s.EpisodeBadgeAlpha),
+			"colors":                     services.EffectiveSourceColors(&s),
 		})
 	}
 }
@@ -135,10 +136,11 @@ type updateSettingsRequest struct {
 	LogoBadgeShape          *string `json:"logo_badge_shape"`
 	BackdropBadgeShape      *string `json:"backdrop_badge_shape"`
 	EpisodeBadgeShape       *string `json:"episode_badge_shape"`
-	PosterBadgeBackground   *string `json:"poster_badge_background"`
-	LogoBadgeBackground     *string `json:"logo_badge_background"`
-	BackdropBadgeBackground *string `json:"backdrop_badge_background"`
-	EpisodeBadgeBackground  *string `json:"episode_badge_background"`
+	PosterBadgeAlpha        *int32  `json:"poster_badge_alpha"`
+	LogoBadgeAlpha          *int32  `json:"logo_badge_alpha"`
+	BackdropBadgeAlpha      *int32  `json:"backdrop_badge_alpha"`
+	EpisodeBadgeAlpha       *int32  `json:"episode_badge_alpha"`
+	Colors                  *map[string]services.SourceColorSet `json:"colors"`
 }
 
 func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
@@ -269,17 +271,24 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.EpisodeBadgeShape != nil {
 			s.EpisodeBadgeShape = services.BadgeShape(*req.EpisodeBadgeShape)
 		}
-		if req.PosterBadgeBackground != nil {
-			s.PosterBadgeBackground = services.BadgeBackground(*req.PosterBadgeBackground)
+		if req.PosterBadgeAlpha != nil {
+			s.PosterBadgeAlpha = services.ClampBadgeAlpha(*req.PosterBadgeAlpha)
 		}
-		if req.LogoBadgeBackground != nil {
-			s.LogoBadgeBackground = services.BadgeBackground(*req.LogoBadgeBackground)
+		if req.LogoBadgeAlpha != nil {
+			s.LogoBadgeAlpha = services.ClampBadgeAlpha(*req.LogoBadgeAlpha)
 		}
-		if req.BackdropBadgeBackground != nil {
-			s.BackdropBadgeBackground = services.BadgeBackground(*req.BackdropBadgeBackground)
+		if req.BackdropBadgeAlpha != nil {
+			s.BackdropBadgeAlpha = services.ClampBadgeAlpha(*req.BackdropBadgeAlpha)
 		}
-		if req.EpisodeBadgeBackground != nil {
-			s.EpisodeBadgeBackground = services.BadgeBackground(*req.EpisodeBadgeBackground)
+		if req.EpisodeBadgeAlpha != nil {
+			s.EpisodeBadgeAlpha = services.ClampBadgeAlpha(*req.EpisodeBadgeAlpha)
+		}
+		if req.Colors != nil {
+			if err := services.ValidateSourceColors(*req.Colors); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			s.Colors = services.NormalizeSourceColors(*req.Colors)
 		}
 
 		if err := services.ValidateRenderSettings(&s); err != nil {
@@ -299,6 +308,9 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if err := services.SetGlobalSettingsBatch(db, batch); err != nil {
 			writeError(w, 500, "Failed to save settings")
 			return
+		}
+		if err := services.PruneStaleColorSettings(db, globals, batch); err != nil {
+			slog.Warn("failed to prune stale color settings", "error", err)
 		}
 
 		slog.Debug("global settings updated", "image_source", s.ImageSource, "lang", s.Lang, "ratings_order", s.RatingsOrder)
