@@ -8,7 +8,7 @@ Internal reference for how OpenPosterDB caches and renders images. You don't nee
 
 ## Tech stack
 
-- **API**: Rust, Axum, SeaORM + SQLite, image/imageproc for rendering
+- **API**: Go, net/http + SQLite, image for rendering
 - **Web**: Vue 3, TypeScript, Tailwind CSS, Vite
 
 ## Cache architecture

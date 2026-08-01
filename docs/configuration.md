@@ -1,6 +1,6 @@
 # Configuration
 
-OpenPosterDB is configured entirely through environment variables. When using Docker Compose, set them in a `.env` file at the project root (copy `api/.env.example` to get started); when using `docker run`, pass them with `-e`.
+OpenPosterDB is configured entirely through environment variables. When using Docker Compose, set them in a `.env` file at the project root (copy `api-go/.env.example` to get started); when using `docker run`, pass them with `-e`.
 
 ## API keys
 
