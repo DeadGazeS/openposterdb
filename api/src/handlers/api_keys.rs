@@ -145,7 +145,7 @@ pub async fn get_settings(
         .await?
         .ok_or_else(|| AppError::IdNotFound(format!("API key {id} not found")))?;
     let settings = db::get_effective_render_settings(&state.db, id, None).await;
-    Ok(Json(settings_to_response(&settings, state.fanart.is_some())))
+    Ok(Json(settings_to_response(&settings, state.fanart.load().is_some())))
 }
 
 fn settings_to_response(settings: &db::RenderSettings, fanart_available: bool) -> RenderSettingsResponse {
@@ -372,7 +372,7 @@ pub async fn get_own_settings(
 ) -> Result<Json<RenderSettingsResponse>, AppError> {
     let settings =
         db::get_effective_render_settings(&state.db, api_key_user.key_id, None).await;
-    Ok(Json(settings_to_response(&settings, state.fanart.is_some())))
+    Ok(Json(settings_to_response(&settings, state.fanart.load().is_some())))
 }
 
 pub async fn update_own_settings(

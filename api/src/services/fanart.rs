@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::error::AppError;
+use crate::services::api_key_pool::ApiKeyPool;
 use crate::services::retry::{self, FANART_RETRY};
 use serde::Deserialize;
-use zeroize::Zeroizing;
 
 #[derive(Clone)]
 pub struct FanartClient {
-    api_key: Arc<Zeroizing<String>>,
+    key_pool: Arc<ApiKeyPool>,
     http: reqwest::Client,
 }
 
@@ -55,14 +55,15 @@ pub enum PosterMatch {
 }
 
 impl FanartClient {
-    pub fn new(api_key: String, http: reqwest::Client) -> Self {
-        Self { api_key: Arc::new(Zeroizing::new(api_key)), http }
+    pub fn new(key_pool: ApiKeyPool, http: reqwest::Client) -> Self {
+        Self { key_pool: Arc::new(key_pool), http }
     }
 
     pub async fn get_movie_images(&self, tmdb_id: u64) -> Result<FanartImages, AppError> {
+        let api_key = self.key_pool.active_key_raw();
         let url = format!(
             "https://webservice.fanart.tv/v3/movies/{tmdb_id}?api_key={}",
-            self.api_key.as_str()
+            api_key.as_str()
         );
         let resp = retry::send_with_retry(&FANART_RETRY, || self.http.get(&url).send()).await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -79,9 +80,10 @@ impl FanartClient {
 
     /// Fetch TV images. Fanart.tv accepts TVDB, TMDB, or IMDb IDs for TV shows.
     pub async fn get_tv_images(&self, id: u64) -> Result<FanartImages, AppError> {
+        let api_key = self.key_pool.active_key_raw();
         let url = format!(
             "https://webservice.fanart.tv/v3/tv/{id}?api_key={}",
-            self.api_key.as_str()
+            api_key.as_str()
         );
         let resp = retry::send_with_retry(&FANART_RETRY, || self.http.get(&url).send()).await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {

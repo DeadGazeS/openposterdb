@@ -32,4 +32,8 @@ pub fn admin_routes() -> Router<Arc<AppState>> {
             "/api/admin/settings",
             get(handlers::admin::get_settings).put(handlers::admin::update_settings),
         )
+        .route(
+            "/api/admin/settings/services",
+            get(handlers::admin::get_service_keys).put(handlers::admin::update_service_keys),
+        )
 }

@@ -23,18 +23,18 @@ use services::db::RenderSettings;
 use services::fanart::{FanartClient, FanartImages};
 use services::mdblist::MdblistClient;
 use services::omdb::OmdbClient;
+use services::service_keys::ServiceKeyManager;
 use services::tmdb::TmdbClient;
 use services::trakt::TraktClient;
 
 pub use routes::build_app;
 
-#[derive(Clone)]
 pub struct AppState {
     pub config: Config,
     pub tmdb: TmdbClient,
-    pub omdb: Option<OmdbClient>,
-    pub mdblist: Option<MdblistClient>,
-    pub trakt: Option<TraktClient>,
+    pub omdb: arc_swap::ArcSwapOption<OmdbClient>,
+    pub mdblist: arc_swap::ArcSwapOption<MdblistClient>,
+    pub trakt: arc_swap::ArcSwapOption<TraktClient>,
 
     pub font: FontArc,
     pub refresh_locks: moka::sync::Cache<String, ()>,
@@ -47,10 +47,8 @@ pub struct AppState {
     pub ratings_cache: moka::future::Cache<String, services::ratings::RatingsResult>,
     pub image_mem_cache: moka::future::Cache<String, MemCacheEntry>,
     pub pending_last_used: Arc<DashMap<i32, ()>>,
-    pub fanart: Option<FanartClient>,
+    pub fanart: arc_swap::ArcSwapOption<FanartClient>,
     pub fanart_cache: moka::future::Cache<String, Arc<FanartImages>>,
-    /// Tracks negative fanart results — e.g. "movie:123:textless" means no textless poster exists.
-    /// Entries expire after the same TTL as fanart_cache so we recheck periodically.
     pub fanart_negative: moka::future::Cache<String, ()>,
     pub tmdb_images_cache: moka::future::Cache<String, Arc<services::tmdb::TmdbImagesResponse>>,
     pub settings_cache: moka::future::Cache<i32, Arc<RenderSettings>>,
@@ -59,12 +57,45 @@ pub struct AppState {
     pub free_api_key_cache: moka::future::Cache<(), bool>,
     pub render_semaphore: Arc<tokio::sync::Semaphore>,
     pub cross_id_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Maps settings hash → RenderSettings for content-addressed `/c/` CDN routes.
-    /// Populated lazily when API key requests produce redirects.
     pub settings_hash_registry: moka::future::Cache<String, Arc<RenderSettings>>,
-    /// In-memory cache for `available_ratings` SQLite lookups.
-    /// Avoids hitting the database on every image request when the entry is already known.
     pub available_ratings_cache: moka::future::Cache<String, Option<String>>,
+    pub service_key_manager: ServiceKeyManager,
+}
+
+impl Clone for AppState {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            tmdb: self.tmdb.clone(),
+            omdb: arc_swap::ArcSwapOption::from((*self.omdb.load()).clone()),
+            mdblist: arc_swap::ArcSwapOption::from((*self.mdblist.load()).clone()),
+            trakt: arc_swap::ArcSwapOption::from((*self.trakt.load()).clone()),
+            font: self.font.clone(),
+            refresh_locks: self.refresh_locks.clone(),
+            db: self.db.clone(),
+            jwt_secret: self.jwt_secret.clone(),
+            secure_cookies: self.secure_cookies,
+            api_key_cache: self.api_key_cache.clone(),
+            image_inflight: self.image_inflight.clone(),
+            id_cache: self.id_cache.clone(),
+            ratings_cache: self.ratings_cache.clone(),
+            image_mem_cache: self.image_mem_cache.clone(),
+            pending_last_used: self.pending_last_used.clone(),
+            fanart: arc_swap::ArcSwapOption::from((*self.fanart.load()).clone()),
+            fanart_cache: self.fanart_cache.clone(),
+            fanart_negative: self.fanart_negative.clone(),
+            tmdb_images_cache: self.tmdb_images_cache.clone(),
+            settings_cache: self.settings_cache.clone(),
+            global_settings_cache: self.global_settings_cache.clone(),
+            preview_cache: self.preview_cache.clone(),
+            free_api_key_cache: self.free_api_key_cache.clone(),
+            render_semaphore: self.render_semaphore.clone(),
+            cross_id_semaphore: self.cross_id_semaphore.clone(),
+            settings_hash_registry: self.settings_hash_registry.clone(),
+            available_ratings_cache: self.available_ratings_cache.clone(),
+            service_key_manager: self.service_key_manager.clone(),
+        }
+    }
 }
 
 impl AppState {

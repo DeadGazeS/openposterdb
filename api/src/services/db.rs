@@ -2056,6 +2056,17 @@ pub async fn get_global_settings(
     Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
 }
 
+pub async fn get_global_setting(
+    db: &impl ConnectionTrait,
+    key: &str,
+) -> Result<Option<String>, AppError> {
+    let row = global_settings::Entity::find_by_id(key.to_string())
+        .one(db)
+        .await
+        .map_err(|e| AppError::DbError(e.to_string()))?;
+    Ok(row.map(|r| r.value))
+}
+
 pub async fn set_global_setting(
     db: &impl ConnectionTrait,
     key: &str,
