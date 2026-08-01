@@ -201,7 +201,63 @@ Verified end-to-end against a fresh container built from the local Dockerfile: a
 - **Version string**: the sidebar reads `version` from `web/package.json`, which the Containerfile rewrites to `APP_VERSION`. When building locally you must pass the full version including the commit, e.g. `docker compose build --build-arg APP_VERSION=1.2.1-dev-$(git rev-parse --short HEAD)` (the Makefile's `build`/`up` targets already do this). Passing only `1.2.1-dev` drops the commit from the displayed version.
 - **UI (settings page)**: the form is now a stack of bordered boxes matching Poster/Logo/Backdrop/Episode — `Image Settings` (heading + Save/Discard + Language + Fanart), `Rating Display`, and one combined `Rating Colours` + `Rating Source Badges` box (both headings inside a single `rounded-md border p-4` container). All box headings use `text-sm font-semibold`. "Backdrop (series/movie)" renamed to "Backdrop (movie/series)".
 
-## Six Rotten Tomatoes badge color settings (2026-08-01)
+## Per-kind text size settings (analysis, 2026-08-02)
+
+- **Request**: add a per-kind setting to change the text size (rating-badge text) in the UI, separately for poster / logo / backdrop / episode.
+- **Context**: the generated images render rating badges. Font faces are created at fixed sizes in `image/serve.go` (`labelFontFaceSize = 26.0`, `valueFontFaceSize = 32.0`) and the badge geometry scales via `badgeScale` = `imageSize.BadgeScale(kind) * badgeSize.ScaleFactor()` (db.go:432, badge.go `newScaledDims`). The existing "Badge size" dropdown (xs–xl) is a coarse whole-badge scale; there is currently no per-kind control over the text/font itself.
+- **Proposed design**: four new integer settings `poster_text_size` / `logo_text_size` / `backdrop_text_size` / `episode_text_size` (percent, default 100, clamped 50–200). At 100% output is byte-identical to today. A kind's text scale multiplies both the badge font faces (`GetValueFontFaceAt`/`GetFontFaceAt` at `32*scale` / `26*scale`) and `badgeScale`, so the badge box stays proportional to its text (no overflow). Cache key gains a `.ts<N>` token (only when ≠ 100, keeping existing keys stable). Flow-through: `RenderSettings`/`APIKeySettings` (db.go) + defaults/parse/toMap/effective, 4 schema migrations for `api_key_settings`, `HandleGetSettings`/`updateSettingsRequest` (admin.go), `FreeKeySettingsResponse` (image.go), preview `text_size` query param (preview.go), `text_size` query override on the public endpoint (image.go), frontend form sliders + snapshots + save + preview params (RenderSettingsForm.vue, api.ts).
+- **Files to touch**: api-go/internal/services/{db.go, cachesuffix.go}, api-go/cmd/server/schema.go, api-go/internal/handlers/{admin.go, image.go, preview.go}, api-go/internal/image/{serve.go, badge.go}, web/src/components/RenderSettingsForm.vue, web/src/lib/api.ts, tests (db_test.go, export_test.go, RenderSettingsForm.spec.ts, SettingsView.spec.ts).
+- **Awaiting approval** (RULES.md waiting state) before implementation.
+
+## Per-kind text size settings + preview fix + tabbed settings page (IMPLEMENTED, 2026-08-02)
+
+### Text size replaces Badge size (user chose option C: replace the dropdown with a slider)- **New per-kind settings** `poster_text_size` / `logo_text_size` / `backdrop_text_size` / `episode_text_size` (int, percent). `TextSize` type (db.go): `DefaultTextSize() = 100`, `ClampTextSize` (50–200), `ScaleFactor(kind)` returns the badge multiplier (100 = the kind's historical default: 1.2 poster/logo/backdrop, 1.45 episode, so default output is byte-identical to before), `Percent()` for the font faces, `CacheSuffix()` = `.ts<N>` (empty at 100 so existing default keys stay clean). The `BadgeSize` enum (`xs`–`xl`) was **removed** from settings/API.
+- **Rendering** (`image/serve.go`): `GetFontFacesAt(textSizePct)` builds label/value faces at `26·pct/100` / `32·pct/100`; `GenerateImage` multiplies `badgeScale` by `TextSize.ScaleFactor(kind)`. `RenderPosterSync/RenderBackdropSync/RenderEpisodeSync` now take `textScale float32` instead of `BadgeSize`, and the row-cap logic keys off `textScale >= 1.45` (matches the old Large/XL threshold). `RenderLogoSync` accepts `textScale` too.
+- **API**: settings GET/PUT now carry `*_text_size` (admin.go); public image endpoint + free-key settings use `text_size` query param (image.go, `text_size` parsed as int, legacy `badge_size` still accepted as an int alias); the four preview handlers read `text_size` (preview.go, `previewTextSize` helper).
+- **DB**: 4 schema migrations add `*_text_size` columns and drop the old `*_badge_size` columns from `api_key_settings`; `GetAPIKeySettings`/`UpsertAPIKeySettings`/`GetEffectiveRenderSettings` updated.
+- **Frontend**: `RenderSettingsForm.vue` replaced the four "Badge size" selects with "Text size" sliders (50–200%, step 1) plus snapshot/save/preview plumbing (`editXTextSize`, `text_size` preview args). `api.ts` preview fns + `SaveSettingsPayload` use `text_size`. `FreeApiKeyCard.vue` replaced the badge-size select with a number input (`text_size`). `auth-api.ts` `FreeKeyDefaults` updated. `BADGE_SIZE_LABELS` removed from `constants.ts`. Docs (`docs/api.md`, `docs/architecture.md`) and dev scripts (`scripts/visual-report.sh`, `scripts/regenerate-examples.sh`) updated.
+
+### Preview staleness bug — FIXED
+1. `RenderSettingsForm.vue`: the `props.settings` watcher now snapshots the edits before applying, and after `nextTick` (syncing=false) calls `updateAllPreviews()` when the applied values actually changed — so externally-refreshed settings immediately re-render all previews.
+2. `SettingsView.vue`: `saveSettings` now calls `refetch()` after a successful PUT so the react-query cache is fresh (no stale pre-save data on re-visit).
+
+### Settings page restructured into sidebar tabs
+- New shadcn-style `Tabs` UI components (`web/src/components/ui/tabs/`) built on reka-ui, matching the existing shadcn pattern.
+- `SettingsView.vue` now uses a `grid grid-cols-1 lg:grid-cols-[300px,1fr]` layout with a left section nav (General / Image / Cache / Backup) and right-hand tab panels, mirroring the reference design. All four panels are force-mounted (like the reference HTML keeps every tabpanel in the DOM) so the Save/Discard header actions and the form stay live regardless of the active tab. Each card got the reference-style uppercase title bar.
+
+### Verification
+- `go build ./...`, `go vet ./...`, `go test ./...` all pass (host Go 1.26).
+- Frontend `vitest run`: **329/329 pass** (run in the project's `node:22-bookworm` container because `node_modules` is root-owned from the docker build; no passwordless sudo). `vite build` succeeds.
+- Lint (oxlint) clean on all changed files. `vue-tsc --build` reports the **same 75 pre-existing errors** as the untouched baseline (all in `__tests__`, e.g. strict-null `findCurlCode(...)` usages, `FreeKeyDefaults` badge_background mismatch) — none introduced by this work. The pre-existing single-word `vue/multi-word-component-names` eslint warnings also apply to every existing ui component (Card, Select, …).
+
+## Preview bug: saved logo badge style shows vertical after revisiting (2026-08-02)
+
+- **Symptom**: set Logo → Badge style = Horizontal, save, navigate away and back → the logo preview renders vertical; only re-selecting Horizontal manually corrects it.
+- **Root cause (two interacting issues in the Vue settings page)**:
+  1. `SettingsView.vue` loads settings via `useQuery(['global-settings'])`. Saving goes through `RenderSettingsForm.save()` → `saveSettings` → `adminApi.updateSettings` (PUT) — this never updates the react-query cache, and the form's `loadSettings()` GET also bypasses it. On revisiting the page, react-query serves the **stale pre-save cache** first (vertical), then refetches the fresh value in the background.
+  2. `RenderSettingsForm.vue`'s `watch(() => props.settings, …)` sets `syncing = true`, calls `applySettings(s)` (which changes `editLogoBadgeStyle` to the fresh value), and flips `syncing = false` inside `nextTick` — but **never refreshes the previews**. Every preview watcher early-returns while `syncing` is true, so when the fresh settings arrive the logo preview stays on the stale (vertical) render. Manually re-selecting the style triggers the watcher outside `syncing`, fixing it.
+- **Fix plan**:
+  1. `RenderSettingsForm.vue`: after the settings-sync `nextTick`, call `updateAllPreviews()` so any externally-updated settings immediately re-render all previews.
+  2. `SettingsView.vue`: after a successful `adminApi.updateSettings`, call `refetch()` so the query cache is fresh and revisits don't briefly mount with stale data.
+- **Verified by reading**: `RenderSettingsForm.vue` watchers (lines 300-307, 513-551), `SettingsView.vue` `saveSettings`/`useQuery` (lines 45-112), `api.ts` `adminApi.updateSettings`, backend save/GET paths (admin.go `HandleUpdateSettings`/`HandleGetSettings` store and return `logo_badge_style` correctly).
+
+## Follow-up round: tabs fix + three independent size controls (2026-08-02)
+
+### Settings page tabs
+- **Bug**: clicking the section tabs did nothing and all four panels were visible. Root cause: reka-ui's `TabsContent` computes `hidden = !(forceMount || isSelected)`, so the `force-mount` I used forced `hidden=false` on every panel → all rendered.
+- **Fix**: `SettingsView.vue` now sets `:unmount-on-hide="false"` on the `Tabs` root and removed `force-mount` from the panels. With `unmount-on-hide=false` reka-ui keeps all panels mounted (so the form/previews stay alive and tests still find everything) but applies the `hidden` attribute to inactive ones — only the active section is shown, and clicking switches. Matches the reference markup (all tabpanels in the DOM, inactive ones `hidden`).
+
+### Three independent size controls (text / badge / logo)
+- The user asked for **text size, badge size and logo size**, each adjustable per image type, with **no overflow outside the badge**.
+- Backend: replaced the single `TextSize` type with a shared `ScalePercent` (int 50–200, default 100; `DefaultScalePercent`/`ClampScalePercent`/`Percent`/`ScaleCacheSuffix(prefix, …)` emitting `.tsN`/`.bzN`/`.lsN`). Each kind now has three settings: `*_text_size`, `*_badge_size`, `*_logo_size` (12 total), plumbed through `RenderSettings`, `APIKeySettings` (+ 8 new `api_key_settings` schema migrations), parse/store/effective, admin GET/PUT, public image query params (`text_size`/`badge_size`/`logo_size`), free-key response, preview handlers, and cache suffixes.
+- **Rendering** (`image/badge.go`): the badge box now **auto-sizes to fit its content** — the height grows from its base to the taller of the value text, the label text, or the (logo-scaled) icon; widths already follow `textWidth`. Logo height = `48 · badgeScale · logo_size/100`. No clipping at any setting.
+- **Scales** (`image/serve.go`, `generate.go`): `badgeMultiplier = kindDefault · badge_size/100` (kindDefault 1.2 poster/logo/backdrop, 1.45 episode) drives the frame scale + the per-row cap (`>= 1.45`); font faces come from `GetFontFacesAt(text_size)`; `logoScale = logo_size/100` flows into the badge renderers. At 100/100/100 output matches the historical defaults.
+- Frontend: each of Poster/Logo/Backdrop/Episode now has three sliders (Text size / Badge size / Logo size, 50–200%); `FreeApiKeyCard` gained Badge size / Logo size number inputs; `SaveSettingsPayload`/`FreeKeyDefaults`/`api.ts` preview fns updated.
+
+### Verification
+- `go build/vet/test`, `vitest run` **329/329**, `vite build`, and full `docker compose build` all pass. `vue-tsc --build` still reports the same 75 pre-existing test-file errors (none new). oxlint clean on changed files.
+
+
 
 - Each of the 6 RT logo variants now has its **own** color settings (accent/value/border/text) instead of sharing one per source:
   - critics: `rt_cf` (Certified Fresh), `rt_pos` (Fresh), `rt_rot` (Rotten)
