@@ -1,8 +1,18 @@
 FROM rust:1-bookworm AS api-builder
+RUN apt-get update && apt-get install -y mold clang && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
+ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 WORKDIR /app
-COPY api/ .
+
 ARG CARGO_FEATURES=""
 ARG APP_VERSION
+
+COPY api/Cargo.toml api/Cargo.lock ./
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs
+RUN cargo chef prepare --recipe-path recipe.json
+RUN cargo chef cook --release --features "${CARGO_FEATURES}" --recipe-path recipe.json
+
+COPY api/ .
 RUN if [ -n "${APP_VERSION}" ]; then sed -i "s/^version = \"[^\"]*\"/version = \"${APP_VERSION}\"/" Cargo.toml; fi
 RUN cargo build --release --features "${CARGO_FEATURES}"
 

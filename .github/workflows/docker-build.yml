@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set dynamic version
+        id: version
         run: |
           BASE=$(jq -r .version web/package.json)
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
@@ -28,9 +29,8 @@ jobs:
           else
             VERSION="${BASE}-${{ github.ref_name }}-${SHORT_SHA}"
           fi
-          echo "Building version: ${VERSION}"
           jq --arg v "${VERSION}" '.version = $v' web/package.json > tmp.json && mv tmp.json web/package.json
-          sed -i "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" api/Cargo.toml
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -55,5 +55,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
