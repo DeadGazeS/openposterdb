@@ -44,7 +44,7 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32)
+	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
 	return fmt.Sprintf("%x:%x", salt, hash), nil
 }
 
@@ -63,7 +63,7 @@ func VerifyPassword(password, storedHash string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	hash := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32)
+	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
 	return hex.EncodeToString(hash) == hex.EncodeToString(expectedHash), nil
 }
 
