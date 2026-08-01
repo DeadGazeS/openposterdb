@@ -2,6 +2,8 @@ FROM rust:1-bookworm AS api-builder
 WORKDIR /app
 COPY api/ .
 ARG CARGO_FEATURES=""
+ARG APP_VERSION
+RUN if [ -n "${APP_VERSION}" ]; then sed -i "s/^version = \"[^\"]*\"/version = \"${APP_VERSION}\"/" Cargo.toml; fi
 RUN cargo build --release --features "${CARGO_FEATURES}"
 
 FROM node:22-bookworm AS web-builder
@@ -9,6 +11,8 @@ WORKDIR /app
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ .
+ARG APP_VERSION
+RUN if [ -n "${APP_VERSION}" ]; then sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${APP_VERSION}\"/" package.json; fi
 RUN npm run build-only
 
 FROM debian:bookworm-slim

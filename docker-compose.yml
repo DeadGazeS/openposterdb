@@ -5,8 +5,8 @@ services:
       - "3000:3000"
     environment:
       # Required
-      TMDB_API_KEY: ${TMDB_API_KEY:?Set TMDB_API_KEY in .env}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env — generate with: openssl rand -hex 32}
+      TMDB_API_KEY: "${TMDB_API_KEY:?Set TMDB_API_KEY in .env}"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env — generate with: openssl rand -hex 32}"
 
       # At least one ratings source (MDBList, OMDb, or Trakt) is required —
       # MDBList is preferred (covers 9 rating sources)
