@@ -72,16 +72,20 @@ func main() {
 
 	httpClient := buildHTTPClient()
 
+	mgr := services.NewServiceKeyManager(db, jwtSecret, httpClient,
+		cfg.TMDBAPIKey, cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID)
+	mgr.Init()
+
 	var tmdbClient *services.TmdbClient
-	if cfg.TMDBAPIKey != "" {
-		tmdbClient = services.NewTmdbClient(cfg.TMDBAPIKey, httpClient)
+	tmdbKey := cfg.TMDBAPIKey
+	if tmdbKey == "" {
+		tmdbKey = mgr.TMDBKey()
+	}
+	if tmdbKey != "" {
+		tmdbClient = services.NewTmdbClient(tmdbKey, httpClient)
 	} else {
 		slog.Warn("TMDB_API_KEY is not set — image endpoints will return 503 until a key is configured in the admin UI")
 	}
-
-	mgr := services.NewServiceKeyManager(db, jwtSecret, httpClient,
-		cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID)
-	mgr.Init()
 
 	state := &router.AppState{
 		Config:        cfg,
