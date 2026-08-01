@@ -17,8 +17,8 @@ const freeAPIKey = "t0-free-rpdb"
 // ImageServeConfig carries the server-level settings needed by the image
 // generation pipeline. Built from config.Config by the router.
 type ImageServeConfig struct {
-	CacheDir           string
-	ExternalCacheOnly  bool
+	CacheDir            string
+	ExternalCacheOnly   bool
 	RatingsMinStaleSecs uint64
 	RatingsMaxAgeSecs   uint64
 	ImageStaleSecs      uint64
@@ -27,31 +27,34 @@ type ImageServeConfig struct {
 
 // ImageQuery represents all query parameters for image endpoints.
 type ImageQuery struct {
-	Fallback         *string `json:"fallback"`
-	Lang             *string `json:"lang"`
-	ImageSize        *string `json:"imageSize"`
-	RatingsLimit     *int32  `json:"ratings_limit"`
-	RatingsOrder     *string `json:"ratings_order"`
-	RatingsExclude   *string `json:"ratings_exclude"`
-	BadgeStyle       *string `json:"badge_style"`
-	LabelStyle       *string `json:"label_style"`
-	BadgeSize        *string `json:"badge_size"`
-	BadgeDirection   *string `json:"badge_direction"`
-	BadgeShape       *string `json:"badge_shape"`
-	BadgeAlpha       *int32  `json:"badge_alpha"`
-	Position         *string `json:"position"`
-	ImageSource      *string `json:"image_source"`
-	Textless         *bool   `json:"textless"`
-	Blur             *bool   `json:"blur"`
-	Split            *bool   `json:"split"`
-	Fit              *string `json:"fit"`
-	EdgeInsetX       *int32  `json:"edge_inset_x"`
-	EdgeInsetY       *int32  `json:"edge_inset_y"`
+	Fallback       *string `json:"fallback"`
+	Lang           *string `json:"lang"`
+	ImageSize      *string `json:"imageSize"`
+	RatingsLimit   *int32  `json:"ratings_limit"`
+	RatingsOrder   *string `json:"ratings_order"`
+	RatingsExclude *string `json:"ratings_exclude"`
+	BadgeStyle     *string `json:"badge_style"`
+	LabelStyle     *string `json:"label_style"`
+	TextSize       *int32  `json:"text_size"`
+	BadgeSize      *int32  `json:"badge_size"`
+	LogoSize       *int32  `json:"logo_size"`
+	BadgeDirection *string `json:"badge_direction"`
+	BadgeShape     *string `json:"badge_shape"`
+	BadgeAlpha     *int32  `json:"badge_alpha"`
+	Position       *string `json:"position"`
+	ImageSource    *string `json:"image_source"`
+	Textless       *bool   `json:"textless"`
+	Blur           *bool   `json:"blur"`
+	Split          *bool   `json:"split"`
+	Fit            *string `json:"fit"`
+	EdgeInsetX     *int32  `json:"edge_inset_x"`
+	EdgeInsetY     *int32  `json:"edge_inset_y"`
 }
 
 func (q *ImageQuery) HasOverrides() bool {
 	return q.RatingsLimit != nil || q.RatingsOrder != nil || q.RatingsExclude != nil ||
-		q.BadgeStyle != nil || q.LabelStyle != nil || q.BadgeSize != nil ||
+		q.BadgeStyle != nil || q.LabelStyle != nil || q.TextSize != nil ||
+		q.BadgeSize != nil || q.LogoSize != nil ||
 		q.BadgeDirection != nil || q.BadgeShape != nil || q.BadgeAlpha != nil ||
 		q.Position != nil || q.ImageSource != nil || q.Textless != nil ||
 		q.Blur != nil || q.Split != nil || q.Fit != nil ||
@@ -122,8 +125,22 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 	}
 
+	if query.TextSize != nil {
+		size := services.ClampScalePercent(*query.TextSize)
+		switch kind {
+		case "poster":
+			s.PosterTextSize = size
+		case "logo":
+			s.LogoTextSize = size
+		case "backdrop":
+			s.BackdropTextSize = size
+		case "episode":
+			s.EpisodeTextSize = size
+		}
+	}
+
 	if query.BadgeSize != nil {
-		size := services.BadgeSize(*query.BadgeSize)
+		size := services.ClampScalePercent(*query.BadgeSize)
 		switch kind {
 		case "poster":
 			s.PosterBadgeSize = size
@@ -133,6 +150,20 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 			s.BackdropBadgeSize = size
 		case "episode":
 			s.EpisodeBadgeSize = size
+		}
+	}
+
+	if query.LogoSize != nil {
+		size := services.ClampScalePercent(*query.LogoSize)
+		switch kind {
+		case "poster":
+			s.PosterLogoSize = size
+		case "logo":
+			s.LogoLogoSize = size
+		case "backdrop":
+			s.BackdropLogoSize = size
+		case "episode":
+			s.EpisodeLogoSize = size
 		}
 	}
 
@@ -251,90 +282,106 @@ func resolveFreeSettings(db *sql.DB, isFreeAPIKeyEnabled func() bool, globalsCac
 }
 
 type FreeKeySettingsResponse struct {
-	ImageSource              string `json:"image_source"`
-	Lang                     string `json:"lang"`
-	Textless                 bool   `json:"textless"`
-	RatingsLimit             int32  `json:"ratings_limit"`
-	RatingsOrder             string `json:"ratings_order"`
-	RatingsExclude           string `json:"ratings_exclude"`
-	PosterPosition           string `json:"poster_position"`
-	LogoRatingsLimit         int32  `json:"logo_ratings_limit"`
-	BackdropRatingsLimit     int32  `json:"backdrop_ratings_limit"`
-	PosterBadgeStyle         string `json:"poster_badge_style"`
-	LogoBadgeStyle           string `json:"logo_badge_style"`
-	BackdropBadgeStyle       string `json:"backdrop_badge_style"`
-	PosterLabelStyle         string `json:"poster_label_style"`
-	LogoLabelStyle           string `json:"logo_label_style"`
-	BackdropLabelStyle       string `json:"backdrop_label_style"`
-	PosterBadgeDirection     string `json:"poster_badge_direction"`
-	PosterBadgeSplit         bool   `json:"poster_badge_split"`
-	PosterFit                string `json:"poster_fit"`
-	PosterBadgeSize          string `json:"poster_badge_size"`
-	LogoBadgeSize            string `json:"logo_badge_size"`
-	BackdropBadgeSize        string `json:"backdrop_badge_size"`
-	PosterBadgeShape         string `json:"poster_badge_shape"`
-	LogoBadgeShape           string `json:"logo_badge_shape"`
-	BackdropBadgeShape       string `json:"backdrop_badge_shape"`
-	PosterBadgeAlpha         int32  `json:"poster_badge_alpha"`
-	LogoBadgeAlpha           int32  `json:"logo_badge_alpha"`
-	BackdropBadgeAlpha       int32  `json:"backdrop_badge_alpha"`
-	BackdropPosition         string `json:"backdrop_position"`
-	BackdropBadgeDirection   string `json:"backdrop_badge_direction"`
-	BackdropEdgeInsetX       int32  `json:"backdrop_edge_inset_x"`
-	BackdropEdgeInsetY       int32  `json:"backdrop_edge_inset_y"`
-	EpisodeRatingsLimit      int32  `json:"episode_ratings_limit"`
-	EpisodeBadgeStyle        string `json:"episode_badge_style"`
-	EpisodeLabelStyle        string `json:"episode_label_style"`
-	EpisodeBadgeSize         string `json:"episode_badge_size"`
-	EpisodePosition          string `json:"episode_position"`
-	EpisodeBadgeDirection    string `json:"episode_badge_direction"`
-	EpisodeBlur              bool   `json:"episode_blur"`
-	EpisodeBadgeShape        string `json:"episode_badge_shape"`
-	EpisodeBadgeAlpha         int32  `json:"episode_badge_alpha"`
+	ImageSource            string `json:"image_source"`
+	Lang                   string `json:"lang"`
+	Textless               bool   `json:"textless"`
+	RatingsLimit           int32  `json:"ratings_limit"`
+	RatingsOrder           string `json:"ratings_order"`
+	RatingsExclude         string `json:"ratings_exclude"`
+	PosterPosition         string `json:"poster_position"`
+	LogoRatingsLimit       int32  `json:"logo_ratings_limit"`
+	BackdropRatingsLimit   int32  `json:"backdrop_ratings_limit"`
+	PosterBadgeStyle       string `json:"poster_badge_style"`
+	LogoBadgeStyle         string `json:"logo_badge_style"`
+	BackdropBadgeStyle     string `json:"backdrop_badge_style"`
+	PosterLabelStyle       string `json:"poster_label_style"`
+	LogoLabelStyle         string `json:"logo_label_style"`
+	BackdropLabelStyle     string `json:"backdrop_label_style"`
+	PosterBadgeDirection   string `json:"poster_badge_direction"`
+	PosterBadgeSplit       bool   `json:"poster_badge_split"`
+	PosterFit              string `json:"poster_fit"`
+	PosterTextSize         int32  `json:"poster_text_size"`
+	LogoTextSize           int32  `json:"logo_text_size"`
+	BackdropTextSize       int32  `json:"backdrop_text_size"`
+	PosterBadgeSize        int32  `json:"poster_badge_size"`
+	LogoBadgeSize          int32  `json:"logo_badge_size"`
+	BackdropBadgeSize      int32  `json:"backdrop_badge_size"`
+	PosterLogoSize         int32  `json:"poster_logo_size"`
+	LogoLogoSize           int32  `json:"logo_logo_size"`
+	BackdropLogoSize       int32  `json:"backdrop_logo_size"`
+	PosterBadgeShape       string `json:"poster_badge_shape"`
+	LogoBadgeShape         string `json:"logo_badge_shape"`
+	BackdropBadgeShape     string `json:"backdrop_badge_shape"`
+	PosterBadgeAlpha       int32  `json:"poster_badge_alpha"`
+	LogoBadgeAlpha         int32  `json:"logo_badge_alpha"`
+	BackdropBadgeAlpha     int32  `json:"backdrop_badge_alpha"`
+	BackdropPosition       string `json:"backdrop_position"`
+	BackdropBadgeDirection string `json:"backdrop_badge_direction"`
+	BackdropEdgeInsetX     int32  `json:"backdrop_edge_inset_x"`
+	BackdropEdgeInsetY     int32  `json:"backdrop_edge_inset_y"`
+	EpisodeRatingsLimit    int32  `json:"episode_ratings_limit"`
+	EpisodeBadgeStyle      string `json:"episode_badge_style"`
+	EpisodeLabelStyle      string `json:"episode_label_style"`
+	EpisodeTextSize        int32  `json:"episode_text_size"`
+	EpisodeBadgeSize       int32  `json:"episode_badge_size"`
+	EpisodeLogoSize        int32  `json:"episode_logo_size"`
+	EpisodePosition        string `json:"episode_position"`
+	EpisodeBadgeDirection  string `json:"episode_badge_direction"`
+	EpisodeBlur            bool   `json:"episode_blur"`
+	EpisodeBadgeShape      string `json:"episode_badge_shape"`
+	EpisodeBadgeAlpha      int32  `json:"episode_badge_alpha"`
 }
 
 func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsResponse {
 	return FreeKeySettingsResponse{
-		ImageSource:              string(s.ImageSource),
-		Lang:                     s.Lang,
-		Textless:                 s.Textless,
-		RatingsLimit:             s.RatingsLimit,
-		RatingsOrder:             s.RatingsOrder,
-		RatingsExclude:           s.RatingsExclude,
-		PosterPosition:           string(s.PosterPosition),
-		LogoRatingsLimit:         s.LogoRatingsLimit,
-		BackdropRatingsLimit:     s.BackdropRatingsLimit,
-		PosterBadgeStyle:         string(s.PosterBadgeStyle),
-		LogoBadgeStyle:           string(s.LogoBadgeStyle),
-		BackdropBadgeStyle:       string(s.BackdropBadgeStyle),
-		PosterLabelStyle:         string(s.PosterLabelStyle),
-		LogoLabelStyle:           string(s.LogoLabelStyle),
-		BackdropLabelStyle:       string(s.BackdropLabelStyle),
-		PosterBadgeDirection:     string(s.PosterBadgeDirection),
-		PosterBadgeSplit:         s.PosterBadgeSplit,
-		PosterFit:                string(s.PosterFit),
-		PosterBadgeSize:          string(s.PosterBadgeSize),
-		LogoBadgeSize:            string(s.LogoBadgeSize),
-		BackdropBadgeSize:        string(s.BackdropBadgeSize),
-		PosterBadgeShape:         string(s.PosterBadgeShape),
-		LogoBadgeShape:           string(s.LogoBadgeShape),
-		BackdropBadgeShape:       string(s.BackdropBadgeShape),
-		PosterBadgeAlpha:         int32(s.PosterBadgeAlpha),
-		LogoBadgeAlpha:           int32(s.LogoBadgeAlpha),
-		BackdropBadgeAlpha:       int32(s.BackdropBadgeAlpha),
-		BackdropPosition:         string(s.BackdropPosition),
-		BackdropBadgeDirection:   string(s.BackdropBadgeDirection),
-		BackdropEdgeInsetX:       s.BackdropEdgeInsetX,
-		BackdropEdgeInsetY:       s.BackdropEdgeInsetY,
-		EpisodeRatingsLimit:      s.EpisodeRatingsLimit,
-		EpisodeBadgeStyle:        string(s.EpisodeBadgeStyle),
-		EpisodeLabelStyle:        string(s.EpisodeLabelStyle),
-		EpisodeBadgeSize:         string(s.EpisodeBadgeSize),
-		EpisodePosition:          string(s.EpisodePosition),
-		EpisodeBadgeDirection:    string(s.EpisodeBadgeDirection),
-		EpisodeBlur:              s.EpisodeBlur,
-		EpisodeBadgeShape:        string(s.EpisodeBadgeShape),
-		EpisodeBadgeAlpha:         int32(s.EpisodeBadgeAlpha),
+		ImageSource:            string(s.ImageSource),
+		Lang:                   s.Lang,
+		Textless:               s.Textless,
+		RatingsLimit:           s.RatingsLimit,
+		RatingsOrder:           s.RatingsOrder,
+		RatingsExclude:         s.RatingsExclude,
+		PosterPosition:         string(s.PosterPosition),
+		LogoRatingsLimit:       s.LogoRatingsLimit,
+		BackdropRatingsLimit:   s.BackdropRatingsLimit,
+		PosterBadgeStyle:       string(s.PosterBadgeStyle),
+		LogoBadgeStyle:         string(s.LogoBadgeStyle),
+		BackdropBadgeStyle:     string(s.BackdropBadgeStyle),
+		PosterLabelStyle:       string(s.PosterLabelStyle),
+		LogoLabelStyle:         string(s.LogoLabelStyle),
+		BackdropLabelStyle:     string(s.BackdropLabelStyle),
+		PosterBadgeDirection:   string(s.PosterBadgeDirection),
+		PosterBadgeSplit:       s.PosterBadgeSplit,
+		PosterFit:              string(s.PosterFit),
+		PosterTextSize:         int32(s.PosterTextSize),
+		LogoTextSize:           int32(s.LogoTextSize),
+		BackdropTextSize:       int32(s.BackdropTextSize),
+		PosterBadgeSize:        int32(s.PosterBadgeSize),
+		LogoBadgeSize:          int32(s.LogoBadgeSize),
+		BackdropBadgeSize:      int32(s.BackdropBadgeSize),
+		PosterLogoSize:         int32(s.PosterLogoSize),
+		LogoLogoSize:           int32(s.LogoLogoSize),
+		BackdropLogoSize:       int32(s.BackdropLogoSize),
+		PosterBadgeShape:       string(s.PosterBadgeShape),
+		LogoBadgeShape:         string(s.LogoBadgeShape),
+		BackdropBadgeShape:     string(s.BackdropBadgeShape),
+		PosterBadgeAlpha:       int32(s.PosterBadgeAlpha),
+		LogoBadgeAlpha:         int32(s.LogoBadgeAlpha),
+		BackdropBadgeAlpha:     int32(s.BackdropBadgeAlpha),
+		BackdropPosition:       string(s.BackdropPosition),
+		BackdropBadgeDirection: string(s.BackdropBadgeDirection),
+		BackdropEdgeInsetX:     s.BackdropEdgeInsetX,
+		BackdropEdgeInsetY:     s.BackdropEdgeInsetY,
+		EpisodeRatingsLimit:    s.EpisodeRatingsLimit,
+		EpisodeBadgeStyle:      string(s.EpisodeBadgeStyle),
+		EpisodeLabelStyle:      string(s.EpisodeLabelStyle),
+		EpisodeTextSize:        int32(s.EpisodeTextSize),
+		EpisodeBadgeSize:       int32(s.EpisodeBadgeSize),
+		EpisodeLogoSize:        int32(s.EpisodeLogoSize),
+		EpisodePosition:        string(s.EpisodePosition),
+		EpisodeBadgeDirection:  string(s.EpisodeBadgeDirection),
+		EpisodeBlur:            s.EpisodeBlur,
+		EpisodeBadgeShape:      string(s.EpisodeBadgeShape),
+		EpisodeBadgeAlpha:      int32(s.EpisodeBadgeAlpha),
 	}
 }
 
@@ -544,7 +591,22 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 		query.LabelStyle = &v
 	}
 	if v := q.Get("badge_size"); v != "" {
-		query.BadgeSize = &v
+		var n int32
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			query.BadgeSize = &n
+		}
+	}
+	if v := q.Get("text_size"); v != "" {
+		var n int32
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			query.TextSize = &n
+		}
+	}
+	if v := q.Get("logo_size"); v != "" {
+		var n int32
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			query.LogoSize = &n
+		}
 	}
 	if v := q.Get("badge_direction"); v != "" {
 		query.BadgeDirection = &v

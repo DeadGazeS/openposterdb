@@ -263,4 +263,68 @@ var migrations = []migration{
 		"ALTER TABLE api_key_settings ADD COLUMN backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0",
 		"duplicate column",
 	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN poster_text_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_text_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN backdrop_text_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN episode_text_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN poster_logo_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_logo_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN backdrop_logo_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN episode_logo_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_size",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN logo_badge_size",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_size",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN episode_badge_size",
+		"no such column",
+	},
 }

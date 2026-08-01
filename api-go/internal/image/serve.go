@@ -73,6 +73,14 @@ func newFace(size float64) font.Face {
 	return face
 }
 
+// GetFontFacesAt returns fresh label and value font faces scaled by the given
+// text-size percentage (100 = the default 26/32pt sizes). Faces are NOT safe to
+// share across goroutines, so each caller gets its own; see GetFontFace.
+func GetFontFacesAt(textSizePct float64) (font.Face, font.Face) {
+	return newFace(labelFontFaceSize * textSizePct / 100.0),
+		newFace(valueFontFaceSize * textSizePct / 100.0)
+}
+
 func loadFontFromData(data []byte) (font.Face, error) {
 	f, err := sfnt.Parse(data)
 	if err != nil {
@@ -106,18 +114,36 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		}
 	}
 
-	badgeSizeScale := services.BadgeSizeMedium.ScaleFactor()
+	// Per-kind scales: the badge frame (badgeMultiplier = kind default ×
+	// badge_size), the font faces (text_size), and the rating logos (logo_size).
+	kindDefault := float32(1.2)
+	if kind == "episode" {
+		kindDefault = 1.45
+	}
+	textSizePct := float64(100)
+	badgeSizePct := float64(100)
+	logoSizePct := float64(100)
 	switch kind {
 	case "poster":
-		badgeSizeScale = settings.PosterBadgeSize.ScaleFactor()
+		textSizePct = float64(settings.PosterTextSize)
+		badgeSizePct = float64(settings.PosterBadgeSize)
+		logoSizePct = float64(settings.PosterLogoSize)
 	case "logo":
-		badgeSizeScale = settings.LogoBadgeSize.ScaleFactor()
+		textSizePct = float64(settings.LogoTextSize)
+		badgeSizePct = float64(settings.LogoBadgeSize)
+		logoSizePct = float64(settings.LogoLogoSize)
 	case "backdrop":
-		badgeSizeScale = settings.BackdropBadgeSize.ScaleFactor()
+		textSizePct = float64(settings.BackdropTextSize)
+		badgeSizePct = float64(settings.BackdropBadgeSize)
+		logoSizePct = float64(settings.BackdropLogoSize)
 	case "episode":
-		badgeSizeScale = settings.EpisodeBadgeSize.ScaleFactor()
+		textSizePct = float64(settings.EpisodeTextSize)
+		badgeSizePct = float64(settings.EpisodeBadgeSize)
+		logoSizePct = float64(settings.EpisodeLogoSize)
 	}
-	badgeScale *= badgeSizeScale
+	badgeMultiplier := kindDefault * float32(badgeSizePct) / 100.0
+	badgeScale *= badgeMultiplier
+	logoScale := float32(logoSizePct) / 100.0
 
 	var labelStyle services.LabelStyle
 	var badgeStyle services.BadgeStyle
@@ -152,8 +178,7 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		position = settings.EpisodePosition
 	}
 
-	valueFace := GetValueFontFace()
-	labelFace := GetFontFace()
+	valueFace, labelFace := GetFontFacesAt(textSizePct)
 	if valueFace == nil || labelFace == nil {
 		return nil, fmt.Errorf("font not loaded")
 	}
@@ -162,23 +187,23 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	case "poster":
 		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, settings.PosterBadgeSize,
+			targetW, badgeScale, badgeMultiplier, logoScale,
 			settings.PosterBadgeSplit, settings.PosterFit, settings.Colors)
 
 	case "logo":
 		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
-			badgeStyle, labelStyle, appearance, targetW, badgeScale, settings.Colors)
+			badgeStyle, labelStyle, appearance, targetW, badgeScale, badgeMultiplier, logoScale, settings.Colors)
 
 	case "backdrop":
 		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, settings.BackdropBadgeSize,
+			targetW, badgeScale, badgeMultiplier, logoScale,
 			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY, settings.Colors)
 
 	case "episode":
 		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, settings.EpisodeBadgeSize, settings.EpisodeBlur, settings.Colors)
+			targetW, badgeScale, badgeMultiplier, logoScale, settings.EpisodeBlur, settings.Colors)
 	}
 
 	return nil, fmt.Errorf("unknown image kind: %s", kind)

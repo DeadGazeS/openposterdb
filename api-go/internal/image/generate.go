@@ -85,7 +85,7 @@ func posterTargetHeight(targetWidth uint32) uint32 {
 	return uint32(math.Round(float64(targetWidth) * 1.5))
 }
 
-func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeSize services.BadgeSize, posterBadgeSplit bool, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, logoScale float32, posterBadgeSplit bool, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -101,14 +101,14 @@ func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFac
 		var badgeImages []*image.RGBA
 		if badgeStyle.IsVertical() {
 			for _, b := range badges {
-				badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors))
+				badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors))
 			}
 		} else {
-			badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors)
+			badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors)
 		}
 
 		maxPR := maxBadgesPerRow
-		if badgeSize == services.BadgeSizeLarge || badgeSize == services.BadgeSizeExtraLarge {
+		if badgeMultiplier >= 1.45 {
 			if badgeStyle == services.BadgeStyleHorizontal {
 				maxPR = 2
 			} else {
@@ -233,7 +233,7 @@ func resizeExact(img image.Image, targetW, targetH int) *image.RGBA {
 
 // --- Logo rendering ---
 
-func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, logoScale float32, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -266,10 +266,10 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 	var badgeImages []*image.RGBA
 	if badgeStyle.IsVertical() {
 		for _, b := range badges {
-			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors))
+			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors))
 		}
 	} else {
-		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors)
+		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors)
 	}
 
 	logoW := uint32(logoImg.Bounds().Dx())
@@ -352,7 +352,7 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 
 // --- Backdrop rendering ---
 
-func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeSize services.BadgeSize, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, logoScale float32, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -385,10 +385,10 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 	var badgeImages []*image.RGBA
 	if badgeStyle.IsVertical() {
 		for _, b := range badges {
-			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors))
+			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors))
 		}
 	} else {
-		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors)
+		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors)
 	}
 
 	ix := services.ClampEdgeInset(edgeInsetX)
@@ -411,7 +411,7 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 
 // --- Episode rendering ---
 
-func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeSize services.BadgeSize, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, logoScale float32, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -453,17 +453,17 @@ func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFac
 	var badgeImages []*image.RGBA
 	if badgeStyle.IsVertical() {
 		for _, b := range badges {
-			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors))
+			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors))
 		}
 	} else {
-		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, colors)
+		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, logoScale, colors)
 	}
 
 	if badgeDirection.IsVertical() {
 		overlayVerticalStack(canvas, badgeImages, position, badgeScale, badgeSideMargin, 0, 0)
 	} else {
 		maxPR := maxBadgesPerRow
-		if badgeSize == services.BadgeSizeLarge || badgeSize == services.BadgeSizeExtraLarge {
+		if badgeMultiplier >= 1.45 {
 			if badgeStyle == services.BadgeStyleHorizontal {
 				maxPR = 2
 			} else {

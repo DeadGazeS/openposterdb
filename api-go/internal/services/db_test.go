@@ -122,15 +122,27 @@ func TestLabelStyle(t *testing.T) {
 	}
 }
 
-func TestBadgeSizeScaleFactors(t *testing.T) {
-	xs := BadgeSizeExtraSmall.ScaleFactor()
-	s := BadgeSizeSmall.ScaleFactor()
-	m := BadgeSizeMedium.ScaleFactor()
-	l := BadgeSizeLarge.ScaleFactor()
-	xl := BadgeSizeExtraLarge.ScaleFactor()
-
-	if !(xs < s && s < m && m < l && l < xl) {
-		t.Error("scale factors should increase monotonically")
+func TestScalePercent(t *testing.T) {
+	if DefaultScalePercent() != 100 {
+		t.Error("default scale should be 100")
+	}
+	if got := ClampScalePercent(30); got != 50 {
+		t.Errorf("clamp low: got %d, want 50", got)
+	}
+	if got := ClampScalePercent(250); got != 200 {
+		t.Errorf("clamp high: got %d, want 200", got)
+	}
+	if ScalePercent(150).Percent() != 1.5 {
+		t.Errorf("Percent: got %v, want 1.5", ScalePercent(150).Percent())
+	}
+	if ScaleCacheSuffix("ts", 100) != "" {
+		t.Error("default scale should add no cache suffix")
+	}
+	if ScaleCacheSuffix("ts", 150) != ".ts150" {
+		t.Errorf("150 should suffix .ts150, got %q", ScaleCacheSuffix("ts", 150))
+	}
+	if ScaleCacheSuffix("bz", 145) != ".bz145" {
+		t.Errorf("badge size suffix wrong: %q", ScaleCacheSuffix("bz", 145))
 	}
 }
 
@@ -238,11 +250,11 @@ func TestDefaultRenderSettings(t *testing.T) {
 
 func TestParseGlobalRenderSettings(t *testing.T) {
 	globals := map[string]string{
-		"image_source":        "f",
-		"poster_badge_style":  "v",
-		"lang":                "de",
-		"ratings_limit":       "5",
-		"poster_fit":          "pad",
+		"image_source":       "f",
+		"poster_badge_style": "v",
+		"lang":               "de",
+		"ratings_limit":      "5",
+		"poster_fit":         "pad",
 	}
 	s := ParseGlobalRenderSettings(globals)
 	if s.ImageSource != ImageSourceFanart {
