@@ -7,10 +7,23 @@ import (
 	"net/http"
 	"strings"
 
+	"openposterdb/internal/errors"
+	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
 
 const freeAPIKey = "t0-free-rpdb"
+
+// ImageServeConfig carries the server-level settings needed by the image
+// generation pipeline. Built from config.Config by the router.
+type ImageServeConfig struct {
+	CacheDir           string
+	ExternalCacheOnly  bool
+	RatingsMinStaleSecs uint64
+	RatingsMaxAgeSecs   uint64
+	ImageStaleSecs      uint64
+	ImageQuality        uint8
+}
 
 // ImageQuery represents all query parameters for image endpoints.
 type ImageQuery struct {
@@ -351,7 +364,7 @@ func HandleFreeKeySettings(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.Han
 	}
 }
 
-func HandleImage(db *sql.DB, tmdb *services.TmdbClient, omdb *services.OmdbClient, mdblist *services.MdblistClient, trakt *services.TraktClient, fanart *services.FanartClient, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
+func HandleImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClient, omdb *services.OmdbClient, mdblist *services.MdblistClient, trakt *services.TraktClient, fanart *services.FanartClient, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "Method not allowed")
@@ -444,93 +457,25 @@ func HandleImage(db *sql.DB, tmdb *services.TmdbClient, omdb *services.OmdbClien
 		// Apply query parameter overrides
 		settings = applyQueryOverrides(settings, query, kind)
 
-		// Resolve and apply badge direction defaults
-		if kind == "poster" {
-			settings.PosterBadgeDirection = settings.PosterBadgeDirection.Resolve(settings.PosterPosition)
-			settings.PosterBadgeStyle = settings.PosterBadgeStyle.Resolve(settings.PosterBadgeDirection)
-		}
-
-		// Parse ID type
-		idType, err := services.ParseIDType(idTypeStr)
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-
-		// Resolve ID
-		resolved, err := services.ResolveID(idType, idValue, tmdb)
-		if err != nil {
-			writeError(w, 404, err.Error())
-			return
-		}
-
-		if resolved.MediaType == services.MediaTypeEpisode && kind != "episode" {
-			// Uplift episode to series for poster/logo/backdrop
-			if resolved.Episode != nil {
-				seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-				resolved, err = services.ResolveID(services.IDTypeTMDB, seriesID, tmdb)
-				if err != nil {
-					writeError(w, 404, err.Error())
-					return
-				}
-			}
-		}
-
-		if kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
-			writeError(w, 400, "not an episode - use poster/logo/backdrop endpoint")
-			return
-		}
-
-		// Fetch ratings
-		limit := settings.RatingsLimit
-		switch kind {
-		case "logo":
-			limit = settings.LogoRatingsLimit
-		case "backdrop":
-			limit = settings.BackdropRatingsLimit
-		case "episode":
-			limit = settings.EpisodeRatingsLimit
-		}
-
-		var imdbID *string
-		if resolved.IMDbID != nil && *resolved.IMDbID != "" {
-			imdbID = resolved.IMDbID
-		}
-
-		mediaType := "movie"
-		switch resolved.MediaType {
-		case services.MediaTypeTV:
-			mediaType = "tv"
-		case services.MediaTypeEpisode:
-			mediaType = "episode"
-		}
-
-		var epShowID uint64
-		var epSeason, epEpisode uint32
-		if resolved.Episode != nil {
-			epShowID = resolved.Episode.ShowTMDbID
-			epSeason = resolved.Episode.SeasonNumber
-			epEpisode = resolved.Episode.EpisodeNumber
-		}
-
-		_, _, _, _, rawBadges := services.FetchRatings(
-			resolved.TMDbID, mediaType, imdbID,
-			epShowID, epSeason, epEpisode,
-			tmdb, omdb, mdblist, trakt,
+		bytes, contentType, err := image.ServeImage(
+			db, tmdb, omdb, mdblist, trakt, fanart,
+			idTypeStr, idValue, kind, settings,
+			cfg.CacheDir, cfg.ExternalCacheOnly,
+			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
+			cfg.ImageQuality, query.ImageSize,
 		)
+		if err != nil {
+			if appErr, ok := err.(*errors.AppError); ok {
+				writeError(w, appErr.Status, appErr.Message)
+			} else {
+				writeError(w, 500, err.Error())
+			}
+			return
+		}
 
-		badges := services.ApplyRatingPreferences(rawBadges, settings.RatingsOrder, settings.RatingsExclude, limit)
-
-		// Build cache suffix
-		ratingsSuffix := services.BadgesCacheSuffix(badges)
-		suffix := services.SettingsCacheSuffixWithRatings(settings, kind, query.ImageSize, ratingsSuffix)
-
-		_ = suffix
-		_ = settings
-
-		// Return placeholder - image rendering not yet implemented
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte{})
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
+		w.Write(bytes)
 	}
 }
 

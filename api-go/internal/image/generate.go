@@ -18,6 +18,69 @@ var blackUniform = image.NewUniform(color.Black)
 
 const maxImagePixels = 8192 * 8192
 
+// Sample artwork used by the admin preview endpoints. Built once at startup so
+// previews render without external API calls.
+var (
+	SamplePosterPNG   []byte
+	SampleLogoPNG     []byte
+	SampleBackdropPNG []byte
+)
+
+func init() {
+	SamplePosterPNG = buildSamplePoster()
+	SampleLogoPNG = buildSampleLogo()
+	SampleBackdropPNG = buildSampleBackdrop()
+}
+
+func buildSamplePoster() []byte {
+	const w, h = 500, 750
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		t := float64(y) / float64(h)
+		v := uint8(42.0 - t*16.0)
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{v, v, v, 255})
+		}
+	}
+	var buf bytes.Buffer
+	png.Encode(&buf, img)
+	return buf.Bytes()
+}
+
+func buildSampleLogo() []byte {
+	const w, h = 400, 120
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	const m = 8
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if x >= m && x < w-m && y >= m && y < h-m {
+				img.Set(x, y, color.RGBA{220, 220, 220, 240})
+			} else {
+				img.Set(x, y, color.RGBA{0, 0, 0, 0})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	png.Encode(&buf, img)
+	return buf.Bytes()
+}
+
+func buildSampleBackdrop() []byte {
+	const w, h = 1280, 720
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for x := 0; x < w; x++ {
+		t := float64(x) / float64(w)
+		r := uint8(26.0 + t*16.0)
+		b := uint8(42.0 - t*16.0)
+		for y := 0; y < h; y++ {
+			img.Set(x, y, color.RGBA{r, 26, b, 255})
+		}
+	}
+	var buf bytes.Buffer
+	png.Encode(&buf, img)
+	return buf.Bytes()
+}
+
 func posterTargetHeight(targetWidth uint32) uint32 {
 	return uint32(math.Round(float64(targetWidth) * 1.5))
 }

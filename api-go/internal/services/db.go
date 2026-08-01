@@ -595,47 +595,47 @@ func ValidateRatingsExclude(exclude string) error {
 // --- RenderSettings ---
 
 type RenderSettings struct {
-	ImageSource               ImageSource
-	Lang                      string
-	Textless                  bool
-	RatingsLimit              int32
-	RatingsOrder              string
-	RatingsExclude            string
-	IsDefault                 bool
-	PosterPosition            BadgePosition
-	LogoRatingsLimit          int32
-	BackdropRatingsLimit      int32
-	PosterBadgeStyle          BadgeStyle
-	LogoBadgeStyle            BadgeStyle
-	BackdropBadgeStyle        BadgeStyle
-	PosterLabelStyle          LabelStyle
-	LogoLabelStyle            LabelStyle
-	BackdropLabelStyle        LabelStyle
-	PosterBadgeDirection      BadgeDirection
-	PosterBadgeSplit          bool
-	PosterFit                 PosterFit
-	PosterBadgeSize           BadgeSize
-	LogoBadgeSize             BadgeSize
-	BackdropBadgeSize         BadgeSize
-	BackdropPosition          BadgePosition
-	BackdropBadgeDirection    BadgeDirection
-	BackdropEdgeInsetX        int32
-	BackdropEdgeInsetY        int32
-	EpisodeRatingsLimit       int32
-	EpisodeBadgeStyle         BadgeStyle
-	EpisodeLabelStyle         LabelStyle
-	EpisodeBadgeSize          BadgeSize
-	EpisodePosition           BadgePosition
-	EpisodeBadgeDirection     BadgeDirection
-	EpisodeBlur               bool
-	PosterBadgeShape          BadgeShape
-	LogoBadgeShape            BadgeShape
-	BackdropBadgeShape        BadgeShape
-	EpisodeBadgeShape         BadgeShape
-	PosterBadgeBackground     BadgeBackground
-	LogoBadgeBackground       BadgeBackground
-	BackdropBadgeBackground   BadgeBackground
-	EpisodeBadgeBackground    BadgeBackground
+	ImageSource               ImageSource     `json:"image_source"`
+	Lang                      string          `json:"lang"`
+	Textless                  bool            `json:"textless"`
+	RatingsLimit              int32           `json:"ratings_limit"`
+	RatingsOrder              string          `json:"ratings_order"`
+	RatingsExclude            string          `json:"ratings_exclude"`
+	IsDefault                 bool            `json:"is_default"`
+	PosterPosition            BadgePosition   `json:"poster_position"`
+	LogoRatingsLimit          int32           `json:"logo_ratings_limit"`
+	BackdropRatingsLimit      int32           `json:"backdrop_ratings_limit"`
+	PosterBadgeStyle          BadgeStyle      `json:"poster_badge_style"`
+	LogoBadgeStyle            BadgeStyle      `json:"logo_badge_style"`
+	BackdropBadgeStyle        BadgeStyle      `json:"backdrop_badge_style"`
+	PosterLabelStyle          LabelStyle      `json:"poster_label_style"`
+	LogoLabelStyle            LabelStyle      `json:"logo_label_style"`
+	BackdropLabelStyle        LabelStyle      `json:"backdrop_label_style"`
+	PosterBadgeDirection      BadgeDirection  `json:"poster_badge_direction"`
+	PosterBadgeSplit          bool            `json:"poster_badge_split"`
+	PosterFit                 PosterFit       `json:"poster_fit"`
+	PosterBadgeSize           BadgeSize       `json:"poster_badge_size"`
+	LogoBadgeSize             BadgeSize       `json:"logo_badge_size"`
+	BackdropBadgeSize         BadgeSize       `json:"backdrop_badge_size"`
+	BackdropPosition          BadgePosition   `json:"backdrop_position"`
+	BackdropBadgeDirection    BadgeDirection  `json:"backdrop_badge_direction"`
+	BackdropEdgeInsetX        int32           `json:"backdrop_edge_inset_x"`
+	BackdropEdgeInsetY        int32           `json:"backdrop_edge_inset_y"`
+	EpisodeRatingsLimit       int32           `json:"episode_ratings_limit"`
+	EpisodeBadgeStyle         BadgeStyle      `json:"episode_badge_style"`
+	EpisodeLabelStyle         LabelStyle      `json:"episode_label_style"`
+	EpisodeBadgeSize          BadgeSize       `json:"episode_badge_size"`
+	EpisodePosition           BadgePosition   `json:"episode_position"`
+	EpisodeBadgeDirection     BadgeDirection  `json:"episode_badge_direction"`
+	EpisodeBlur               bool            `json:"episode_blur"`
+	PosterBadgeShape          BadgeShape      `json:"poster_badge_shape"`
+	LogoBadgeShape            BadgeShape      `json:"logo_badge_shape"`
+	BackdropBadgeShape        BadgeShape      `json:"backdrop_badge_shape"`
+	EpisodeBadgeShape         BadgeShape      `json:"episode_badge_shape"`
+	PosterBadgeBackground     BadgeBackground `json:"poster_badge_background"`
+	LogoBadgeBackground       BadgeBackground `json:"logo_badge_background"`
+	BackdropBadgeBackground   BadgeBackground `json:"backdrop_badge_background"`
+	EpisodeBadgeBackground    BadgeBackground `json:"episode_badge_background"`
 }
 
 func DefaultRenderSettings() RenderSettings {
@@ -783,6 +783,92 @@ func int32ClampOr(v int32) int32 {
 		return 50
 	}
 	return v
+}
+
+// RenderSettingsToMap converts effective render settings back into the flat
+// key/value form stored in global_settings. Used by the admin settings update
+// path so the stored representation always reflects the current settings.
+func RenderSettingsToMap(s *RenderSettings) map[string]string {
+	return map[string]string{
+		"image_source":              string(s.ImageSource),
+		"lang":                      s.Lang,
+		"textless":                  boolStr(s.Textless),
+		"ratings_limit":             int32Str(s.RatingsLimit),
+		"ratings_order":             s.RatingsOrder,
+		"ratings_exclude":           s.RatingsExclude,
+		"poster_position":           string(s.PosterPosition),
+		"logo_ratings_limit":        int32Str(s.LogoRatingsLimit),
+		"backdrop_ratings_limit":    int32Str(s.BackdropRatingsLimit),
+		"poster_badge_style":        string(s.PosterBadgeStyle),
+		"logo_badge_style":          string(s.LogoBadgeStyle),
+		"backdrop_badge_style":      string(s.BackdropBadgeStyle),
+		"poster_label_style":        string(s.PosterLabelStyle),
+		"logo_label_style":          string(s.LogoLabelStyle),
+		"backdrop_label_style":      string(s.BackdropLabelStyle),
+		"poster_badge_direction":    string(s.PosterBadgeDirection),
+		"poster_badge_split":        boolStr(s.PosterBadgeSplit),
+		"poster_fit":                string(s.PosterFit),
+		"poster_badge_size":         string(s.PosterBadgeSize),
+		"logo_badge_size":           string(s.LogoBadgeSize),
+		"backdrop_badge_size":       string(s.BackdropBadgeSize),
+		"backdrop_position":         string(s.BackdropPosition),
+		"backdrop_badge_direction":  string(s.BackdropBadgeDirection),
+		"backdrop_edge_inset_x":     int32Str(s.BackdropEdgeInsetX),
+		"backdrop_edge_inset_y":     int32Str(s.BackdropEdgeInsetY),
+		"episode_ratings_limit":     int32Str(s.EpisodeRatingsLimit),
+		"episode_badge_style":       string(s.EpisodeBadgeStyle),
+		"episode_label_style":       string(s.EpisodeLabelStyle),
+		"episode_badge_size":        string(s.EpisodeBadgeSize),
+		"episode_position":          string(s.EpisodePosition),
+		"episode_badge_direction":   string(s.EpisodeBadgeDirection),
+		"episode_blur":              boolStr(s.EpisodeBlur),
+		"poster_badge_shape":        string(s.PosterBadgeShape),
+		"logo_badge_shape":          string(s.LogoBadgeShape),
+		"backdrop_badge_shape":      string(s.BackdropBadgeShape),
+		"episode_badge_shape":       string(s.EpisodeBadgeShape),
+		"poster_badge_background":   string(s.PosterBadgeBackground),
+		"logo_badge_background":     string(s.LogoBadgeBackground),
+		"backdrop_badge_background": string(s.BackdropBadgeBackground),
+		"episode_badge_background":  string(s.EpisodeBadgeBackground),
+	}
+}
+
+// ValidateRenderSettings validates the effective render settings, returning an
+// error string suitable for a 400 response.
+func ValidateRenderSettings(s *RenderSettings) error {
+	if err := ValidateLang(s.Lang); err != nil {
+		return err
+	}
+	if err := ValidateRatingsLimit(s.RatingsLimit); err != nil {
+		return err
+	}
+	if err := ValidateRatingsOrder(s.RatingsOrder); err != nil {
+		return err
+	}
+	if err := ValidateRatingsExclude(s.RatingsExclude); err != nil {
+		return err
+	}
+	if err := ValidateRatingsLimit(s.LogoRatingsLimit); err != nil {
+		return err
+	}
+	if err := ValidateRatingsLimit(s.BackdropRatingsLimit); err != nil {
+		return err
+	}
+	if err := ValidateRatingsLimit(s.EpisodeRatingsLimit); err != nil {
+		return err
+	}
+	return nil
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+func int32Str(v int32) string {
+	return fmt.Sprintf("%d", v)
 }
 
 // --- Admin user CRUD ---
@@ -1023,11 +1109,11 @@ func CountImageMeta(db *sql.DB, imageType string) (int64, error) {
 }
 
 type ImageMetaItem struct {
-	CacheKey    string
-	ReleaseDate *string
-	ImageType   string
-	CreatedAt   int64
-	UpdatedAt   int64
+	CacheKey    string  `json:"cache_key"`
+	ReleaseDate *string `json:"release_date"`
+	ImageType   string  `json:"image_type"`
+	CreatedAt   int64   `json:"created_at"`
+	UpdatedAt   int64   `json:"updated_at"`
 }
 
 func ListImageMetaByKind(db *sql.DB, imageType string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
@@ -1115,47 +1201,47 @@ func SetGlobalSettingsBatch(db *sql.DB, settings map[string]string) error {
 // --- Per-key settings ---
 
 type APIKeySettings struct {
-	APIKeyID                  int64
-	ImageSource               string
-	Lang                      string
-	Textless                  bool
-	RatingsLimit              int32
-	RatingsOrder              string
-	RatingsExclude            string
-	PosterPosition            string
-	LogoRatingsLimit          int32
-	BackdropRatingsLimit      int32
-	PosterBadgeStyle          string
-	LogoBadgeStyle            string
-	BackdropBadgeStyle        string
-	PosterLabelStyle          string
-	LogoLabelStyle            string
-	BackdropLabelStyle        string
-	PosterBadgeDirection      string
-	PosterBadgeSplit          bool
-	PosterFit                 string
-	PosterBadgeSize           string
-	LogoBadgeSize             string
-	BackdropBadgeSize         string
-	BackdropPosition          string
-	BackdropBadgeDirection    string
-	EpisodeRatingsLimit       int32
-	EpisodeBadgeStyle         string
-	EpisodeLabelStyle         string
-	EpisodeBadgeSize          string
-	EpisodePosition           string
-	EpisodeBadgeDirection     string
-	EpisodeBlur               bool
-	PosterBadgeShape          string
-	LogoBadgeShape            string
-	BackdropBadgeShape        string
-	EpisodeBadgeShape         string
-	PosterBadgeBackground     string
-	LogoBadgeBackground       string
-	BackdropBadgeBackground   string
-	EpisodeBadgeBackground    string
-	BackdropEdgeInsetX        int32
-	BackdropEdgeInsetY        int32
+	APIKeyID                 int64  `json:"api_key_id"`
+	ImageSource              string `json:"image_source"`
+	Lang                     string `json:"lang"`
+	Textless                 bool   `json:"textless"`
+	RatingsLimit             int32  `json:"ratings_limit"`
+	RatingsOrder             string `json:"ratings_order"`
+	RatingsExclude           string `json:"ratings_exclude"`
+	PosterPosition           string `json:"poster_position"`
+	LogoRatingsLimit         int32  `json:"logo_ratings_limit"`
+	BackdropRatingsLimit     int32  `json:"backdrop_ratings_limit"`
+	PosterBadgeStyle         string `json:"poster_badge_style"`
+	LogoBadgeStyle           string `json:"logo_badge_style"`
+	BackdropBadgeStyle       string `json:"backdrop_badge_style"`
+	PosterLabelStyle         string `json:"poster_label_style"`
+	LogoLabelStyle           string `json:"logo_label_style"`
+	BackdropLabelStyle       string `json:"backdrop_label_style"`
+	PosterBadgeDirection     string `json:"poster_badge_direction"`
+	PosterBadgeSplit         bool   `json:"poster_badge_split"`
+	PosterFit                string `json:"poster_fit"`
+	PosterBadgeSize          string `json:"poster_badge_size"`
+	LogoBadgeSize            string `json:"logo_badge_size"`
+	BackdropBadgeSize        string `json:"backdrop_badge_size"`
+	BackdropPosition         string `json:"backdrop_position"`
+	BackdropBadgeDirection   string `json:"backdrop_badge_direction"`
+	EpisodeRatingsLimit      int32  `json:"episode_ratings_limit"`
+	EpisodeBadgeStyle        string `json:"episode_badge_style"`
+	EpisodeLabelStyle        string `json:"episode_label_style"`
+	EpisodeBadgeSize         string `json:"episode_badge_size"`
+	EpisodePosition          string `json:"episode_position"`
+	EpisodeBadgeDirection    string `json:"episode_badge_direction"`
+	EpisodeBlur              bool   `json:"episode_blur"`
+	PosterBadgeShape         string `json:"poster_badge_shape"`
+	LogoBadgeShape           string `json:"logo_badge_shape"`
+	BackdropBadgeShape       string `json:"backdrop_badge_shape"`
+	EpisodeBadgeShape        string `json:"episode_badge_shape"`
+	PosterBadgeBackground    string `json:"poster_badge_background"`
+	LogoBadgeBackground      string `json:"logo_badge_background"`
+	BackdropBadgeBackground  string `json:"backdrop_badge_background"`
+	EpisodeBadgeBackground   string `json:"episode_badge_background"`
+	BackdropEdgeInsetX       int32  `json:"backdrop_edge_inset_x"`
+	BackdropEdgeInsetY       int32  `json:"backdrop_edge_inset_y"`
 }
 
 func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {

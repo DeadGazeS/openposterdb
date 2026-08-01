@@ -256,12 +256,12 @@ func RefreshHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, refreshTok
 		return 401, nil, nil
 	}
 
-	_, _, err = services.FindAdminUserByID(db, stored.UserID)
+	username, _, err := services.FindAdminUserByID(db, stored.UserID)
 	if err != nil {
 		return 401, nil, nil
 	}
 
-	accessToken, rawRefresh, err := IssueTokenPair(db, jwtSecret, stored.UserID, "")
+	accessToken, rawRefresh, err := IssueTokenPair(db, jwtSecret, stored.UserID, username)
 	if err != nil {
 		return 500, nil, nil
 	}

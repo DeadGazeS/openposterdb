@@ -3,42 +3,17 @@ services:
     image: pnrxa/openposterdb:latest
     ports:
       - "3000:3000"
-    environment:
-      # Required
-      TMDB_API_KEY: "${TMDB_API_KEY:-}"
-      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env — generate with: openssl rand -hex 32}"
-
-      # At least one ratings source (MDBList, OMDb, or Trakt) is required —
-      # MDBList is preferred (covers 9 rating sources)
-      MDBLIST_API_KEY: ${MDBLIST_API_KEY:-}
-      # OMDb is also required for IMDB episode ratings (MDBList does not support episode-level ratings)
-      OMDB_API_KEY: ${OMDB_API_KEY:-}
-      # Trakt Client ID — Trakt community ratings for movies, shows, and episodes
-      TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID:-}
-
-      # Optional — enables Fanart.tv as an alternative or preferred image source
-      FANART_API_KEY: ${FANART_API_KEY:-}
-
-      # Optional
-      CORS_ORIGIN: ${CORS_ORIGIN:-}
-      COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      LISTEN_ADDR: 0.0.0.0:3000
-      CACHE_DIR: /data/cache
-      DB_DIR: /data/db
-      STATIC_DIR: /app/dist
-      IMAGE_QUALITY: ${IMAGE_QUALITY:-85}
-      IMAGE_MEM_CACHE_MB: ${IMAGE_MEM_CACHE_MB:-512}
-      RATINGS_STALE_SECS: ${RATINGS_STALE_SECS:-86400}
-      RATINGS_MAX_AGE_SECS: ${RATINGS_MAX_AGE_SECS:-31536000}
-      IMAGE_STALE_SECS: ${IMAGE_STALE_SECS:-0}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      ENABLE_CDN_REDIRECTS: ${ENABLE_CDN_REDIRECTS:-false}
-      EXTERNAL_CACHE_ONLY: ${EXTERNAL_CACHE_ONLY:-false}
-      DISABLE_PUBLIC_PAGES: ${DISABLE_PUBLIC_PAGES:-false}
+    env_file:
+      - .env
     volumes:
       - openposterdb-data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/auth/status"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
 
 volumes:
   openposterdb-data:

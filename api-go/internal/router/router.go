@@ -240,9 +240,9 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleGetSettings(s.DB)(w, req)
+			handlers.HandleGetSettings(s.DB, s.isFreeAPIKeyEnabled(), s.Config.FreeKeyEnabled != nil, s.Fanart != nil)(w, req)
 		case http.MethodPut:
-			handlers.HandleUpdateSettings(s.DB)(w, req)
+			handlers.HandleUpdateSettings(s.DB, s.Config.FreeKeyEnabled != nil)(w, req)
 		default:
 			writeError(w, 405, "Method not allowed")
 		}
@@ -312,7 +312,7 @@ func (r *Router) registerRoutes() {
 		handlers.HandleImageFile(s.DB, s.Config.CacheDir, "p", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
 	}))
 	r.mux.Handle("/api/admin/posters/{id_type}/{id_value}/fetch", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		handlers.HandleFetchImage(s.DB, s.Config.CacheDir, "p", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
+		handlers.HandleFetchImage(s.DB, s.imageServeConfig(), s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, "p", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
 	}))
 	r.mux.Handle("/api/admin/logos/{id_type}/{id_value}", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		idT, idV := req.PathValue("id_type"), req.PathValue("id_value")
@@ -326,7 +326,7 @@ func (r *Router) registerRoutes() {
 		}
 	}))
 	r.mux.Handle("/api/admin/logos/{id_type}/{id_value}/fetch", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		handlers.HandleFetchImage(s.DB, s.Config.CacheDir, "l", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
+		handlers.HandleFetchImage(s.DB, s.imageServeConfig(), s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, "l", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
 	}))
 	r.mux.Handle("/api/admin/backdrops/{id_type}/{id_value}", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		idT, idV := req.PathValue("id_type"), req.PathValue("id_value")
@@ -340,7 +340,7 @@ func (r *Router) registerRoutes() {
 		}
 	}))
 	r.mux.Handle("/api/admin/backdrops/{id_type}/{id_value}/fetch", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		handlers.HandleFetchImage(s.DB, s.Config.CacheDir, "b", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
+		handlers.HandleFetchImage(s.DB, s.imageServeConfig(), s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, "b", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
 	}))
 	r.mux.Handle("/api/admin/episodes/{id_type}/{id_value}", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		idT, idV := req.PathValue("id_type"), req.PathValue("id_value")
@@ -354,7 +354,7 @@ func (r *Router) registerRoutes() {
 		handlers.HandleImageFile(s.DB, s.Config.CacheDir, "e", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
 	}))
 	r.mux.Handle("/api/admin/episodes/{id_type}/{id_value}/fetch", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		handlers.HandleFetchImage(s.DB, s.Config.CacheDir, "e", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
+		handlers.HandleFetchImage(s.DB, s.imageServeConfig(), s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, "e", req.PathValue("id_type"), req.PathValue("id_value"))(w, req)
 	}))
 
 	// Key self-service preview routes
@@ -382,7 +382,31 @@ func (r *Router) registerRoutes() {
 		case http.MethodPut:
 			var update services.ServiceKeysUpdate
 			decodeJSON(req, &update)
-			s.ServiceKeys.UpdateKeys(&update)
+
+			validators := []struct {
+				name  string
+				value *string
+			}{
+				{"tmdb", update.TMDB},
+				{"mdblist", update.MDBList},
+				{"omdb", update.OMDB},
+				{"fanart", update.Fanart},
+				{"trakt", update.Trakt},
+			}
+			for _, v := range validators {
+				if v.value == nil || strings.TrimSpace(*v.value) == "" {
+					continue
+				}
+				if err := services.ValidateServiceKeyString(v.name, *v.value, s.HTTPClient); err != nil {
+					writeError(w, 400, v.name+": "+err.Error())
+					return
+				}
+			}
+
+			if err := s.ServiceKeys.UpdateKeys(&update); err != nil {
+				writeError(w, 500, "failed to update keys: "+err.Error())
+				return
+			}
 			s.SetupTMDB(s.ServiceKeys.TMDBKey())
 			s.SetupOMDB(s.ServiceKeys.OMDBKeys())
 			s.SetupMDBList(s.ServiceKeys.MDBListKeys())
@@ -397,7 +421,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("/api/free-key/settings", handlers.HandleFreeKeySettings(s.DB, s.isFreeAPIKeyEnabled))
 
 	// Image/isValid routes via catch-all
-	imageHandler := handlers.HandleImage(s.DB, s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, s.isFreeAPIKeyEnabled)
+	imageHandler := handlers.HandleImage(s.DB, s.imageServeConfig(), s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, s.isFreeAPIKeyEnabled)
 	isValidHandler := handlers.HandleIsValid(s.DB, s.isFreeAPIKeyEnabled)
 	r.mux.HandleFunc("/{apiKey}/{rest...}", func(w http.ResponseWriter, req *http.Request) {
 		rest := req.PathValue("rest")
@@ -462,6 +486,17 @@ func (s *AppState) isFreeAPIKeyEnabled() bool {
 	}
 	val, _ := services.GetGlobalSetting(s.DB, "free_api_key_enabled")
 	return val == "true"
+}
+
+func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {
+	return &handlers.ImageServeConfig{
+		CacheDir:            s.Config.CacheDir,
+		ExternalCacheOnly:   s.Config.ExternalCacheOnly,
+		RatingsMinStaleSecs: s.Config.RatingsMinStaleSecs,
+		RatingsMaxAgeSecs:   s.Config.RatingsMaxAgeSecs,
+		ImageStaleSecs:      s.Config.ImageStaleSecs,
+		ImageQuality:        s.Config.ImageQuality,
+	}
 }
 
 func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {

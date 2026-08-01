@@ -27,16 +27,14 @@ var jwtSecret []byte
 var secureCookies bool
 
 func init() {
+	setupLogging(os.Getenv("LOG_LEVEL"))
 	jwtSecret = loadJWTSecret()
 	secureCookies = loadSecureCookies()
 }
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
-
 	cfg := config.FromEnv()
+	setupLogging(cfg.LogLevel)
 	logConfig(cfg)
 
 	dbPath, dbDir := getDBPaths()
@@ -156,8 +154,30 @@ func main() {
 	slog.Info("server stopped")
 }
 
-func loadJWTSecret() []byte {
-	hexStr := os.Getenv("JWT_SECRET")
+func setupLogging(level string) {
+	level = strings.TrimSpace(level)
+	if i := strings.IndexAny(level, " \t("); i >= 0 {
+		level = level[:i]
+	}
+	var slogLevel slog.Level
+	switch strings.ToLower(level) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "warn", "warning":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	case "off", "none":
+		slogLevel = slog.Level(1000)
+	default:
+		slogLevel = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slogLevel,
+	})))
+}
+
+func loadJWTSecret() []byte {	hexStr := os.Getenv("JWT_SECRET")
 	if hexStr == "" {
 		slog.Error("JWT_SECRET is not set. This is required.\n" +
 			"Generate one with: openssl rand -hex 32\n" +
@@ -292,6 +312,7 @@ func logConfig(cfg *config.Config) {
 		"cdn_redirects", cfg.EnableCDNRedirects,
 		"external_cache_only", cfg.ExternalCacheOnly,
 		"free_key_enabled", cfg.FreeKeyEnabled,
+		"log_level", cfg.LogLevel,
 	)
 }
 

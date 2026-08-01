@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -342,4 +343,108 @@ func parseKeys(keys string) []string {
 		}
 	}
 	return result
+}
+
+// ParseServiceKeys is the exported form of parseKeys.
+func ParseServiceKeys(keys string) []string {
+	return parseKeys(keys)
+}
+
+// ValidateServiceKeyString validates a comma-separated service key value before
+// saving it. It rejects clearly-malformed input (empty entries when a value was
+// provided, duplicates, whitespace garbage) and performs a live check against
+// the provider for a definitive answer. Network/provider errors and rate limits
+// are tolerated (the key is accepted) — only a clear 401/403 rejects the key.
+func ValidateServiceKeyString(service, value string, httpClient *http.Client) error {
+	rawKeys := parseKeys(value)
+	if len(rawKeys) == 0 {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		return fmt.Errorf("value contained no usable keys")
+	}
+
+	seen := make(map[string]bool)
+	for _, k := range rawKeys {
+		if k == "" {
+			return fmt.Errorf("contains an empty key")
+		}
+		if seen[k] {
+			return fmt.Errorf("duplicate key: %s", MaskKey(k))
+		}
+		seen[k] = true
+		if err := ValidateServiceKey(service, k, httpClient); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateServiceKey performs a live check against the provider for a single key.
+// Only a definitive 401/403 is treated as invalid; network errors, 5xx, and rate
+// limits are tolerated so flaky providers don't block saving a good key.
+func ValidateServiceKey(service, key string, httpClient *http.Client) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	if len(key) < 6 {
+		return fmt.Errorf("key is too short (%d chars)", len(key))
+	}
+
+	switch service {
+	case "tmdb":
+		return checkProviderURL(httpClient, "https://api.themoviedb.org/3/configuration?api_key="+key, "TMDB")
+	case "omdb":
+		return checkProviderURL(httpClient, "https://www.omdbapi.com/?apikey="+key+"&i=tt3896198", "OMDb")
+	case "mdblist":
+		return checkProviderURL(httpClient, "https://api.mdblist.com/tmdb/movie/1?apikey="+key, "MDBList")
+	case "fanart":
+		return checkProviderURL(httpClient, "https://webservice.fanart.tv/v3/movies/550?api_key="+key, "Fanart.tv")
+	case "trakt":
+		return checkTraktClientID(httpClient, key)
+	}
+	return nil
+}
+
+func checkProviderURL(httpClient *http.Client, url, service string) error {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "openposterdb/1.2.1")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Warn("service key validation request failed", "service", service, "error", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("invalid key (HTTP %d)", resp.StatusCode)
+	}
+	return nil
+}
+
+func checkTraktClientID(httpClient *http.Client, clientID string) error {
+	req, err := http.NewRequest("GET", "https://api.trakt.tv/movies/tt3896198", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("trakt-api-version", "2")
+	req.Header.Set("trakt-api-key", clientID)
+	req.Header.Set("User-Agent", "openposterdb/1.2.1")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Warn("service key validation request failed", "service", "trakt", "error", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("invalid Client ID (HTTP %d)", resp.StatusCode)
+	}
+	return nil
 }

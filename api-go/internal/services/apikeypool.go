@@ -9,7 +9,7 @@ import (
 )
 
 const rotationCooldown = 24 * time.Hour
-const maxConsecutive429s = 3
+const maxConsecutive429s = 1
 
 func hashKey(key string) string {
 	h := sha256.Sum256([]byte(key))

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	apperr "openposterdb/internal/errors"
+	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
 
@@ -193,59 +195,312 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		posterFit = services.PosterFit(*query.Fit)
 	}
 
-	ratingsSuffix := services.RatingsCacheSuffix(ratingsOrder, ratingsExclude, ratingsLimit)
 	settings := previewRenderSettings("poster", badgeStyle, labelStyle, badgeSize, position, badgeDirection, appearance, ratingsLimit, ratingsOrder, ratingsExclude)
 	settings.PosterBadgeSplit = split
 	settings.PosterFit = posterFit
 
-	_ = ratingsSuffix
-	_ = settings
-	_ = targetWidth
-	_ = badgeScale
+	badges := sampleBadges()
+	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
+
+	f := image.GetFontFace()
+	if f == nil {
+		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		return
+	}
+
+	rendered, err := image.RenderPosterSync(image.SamplePosterPNG, badges, f, f, p.cfg.ImageQuality,
+		position, badgeStyle, labelStyle, appearance, badgeDirection,
+		targetWidth, badgeScale, badgeSize, split, posterFit)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write(rendered)
+}
+
+func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
+	query := parseImageQuery(r)
+
+	imageSize, err := parsePreviewImageSize(query.ImageSize, "logo")
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	resolvedSize := services.ImageSizeMedium
+	if imageSize != nil {
+		resolvedSize = *imageSize
+	}
+
+	badgeSize := services.BadgeSizeMedium
+	if query.BadgeSize != nil {
+		badgeSize = services.BadgeSize(*query.BadgeSize)
+	}
+
+	targetWidth := resolvedSize.LogoTargetWidth()
+	badgeScale := resolvedSize.BadgeScale("logo") * badgeSize.ScaleFactor()
+
+	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
+	if query.RatingsLimit != nil {
+		ratingsLimit = *query.RatingsLimit
+	}
+	services.ValidateRatingsLimit(ratingsLimit)
+
+	defaultOrder := services.DefaultRatingsOrder()
+	ratingsOrder := defaultOrder
+	if query.RatingsOrder != nil && *query.RatingsOrder != "" {
+		ratingsOrder = *query.RatingsOrder
+	}
+
+	ratingsExclude := ""
+	if query.RatingsExclude != nil {
+		ratingsExclude = *query.RatingsExclude
+	}
+
+	rawBadgeStyle := services.BadgeStyleHorizontal
+	if query.BadgeStyle != nil {
+		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
+	}
+
+	labelStyle := services.LabelStyleOfficial
+	if query.LabelStyle != nil {
+		labelStyle = services.LabelStyle(*query.LabelStyle)
+	}
+
+	badgeStyle := rawBadgeStyle.Resolve(services.BadgeDirectionHorizontal)
+
+	shape := services.BadgeShapeRounded
+	if query.BadgeShape != nil {
+		shape = services.BadgeShape(*query.BadgeShape)
+	}
+	background := services.BadgeBackgroundDefault
+	if query.BadgeBackground != nil {
+		background = services.BadgeBackground(*query.BadgeBackground)
+	}
+	appearance := services.BadgeAppearance{Shape: shape, Background: background}
 
 	badges := sampleBadges()
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 
-	_ = badges
-
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.WriteHeader(200)
-
-	slog.Info("preview poster requested", "badge_count", len(badges))
-}
-
-func (p *PreviewHandler) HandlePreview(w http.ResponseWriter, r *http.Request, kind string) {
-	_ = parseImageQuery(r)
-
-	badges := sampleBadges()
-	badgeCount := len(badges)
-
-	switch kind {
-	case "logo":
-		w.Header().Set("Content-Type", "image/png")
-	case "episode", "backdrop":
-		w.Header().Set("Content-Type", "image/jpeg")
+	f := image.GetFontFace()
+	if f == nil {
+		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		return
 	}
 
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	writeJSON(w, 200, map[string]interface{}{
-		"kind":   kind,
-		"badges": badgeCount,
-		"note":   "preview rendering requires font + icon assets",
-	})
-}
+	rendered, err := image.RenderLogoSync(image.SampleLogoPNG, badges, f, f,
+		badgeStyle, labelStyle, appearance, targetWidth, badgeScale)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 
-func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
-	p.HandlePreview(w, r, "logo")
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write(rendered)
 }
 
 func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) {
-	p.HandlePreview(w, r, "backdrop")
+	query := parseImageQuery(r)
+
+	imageSize, err := parsePreviewImageSize(query.ImageSize, "backdrop")
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	resolvedSize := services.ImageSizeMedium
+	if imageSize != nil {
+		resolvedSize = *imageSize
+	}
+
+	badgeSize := services.BadgeSizeMedium
+	if query.BadgeSize != nil {
+		badgeSize = services.BadgeSize(*query.BadgeSize)
+	}
+
+	targetWidth := resolvedSize.BackdropTargetWidth()
+	badgeScale := resolvedSize.BadgeScale("backdrop") * badgeSize.ScaleFactor()
+
+	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
+	if query.RatingsLimit != nil {
+		ratingsLimit = *query.RatingsLimit
+	}
+	services.ValidateRatingsLimit(ratingsLimit)
+
+	defaultOrder := services.DefaultRatingsOrder()
+	ratingsOrder := defaultOrder
+	if query.RatingsOrder != nil && *query.RatingsOrder != "" {
+		ratingsOrder = *query.RatingsOrder
+	}
+
+	ratingsExclude := ""
+	if query.RatingsExclude != nil {
+		ratingsExclude = *query.RatingsExclude
+	}
+
+	position := services.PositionTopRight
+	if query.Position != nil {
+		position = services.BadgePosition(*query.Position)
+	}
+
+	badgeDirection := services.BadgeDirectionDefault.Resolve(position)
+	if query.BadgeDirection != nil {
+		badgeDirection = services.BadgeDirection(*query.BadgeDirection).Resolve(position)
+	}
+
+	rawBadgeStyle := services.BadgeStyleVertical
+	if query.BadgeStyle != nil {
+		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
+	}
+
+	labelStyle := services.LabelStyleOfficial
+	if query.LabelStyle != nil {
+		labelStyle = services.LabelStyle(*query.LabelStyle)
+	}
+
+	badgeStyle := rawBadgeStyle.Resolve(badgeDirection)
+
+	shape := services.BadgeShapeRounded
+	if query.BadgeShape != nil {
+		shape = services.BadgeShape(*query.BadgeShape)
+	}
+	background := services.BadgeBackgroundDefault
+	if query.BadgeBackground != nil {
+		background = services.BadgeBackground(*query.BadgeBackground)
+	}
+	appearance := services.BadgeAppearance{Shape: shape, Background: background}
+
+	edgeInsetX := int32(0)
+	if query.EdgeInsetX != nil {
+		edgeInsetX = *query.EdgeInsetX
+	}
+	edgeInsetY := int32(0)
+	if query.EdgeInsetY != nil {
+		edgeInsetY = *query.EdgeInsetY
+	}
+
+	badges := sampleBadges()
+	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
+
+	f := image.GetFontFace()
+	if f == nil {
+		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		return
+	}
+
+	rendered, err := image.RenderBackdropSync(image.SampleBackdropPNG, badges, f, f, p.cfg.ImageQuality,
+		position, badgeStyle, labelStyle, appearance, badgeDirection,
+		targetWidth, badgeScale, badgeSize, edgeInsetX, edgeInsetY)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write(rendered)
 }
 
 func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
-	p.HandlePreview(w, r, "episode")
+	query := parseImageQuery(r)
+
+	imageSize, err := parsePreviewImageSize(query.ImageSize, "episode")
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	resolvedSize := services.ImageSizeMedium
+	if imageSize != nil {
+		resolvedSize = *imageSize
+	}
+
+	badgeSize := services.BadgeSizeMedium
+	if query.BadgeSize != nil {
+		badgeSize = services.BadgeSize(*query.BadgeSize)
+	}
+
+	targetWidth := resolvedSize.EpisodeTargetWidth()
+	badgeScale := resolvedSize.BadgeScale("episode") * badgeSize.ScaleFactor()
+
+	ratingsLimit := int32(previewPosterRatingsLimit)
+	if query.RatingsLimit != nil {
+		ratingsLimit = *query.RatingsLimit
+	}
+	services.ValidateRatingsLimit(ratingsLimit)
+
+	defaultOrder := services.DefaultRatingsOrder()
+	ratingsOrder := defaultOrder
+	if query.RatingsOrder != nil && *query.RatingsOrder != "" {
+		ratingsOrder = *query.RatingsOrder
+	}
+
+	ratingsExclude := ""
+	if query.RatingsExclude != nil {
+		ratingsExclude = *query.RatingsExclude
+	}
+
+	position := services.PositionTopRight
+	if query.Position != nil {
+		position = services.BadgePosition(*query.Position)
+	}
+
+	badgeDirection := services.BadgeDirectionVertical.Resolve(position)
+	if query.BadgeDirection != nil {
+		badgeDirection = services.BadgeDirection(*query.BadgeDirection).Resolve(position)
+	}
+
+	rawBadgeStyle := services.BadgeStyleVertical
+	if query.BadgeStyle != nil {
+		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
+	}
+
+	labelStyle := services.LabelStyleOfficial
+	if query.LabelStyle != nil {
+		labelStyle = services.LabelStyle(*query.LabelStyle)
+	}
+
+	badgeStyle := rawBadgeStyle.Resolve(badgeDirection)
+
+	shape := services.BadgeShapeRounded
+	if query.BadgeShape != nil {
+		shape = services.BadgeShape(*query.BadgeShape)
+	}
+	background := services.BadgeBackgroundDefault
+	if query.BadgeBackground != nil {
+		background = services.BadgeBackground(*query.BadgeBackground)
+	}
+	appearance := services.BadgeAppearance{Shape: shape, Background: background}
+
+	blur := false
+	if query.Blur != nil {
+		blur = *query.Blur
+	}
+
+	badges := sampleBadges()
+	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
+
+	f := image.GetFontFace()
+	if f == nil {
+		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		return
+	}
+
+	rendered, err := image.RenderEpisodeSync(image.SampleBackdropPNG, badges, f, f, p.cfg.ImageQuality,
+		position, badgeStyle, labelStyle, appearance, badgeDirection,
+		targetWidth, badgeScale, badgeSize, blur)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write(rendered)
 }
 
 // --- Admin image list/file serving ---
@@ -288,21 +543,68 @@ func HandleImageFile(db *sql.DB, cacheDir string, imageType, idType, idValue str
 	}
 }
 
-func HandleFetchImage(db *sql.DB, cacheDir string, imageType, idType, idValue string) http.HandlerFunc {
+func HandleFetchImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClient, omdb *services.OmdbClient, mdblist *services.MdblistClient, trakt *services.TraktClient, fanart *services.FanartClient, imageType, idType, idValue string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, 405, "Method not allowed")
 			return
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
-			"status":   "ok",
-			"note":     "fetch triggered",
-			"id_type":  idType,
-			"id_value": idValue,
-			"image_type": imageType,
-		})
+		if err := services.ValidateIDValue(idValue); err != nil {
+			writeError(w, 400, "invalid id value")
+			return
+		}
+
+		if tmdb == nil {
+			writeError(w, 503, "TMDB API key not configured — image generation unavailable")
+			return
+		}
+
+		kind, ok := kindFromType(imageType)
+		if !ok {
+			writeError(w, 400, "invalid image type")
+			return
+		}
+
+		slog.Debug("admin fetch requested", "kind", kind, "id", idType+"/"+idValue)
+
+		globals, _ := services.GetGlobalSettings(db)
+		settings := services.ParseGlobalRenderSettings(globals)
+
+		bytes, contentType, err := image.ServeImage(
+			db, tmdb, omdb, mdblist, trakt, fanart,
+			idType, idValue, kind, &settings,
+			cfg.CacheDir, cfg.ExternalCacheOnly,
+			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
+			cfg.ImageQuality, nil,
+		)
+		if err != nil {
+			if appErr, ok := err.(*apperr.AppError); ok {
+				writeError(w, appErr.Status, appErr.Message)
+			} else {
+				writeError(w, 500, err.Error())
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
+		w.Write(bytes)
 	}
+}
+
+func kindFromType(imageType string) (string, bool) {
+	switch imageType {
+	case "p":
+		return "poster", true
+	case "l":
+		return "logo", true
+	case "b":
+		return "backdrop", true
+	case "e":
+		return "episode", true
+	}
+	return "", false
 }
 
 func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCacheOnly bool) http.HandlerFunc {
