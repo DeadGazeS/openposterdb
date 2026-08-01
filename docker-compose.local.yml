@@ -1,0 +1,6 @@
+services:
+  openposterdb:
+    container_name: openposterdb
+    build:
+      context: .
+      dockerfile: Containerfile
