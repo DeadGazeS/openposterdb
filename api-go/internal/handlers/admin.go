@@ -24,13 +24,13 @@ func HandleStats(db *sql.DB) http.HandlerFunc {
 		apiKeyCount, _ := services.CountAPIKeys(db)
 
 		writeJSON(w, 200, map[string]interface{}{
-			"total_images":           posterCount + logoCount + backdropCount + episodeCount,
-			"total_api_keys":          apiKeyCount,
-			"cached_posters":         posterCount,
-			"cached_logos":           logoCount,
-			"cached_backdrops":       backdropCount,
-			"cached_episodes":        episodeCount,
-			"api_key_count":          apiKeyCount,
+			"total_images":     posterCount + logoCount + backdropCount + episodeCount,
+			"total_api_keys":   apiKeyCount,
+			"cached_posters":   posterCount,
+			"cached_logos":     logoCount,
+			"cached_backdrops": backdropCount,
+			"cached_episodes":  episodeCount,
+			"api_key_count":    apiKeyCount,
 		})
 	}
 }
@@ -50,97 +50,113 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 		s := services.ParseGlobalRenderSettings(globals)
 
 		writeJSON(w, 200, map[string]interface{}{
-			"image_source":               string(s.ImageSource),
-			"lang":                       s.Lang,
-			"textless":                   s.Textless,
-			"fanart_available":           fanartAvailable,
-			"ratings_limit":              s.RatingsLimit,
-			"ratings_order":              s.RatingsOrder,
-			"ratings_exclude":            s.RatingsExclude,
-			"free_api_key_enabled":       freeKeyEnabled,
-			"free_api_key_locked":        freeKeyLocked,
-			"poster_position":            string(s.PosterPosition),
-			"logo_ratings_limit":         s.LogoRatingsLimit,
-			"backdrop_ratings_limit":     s.BackdropRatingsLimit,
-			"poster_badge_style":         string(s.PosterBadgeStyle),
-			"logo_badge_style":           string(s.LogoBadgeStyle),
-			"backdrop_badge_style":       string(s.BackdropBadgeStyle),
-			"poster_label_style":         string(s.PosterLabelStyle),
-			"logo_label_style":           string(s.LogoLabelStyle),
-			"backdrop_label_style":       string(s.BackdropLabelStyle),
-			"poster_badge_direction":     string(s.PosterBadgeDirection),
-			"poster_badge_split":         s.PosterBadgeSplit,
-			"poster_fit":                 string(s.PosterFit),
-			"poster_badge_size":          string(s.PosterBadgeSize),
-			"logo_badge_size":            string(s.LogoBadgeSize),
-			"backdrop_badge_size":        string(s.BackdropBadgeSize),
-			"backdrop_position":          string(s.BackdropPosition),
-			"backdrop_badge_direction":   string(s.BackdropBadgeDirection),
-			"backdrop_edge_inset_x":      s.BackdropEdgeInsetX,
-			"backdrop_edge_inset_y":      s.BackdropEdgeInsetY,
-			"episode_ratings_limit":      s.EpisodeRatingsLimit,
-			"episode_badge_style":        string(s.EpisodeBadgeStyle),
-			"episode_label_style":        string(s.EpisodeLabelStyle),
-			"episode_badge_size":         string(s.EpisodeBadgeSize),
-			"episode_position":           string(s.EpisodePosition),
-			"episode_badge_direction":    string(s.EpisodeBadgeDirection),
-			"episode_blur":               s.EpisodeBlur,
-			"poster_badge_shape":         string(s.PosterBadgeShape),
-			"logo_badge_shape":           string(s.LogoBadgeShape),
-			"backdrop_badge_shape":       string(s.BackdropBadgeShape),
-			"episode_badge_shape":        string(s.EpisodeBadgeShape),
-			"poster_badge_alpha":         int32(s.PosterBadgeAlpha),
-			"logo_badge_alpha":           int32(s.LogoBadgeAlpha),
-			"backdrop_badge_alpha":       int32(s.BackdropBadgeAlpha),
-			"episode_badge_alpha":        int32(s.EpisodeBadgeAlpha),
-			"colors":                     services.EffectiveSourceColors(&s),
+			"image_source":             string(s.ImageSource),
+			"lang":                     s.Lang,
+			"textless":                 s.Textless,
+			"fanart_available":         fanartAvailable,
+			"ratings_limit":            s.RatingsLimit,
+			"ratings_order":            s.RatingsOrder,
+			"ratings_exclude":          s.RatingsExclude,
+			"free_api_key_enabled":     freeKeyEnabled,
+			"free_api_key_locked":      freeKeyLocked,
+			"poster_position":          string(s.PosterPosition),
+			"logo_ratings_limit":       s.LogoRatingsLimit,
+			"backdrop_ratings_limit":   s.BackdropRatingsLimit,
+			"poster_badge_style":       string(s.PosterBadgeStyle),
+			"logo_badge_style":         string(s.LogoBadgeStyle),
+			"backdrop_badge_style":     string(s.BackdropBadgeStyle),
+			"poster_label_style":       string(s.PosterLabelStyle),
+			"logo_label_style":         string(s.LogoLabelStyle),
+			"backdrop_label_style":     string(s.BackdropLabelStyle),
+			"poster_badge_direction":   string(s.PosterBadgeDirection),
+			"poster_badge_split":       s.PosterBadgeSplit,
+			"poster_fit":               string(s.PosterFit),
+			"poster_text_size":         int32(s.PosterTextSize),
+			"logo_text_size":           int32(s.LogoTextSize),
+			"backdrop_text_size":       int32(s.BackdropTextSize),
+			"poster_badge_size":        int32(s.PosterBadgeSize),
+			"logo_badge_size":          int32(s.LogoBadgeSize),
+			"backdrop_badge_size":      int32(s.BackdropBadgeSize),
+			"poster_logo_size":         int32(s.PosterLogoSize),
+			"logo_logo_size":           int32(s.LogoLogoSize),
+			"backdrop_logo_size":       int32(s.BackdropLogoSize),
+			"backdrop_position":        string(s.BackdropPosition),
+			"backdrop_badge_direction": string(s.BackdropBadgeDirection),
+			"backdrop_edge_inset_x":    s.BackdropEdgeInsetX,
+			"backdrop_edge_inset_y":    s.BackdropEdgeInsetY,
+			"episode_ratings_limit":    s.EpisodeRatingsLimit,
+			"episode_badge_style":      string(s.EpisodeBadgeStyle),
+			"episode_label_style":      string(s.EpisodeLabelStyle),
+			"episode_text_size":        int32(s.EpisodeTextSize),
+			"episode_badge_size":       int32(s.EpisodeBadgeSize),
+			"episode_logo_size":        int32(s.EpisodeLogoSize),
+			"episode_position":         string(s.EpisodePosition),
+			"episode_badge_direction":  string(s.EpisodeBadgeDirection),
+			"episode_blur":             s.EpisodeBlur,
+			"poster_badge_shape":       string(s.PosterBadgeShape),
+			"logo_badge_shape":         string(s.LogoBadgeShape),
+			"backdrop_badge_shape":     string(s.BackdropBadgeShape),
+			"episode_badge_shape":      string(s.EpisodeBadgeShape),
+			"poster_badge_alpha":       int32(s.PosterBadgeAlpha),
+			"logo_badge_alpha":         int32(s.LogoBadgeAlpha),
+			"backdrop_badge_alpha":     int32(s.BackdropBadgeAlpha),
+			"episode_badge_alpha":      int32(s.EpisodeBadgeAlpha),
+			"colors":                   services.EffectiveSourceColors(&s),
 		})
 	}
 }
 
 type updateSettingsRequest struct {
-	ImageSource             *string `json:"image_source"`
-	Lang                    *string `json:"lang"`
-	Textless                *bool   `json:"textless"`
-	RatingsLimit            *int32  `json:"ratings_limit"`
-	RatingsOrder            *string `json:"ratings_order"`
-	RatingsExclude          *string `json:"ratings_exclude"`
-	FreeAPIKeyEnabled       *bool   `json:"free_api_key_enabled"`
-	PosterPosition          *string `json:"poster_position"`
-	LogoRatingsLimit        *int32  `json:"logo_ratings_limit"`
-	BackdropRatingsLimit    *int32  `json:"backdrop_ratings_limit"`
-	PosterBadgeStyle        *string `json:"poster_badge_style"`
-	LogoBadgeStyle          *string `json:"logo_badge_style"`
-	BackdropBadgeStyle      *string `json:"backdrop_badge_style"`
-	PosterLabelStyle        *string `json:"poster_label_style"`
-	LogoLabelStyle          *string `json:"logo_label_style"`
-	BackdropLabelStyle      *string `json:"backdrop_label_style"`
-	PosterBadgeDirection    *string `json:"poster_badge_direction"`
-	PosterBadgeSplit        *bool   `json:"poster_badge_split"`
-	PosterFit               *string `json:"poster_fit"`
-	PosterBadgeSize         *string `json:"poster_badge_size"`
-	LogoBadgeSize           *string `json:"logo_badge_size"`
-	BackdropBadgeSize       *string `json:"backdrop_badge_size"`
-	BackdropPosition        *string `json:"backdrop_position"`
-	BackdropBadgeDirection  *string `json:"backdrop_badge_direction"`
-	BackdropEdgeInsetX      *int32  `json:"backdrop_edge_inset_x"`
-	BackdropEdgeInsetY      *int32  `json:"backdrop_edge_inset_y"`
-	EpisodeRatingsLimit     *int32  `json:"episode_ratings_limit"`
-	EpisodeBadgeStyle       *string `json:"episode_badge_style"`
-	EpisodeLabelStyle       *string `json:"episode_label_style"`
-	EpisodeBadgeSize        *string `json:"episode_badge_size"`
-	EpisodePosition         *string `json:"episode_position"`
-	EpisodeBadgeDirection   *string `json:"episode_badge_direction"`
-	EpisodeBlur             *bool   `json:"episode_blur"`
-	PosterBadgeShape        *string `json:"poster_badge_shape"`
-	LogoBadgeShape          *string `json:"logo_badge_shape"`
-	BackdropBadgeShape      *string `json:"backdrop_badge_shape"`
-	EpisodeBadgeShape       *string `json:"episode_badge_shape"`
-	PosterBadgeAlpha        *int32  `json:"poster_badge_alpha"`
-	LogoBadgeAlpha          *int32  `json:"logo_badge_alpha"`
-	BackdropBadgeAlpha      *int32  `json:"backdrop_badge_alpha"`
-	EpisodeBadgeAlpha       *int32  `json:"episode_badge_alpha"`
-	Colors                  *map[string]services.SourceColorSet `json:"colors"`
+	ImageSource            *string                             `json:"image_source"`
+	Lang                   *string                             `json:"lang"`
+	Textless               *bool                               `json:"textless"`
+	RatingsLimit           *int32                              `json:"ratings_limit"`
+	RatingsOrder           *string                             `json:"ratings_order"`
+	RatingsExclude         *string                             `json:"ratings_exclude"`
+	FreeAPIKeyEnabled      *bool                               `json:"free_api_key_enabled"`
+	PosterPosition         *string                             `json:"poster_position"`
+	LogoRatingsLimit       *int32                              `json:"logo_ratings_limit"`
+	BackdropRatingsLimit   *int32                              `json:"backdrop_ratings_limit"`
+	PosterBadgeStyle       *string                             `json:"poster_badge_style"`
+	LogoBadgeStyle         *string                             `json:"logo_badge_style"`
+	BackdropBadgeStyle     *string                             `json:"backdrop_badge_style"`
+	PosterLabelStyle       *string                             `json:"poster_label_style"`
+	LogoLabelStyle         *string                             `json:"logo_label_style"`
+	BackdropLabelStyle     *string                             `json:"backdrop_label_style"`
+	PosterBadgeDirection   *string                             `json:"poster_badge_direction"`
+	PosterBadgeSplit       *bool                               `json:"poster_badge_split"`
+	PosterFit              *string                             `json:"poster_fit"`
+	PosterTextSize         *int32                              `json:"poster_text_size"`
+	LogoTextSize           *int32                              `json:"logo_text_size"`
+	BackdropTextSize       *int32                              `json:"backdrop_text_size"`
+	PosterBadgeSize        *int32                              `json:"poster_badge_size"`
+	LogoBadgeSize          *int32                              `json:"logo_badge_size"`
+	BackdropBadgeSize      *int32                              `json:"backdrop_badge_size"`
+	PosterLogoSize         *int32                              `json:"poster_logo_size"`
+	LogoLogoSize           *int32                              `json:"logo_logo_size"`
+	BackdropLogoSize       *int32                              `json:"backdrop_logo_size"`
+	BackdropPosition       *string                             `json:"backdrop_position"`
+	BackdropBadgeDirection *string                             `json:"backdrop_badge_direction"`
+	BackdropEdgeInsetX     *int32                              `json:"backdrop_edge_inset_x"`
+	BackdropEdgeInsetY     *int32                              `json:"backdrop_edge_inset_y"`
+	EpisodeRatingsLimit    *int32                              `json:"episode_ratings_limit"`
+	EpisodeBadgeStyle      *string                             `json:"episode_badge_style"`
+	EpisodeLabelStyle      *string                             `json:"episode_label_style"`
+	EpisodeTextSize        *int32                              `json:"episode_text_size"`
+	EpisodeBadgeSize       *int32                              `json:"episode_badge_size"`
+	EpisodeLogoSize        *int32                              `json:"episode_logo_size"`
+	EpisodePosition        *string                             `json:"episode_position"`
+	EpisodeBadgeDirection  *string                             `json:"episode_badge_direction"`
+	EpisodeBlur            *bool                               `json:"episode_blur"`
+	PosterBadgeShape       *string                             `json:"poster_badge_shape"`
+	LogoBadgeShape         *string                             `json:"logo_badge_shape"`
+	BackdropBadgeShape     *string                             `json:"backdrop_badge_shape"`
+	EpisodeBadgeShape      *string                             `json:"episode_badge_shape"`
+	PosterBadgeAlpha       *int32                              `json:"poster_badge_alpha"`
+	LogoBadgeAlpha         *int32                              `json:"logo_badge_alpha"`
+	BackdropBadgeAlpha     *int32                              `json:"backdrop_badge_alpha"`
+	EpisodeBadgeAlpha      *int32                              `json:"episode_badge_alpha"`
+	Colors                 *map[string]services.SourceColorSet `json:"colors"`
 }
 
 func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
@@ -217,14 +233,32 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.PosterFit != nil {
 			s.PosterFit = services.PosterFit(*req.PosterFit)
 		}
+		if req.PosterTextSize != nil {
+			s.PosterTextSize = services.ClampScalePercent(*req.PosterTextSize)
+		}
+		if req.LogoTextSize != nil {
+			s.LogoTextSize = services.ClampScalePercent(*req.LogoTextSize)
+		}
+		if req.BackdropTextSize != nil {
+			s.BackdropTextSize = services.ClampScalePercent(*req.BackdropTextSize)
+		}
 		if req.PosterBadgeSize != nil {
-			s.PosterBadgeSize = services.BadgeSize(*req.PosterBadgeSize)
+			s.PosterBadgeSize = services.ClampScalePercent(*req.PosterBadgeSize)
 		}
 		if req.LogoBadgeSize != nil {
-			s.LogoBadgeSize = services.BadgeSize(*req.LogoBadgeSize)
+			s.LogoBadgeSize = services.ClampScalePercent(*req.LogoBadgeSize)
 		}
 		if req.BackdropBadgeSize != nil {
-			s.BackdropBadgeSize = services.BadgeSize(*req.BackdropBadgeSize)
+			s.BackdropBadgeSize = services.ClampScalePercent(*req.BackdropBadgeSize)
+		}
+		if req.PosterLogoSize != nil {
+			s.PosterLogoSize = services.ClampScalePercent(*req.PosterLogoSize)
+		}
+		if req.LogoLogoSize != nil {
+			s.LogoLogoSize = services.ClampScalePercent(*req.LogoLogoSize)
+		}
+		if req.BackdropLogoSize != nil {
+			s.BackdropLogoSize = services.ClampScalePercent(*req.BackdropLogoSize)
 		}
 		if req.BackdropPosition != nil {
 			s.BackdropPosition = services.BadgePosition(*req.BackdropPosition)
@@ -247,8 +281,14 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.EpisodeLabelStyle != nil {
 			s.EpisodeLabelStyle = services.LabelStyle(*req.EpisodeLabelStyle)
 		}
+		if req.EpisodeTextSize != nil {
+			s.EpisodeTextSize = services.ClampScalePercent(*req.EpisodeTextSize)
+		}
 		if req.EpisodeBadgeSize != nil {
-			s.EpisodeBadgeSize = services.BadgeSize(*req.EpisodeBadgeSize)
+			s.EpisodeBadgeSize = services.ClampScalePercent(*req.EpisodeBadgeSize)
+		}
+		if req.EpisodeLogoSize != nil {
+			s.EpisodeLogoSize = services.ClampScalePercent(*req.EpisodeLogoSize)
 		}
 		if req.EpisodePosition != nil {
 			s.EpisodePosition = services.BadgePosition(*req.EpisodePosition)

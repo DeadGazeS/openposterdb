@@ -115,7 +115,7 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 		}
 
 		appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
-		rendered := appimg.RenderBadgesUniform(row, valueFace, labelFace, labelStyle, appearance, 1.0, colors)
+		rendered := appimg.RenderBadgesUniform(row, valueFace, labelFace, labelStyle, appearance, 1.0, 1.0, colors)
 
 		var target *image.RGBA
 		for i, b := range row {

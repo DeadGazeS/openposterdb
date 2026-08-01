@@ -17,7 +17,7 @@ func TestBadgesAndOverlayAtScale(t *testing.T) {
 	lf := GetFontFace()
 	appearance := services.DefaultBadgeAppearance()
 	for _, scale := range []float32{1.0, 1.2} {
-		bis := RenderBadgesUniform(badges, vf, lf, services.LabelStyleText, appearance, scale, nil)
+		bis := RenderBadgesUniform(badges, vf, lf, services.LabelStyleText, appearance, scale, 1.0, nil)
 		t.Logf("scale=%v badge count=%d", scale, len(bis))
 		for i, bi := range bis {
 			b := bi.Bounds()
