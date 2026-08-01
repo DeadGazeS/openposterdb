@@ -358,6 +358,11 @@ func HandleImage(db *sql.DB, tmdb *services.TmdbClient, omdb *services.OmdbClien
 			return
 		}
 
+		if tmdb == nil {
+			writeError(w, 503, "TMDB API key not configured — image generation unavailable")
+			return
+		}
+
 		apiKey := r.PathValue("apiKey")
 		rest := r.PathValue("rest")
 
