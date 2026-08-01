@@ -715,11 +715,11 @@ impl BadgeSize {
 
     pub fn scale_factor(self) -> f32 {
         match self {
-            Self::ExtraSmall => 0.5,
-            Self::Small => 0.75,
-            Self::Medium => 1.0,
-            Self::Large => 1.25,
-            Self::ExtraLarge => 1.5,
+            Self::ExtraSmall => 0.7,
+            Self::Small => 0.95,
+            Self::Medium => 1.2,
+            Self::Large => 1.45,
+            Self::ExtraLarge => 1.7,
         }
     }
 
