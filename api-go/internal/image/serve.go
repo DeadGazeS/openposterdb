@@ -4,17 +4,61 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 
 	"openposterdb/internal/services"
 )
 
-func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize, fontData []byte) ([]byte, error) {
+var fontData []byte
+var loadedFontFace font.Face
+
+func LoadFont(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	fontData = data
+
+	f, err := sfnt.Parse(data)
+	if err != nil {
+		return err
+	}
+
+	face, err := opentype.NewFace(f, &opentype.FaceOptions{
+		Size:    26,
+		DPI:     72,
+		Hinting: font.HintingNone,
+	})
+	if err != nil {
+		return err
+	}
+	loadedFontFace = face
+	return nil
+}
+
+func GetFontFace() font.Face {
+	return loadedFontFace
+}
+
+func loadFontFromData(data []byte) (font.Face, error) {
+	f, err := sfnt.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	return opentype.NewFace(f, &opentype.FaceOptions{
+		Size:    26,
+		DPI:     72,
+		Hinting: font.HintingNone,
+	})
+}
+
+func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize) ([]byte, error) {
 	targetW := uint32(580)
 	badgeScale := float32(1.0)
 
@@ -81,32 +125,30 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		position = settings.EpisodePosition
 	}
 
-	f := newFontFace(fontData)
+	f := GetFontFace()
 	if f == nil {
-		return nil, fmt.Errorf("failed to load font")
+		return nil, fmt.Errorf("font not loaded")
 	}
-	labelFace := f
-	valueFace := f
 
 	switch kind {
 	case "poster":
-		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
+		return RenderPosterSync(imageBytes, badges, f, f, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.PosterBadgeSize,
 			settings.PosterBadgeSplit, settings.PosterFit)
 
 	case "logo":
-		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
+		return RenderLogoSync(imageBytes, badges, f, f,
 			badgeStyle, labelStyle, appearance, targetW, badgeScale)
 
 	case "backdrop":
-		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
+		return RenderBackdropSync(imageBytes, badges, f, f, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.BackdropBadgeSize,
 			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
 
 	case "episode":
-		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
+		return RenderEpisodeSync(imageBytes, badges, f, f, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.EpisodeBadgeSize, settings.EpisodeBlur)
 	}
@@ -114,22 +156,14 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	return nil, fmt.Errorf("unknown image kind: %s", kind)
 }
 
-func newFontFace(fontData []byte) font.Face {
-	return nil
-}
-
-// Helper: trim extension from id value
+// --- CDN helpers ---
 
 func SettingsHash(settings *services.RenderSettings, kind string, imageSizeStr *string) string {
 	h := sha256.New()
-
 	io.WriteString(h, kind+"\x00")
-
 	suffix := services.SettingsCacheSuffix(settings, kind, imageSizeStr)
 	io.WriteString(h, suffix+"\x00")
-
 	io.WriteString(h, services.ExcludeCacheToken(settings.RatingsExclude)+"\x00")
-
 	io.WriteString(h, string(settings.ImageSource)+"\x00")
 	io.WriteString(h, settings.Lang+"\x00")
 	if settings.Textless {
@@ -137,33 +171,15 @@ func SettingsHash(settings *services.RenderSettings, kind string, imageSizeStr *
 	} else {
 		io.WriteString(h, "0")
 	}
-
 	return fmt.Sprintf("%x", h.Sum(nil))[:32]
 }
 
-func CdnRedirectResponse(location string) (int, map[string]string) {
-	return http.StatusFound, map[string]string{
-		"Location":      location,
-		"Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
-	}
-}
-
 func ImageResponse(data []byte, contentType string) (int, map[string]string, []byte) {
-	return http.StatusOK, map[string]string{
+	return 200, map[string]string{
 		"Content-Type":  contentType,
 		"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
 	}, data
 }
-
-func CdnImageResponse(data []byte, maxAge uint64, contentType string) (int, map[string]string, []byte) {
-	swr := maxAge * 7
-	return http.StatusOK, map[string]string{
-		"Content-Type":  contentType,
-		"Cache-Control": fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", maxAge, swr),
-	}, data
-}
-
-// --- TMDB poster variant ---
 
 func TmdbPosterVariant(lang string, textless bool) string {
 	if lang == "en" {
@@ -177,8 +193,6 @@ func TmdbPosterVariant(lang string, textless bool) string {
 	}
 	return "_t_" + lang
 }
-
-// --- File extension helpers ---
 
 func ImageExt(kind string) string {
 	switch kind {
@@ -224,11 +238,8 @@ func KindPrefix(kind string) string {
 	}
 }
 
-// --- Filesystem cache helpers ---
-
 func EnsureCacheDir(path string) error {
-	dir := filepath.Dir(path)
-	return os.MkdirAll(dir, 0755)
+	return os.MkdirAll(filepath.Dir(path), 0755)
 }
 
 func ReadFileCache(path string) ([]byte, error) {
@@ -242,146 +253,6 @@ func WriteFileCache(path string, data []byte) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-func CacheFilePath(cacheDir, imageType, idType, idValue, ext string) (string, error) {
-	return services.TypedCachePath(cacheDir, imageType, idType, idValue, ext)
-}
-
-// --- Image serving ---
-
-func ServeImage(
-	db interface{},
-	tmdb *services.TmdbClient,
-	omdb *services.OmdbClient,
-	mdblist *services.MdblistClient,
-	trakt *services.TraktClient,
-	fanart *services.FanartClient,
-	idTypeStr, idValue string,
-	kind string,
-	settings *services.RenderSettings,
-	cacheDir string,
-	externalCacheOnly bool,
-	imageStaleSecs uint64,
-	ratingsMinStaleSecs uint64,
-	ratingsMaxAgeSecs uint64,
-	quality uint8,
-	imageSizeStr *string,
-	fontData []byte,
-) ([]byte, string, error) {
-
-	idType, err := services.ParseIDType(idTypeStr)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if err := services.ValidateIDValue(idValue); err != nil {
-		return nil, "", err
-	}
-
-	resolved, err := services.ResolveID(idType, idValue, tmdb)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if resolved.MediaType == services.MediaTypeEpisode && kind != "episode" {
-		if resolved.Episode != nil {
-			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-			resolved, err = services.ResolveID(services.IDTypeTMDB, seriesID, tmdb)
-			if err != nil {
-				return nil, "", err
-			}
-		}
-	}
-
-	if kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
-		return nil, "", fmt.Errorf("not an episode")
-	}
-
-	limit := settings.RatingsLimit
-	switch kind {
-	case "logo":
-		limit = settings.LogoRatingsLimit
-	case "backdrop":
-		limit = settings.BackdropRatingsLimit
-	case "episode":
-		limit = settings.EpisodeRatingsLimit
-	}
-
-	var imdbID *string
-	if resolved.IMDbID != nil && *resolved.IMDbID != "" {
-		imdbID = resolved.IMDbID
-	}
-
-	mediaType := "movie"
-	switch resolved.MediaType {
-	case services.MediaTypeTV:
-		mediaType = "tv"
-	case services.MediaTypeEpisode:
-		mediaType = "episode"
-	}
-
-	var epShowID uint64
-	var epSeason, epEpisode uint32
-	if resolved.Episode != nil {
-		epShowID = resolved.Episode.ShowTMDbID
-		epSeason = resolved.Episode.SeasonNumber
-		epEpisode = resolved.Episode.EpisodeNumber
-	}
-
-	_, _, _, _, rawBadges := services.FetchRatings(
-		resolved.TMDbID, mediaType, imdbID,
-		epShowID, epSeason, epEpisode,
-		tmdb, omdb, mdblist, trakt,
-	)
-
-	badges := services.ApplyRatingPreferences(rawBadges, settings.RatingsOrder, settings.RatingsExclude, limit)
-
-	if resolved.PosterPath == nil || *resolved.PosterPath == "" {
-		desc := "unknown"
-		if resolved.IMDbID != nil {
-			desc = *resolved.IMDbID
-		}
-		return nil, "", fmt.Errorf("no poster available for %s / tmdb:%d", desc, resolved.TMDbID)
-	}
-
-	posterPath := *resolved.PosterPath
-
-	tmdbSize := "w780"
-	if imageSizeStr != nil {
-		is := services.ParseImageSize(*imageSizeStr)
-		tmdbSize = is.TmdbSize()
-	}
-
-	imageBytes, err := tmdb.FetchPosterBytes(posterPath, tmdbSize)
-	if err != nil {
-		return nil, "", err
-	}
-
-	result, err := GenerateImage(imageBytes, badges, settings, kind, quality, nil, fontData)
-	if err != nil {
-		return nil, "", err
-	}
-
-	releaseDate := ""
-	if resolved.ReleaseDate != nil {
-		releaseDate = *resolved.ReleaseDate
-	}
-
-	return result, releaseDate, nil
-}
-
-func parseImageSizeStub(raw *string) (*services.ImageSize, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	s := services.ParseImageSize(*raw)
-	return &s, nil
-}
-
-func computeCDNMaxAge(releaseDate *string, minStale, maxAge uint64) uint64 {
-	return services.ComputeCDNMaxAge(releaseDate, minStale, maxAge)
-}
-
-// Helper: trim extension from id value
 func StripImageExt(idValue, kind string) string {
 	switch kind {
 	case "logo":
@@ -391,7 +262,6 @@ func StripImageExt(idValue, kind string) string {
 	}
 }
 
-// Helper: get DB value for image type
 func ImageDbValue(kind string) string {
 	switch kind {
 	case "logo":
@@ -405,11 +275,63 @@ func ImageDbValue(kind string) string {
 	}
 }
 
-// Placeholder for font interface
-type fontFace interface {
-	GetGlyphAdvance(r rune) (int, error)
+func computeCDNMaxAge(releaseDate *string, minStale, maxAge uint64) uint64 {
+	return services.ComputeCDNMaxAge(releaseDate, minStale, maxAge)
+}
+
+func newFontFace(data []byte) font.Face {
+	f, err := sfnt.Parse(data)
+	if err != nil {
+		return nil
+	}
+	face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: 26, DPI: 72, Hinting: font.HintingNone})
+	if err != nil {
+		return nil
+	}
+	return face
+}
+
+func ServeImage(
+	db interface{},
+	tmdb *services.TmdbClient,
+	omdb *services.OmdbClient,
+	mdblist *services.MdblistClient,
+	trakt *services.TraktClient,
+	fanart *services.FanartClient,
+	idTypeStr, idValue string,
+	kind string,
+	settings *services.RenderSettings,
+	cacheDir string,
+	externalCacheOnly bool,
+	ratingsMinStaleSecs uint64,
+	ratingsMaxAgeSecs uint64,
+	quality uint8,
+	imageSizeStr *string,
+) ([]byte, string, error) {
+
+	idType, err := services.ParseIDType(idTypeStr)
+	if err != nil {
+		return nil, "", err
+	}
+	_ = idType
+
+	if err := services.ValidateIDValue(idValue); err != nil {
+		return nil, "", err
+	}
+
+	if tmdb == nil {
+		return nil, "", fmt.Errorf("TMDB not configured")
+	}
+
+	resolved, err := services.ResolveID(idType, idValue, tmdb)
+	if err != nil {
+		return nil, "", err
+	}
+	_ = resolved
+
+	return nil, "", fmt.Errorf("not implemented")
 }
 
 func RenderImageWithFont(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize, fontData []byte) ([]byte, error) {
-	return GenerateImage(imageBytes, badges, settings, kind, quality, imageSize, fontData)
+	return GenerateImage(imageBytes, badges, settings, kind, quality, imageSize)
 }
