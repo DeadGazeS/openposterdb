@@ -98,15 +98,12 @@ func TestCommaSeparatedKeys(t *testing.T) {
 	}
 }
 
-func TestPanicsWithoutTMDBKey(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic without TMDB_API_KEY")
-		}
-	}()
-	// Clear the key if set by another test
+func TestTMDBKeyOptional(t *testing.T) {
 	os.Unsetenv("TMDB_API_KEY")
-	FromEnv()
+	cfg := FromEnv()
+	if cfg.TMDBAPIKey != "" {
+		t.Errorf("expected empty TMDB key, got %s", cfg.TMDBAPIKey)
+	}
 }
 
 func TestFreeKeyEnabled(t *testing.T) {
