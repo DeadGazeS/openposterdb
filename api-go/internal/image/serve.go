@@ -19,7 +19,14 @@ import (
 )
 
 var fontData []byte
-var loadedFontFace font.Face
+var loadedFont *sfnt.Font
+
+const (
+	// labelFontFaceSize is the point size for rating source labels.
+	labelFontFaceSize = 26.0
+	// valueFontFaceSize is the point size for rating values, ~10% larger.
+	valueFontFaceSize = 28.6
+)
 
 func LoadFont(path string) error {
 	data, err := os.ReadFile(path)
@@ -32,21 +39,38 @@ func LoadFont(path string) error {
 	if err != nil {
 		return err
 	}
+	loadedFont = f
+	return nil
+}
 
-	face, err := opentype.NewFace(f, &opentype.FaceOptions{
-		Size:    26,
+// GetFontFace returns a fresh font.Face at the label size. opentype.Face is
+// NOT safe for concurrent use — it owns a mutable sfnt.Buffer and rasterizer,
+// so a single shared face corrupted its glyph data under parallel requests
+// (panic: index out of range in sfnt.LoadGlyph). Each caller therefore gets
+// its own face; the underlying *sfnt.Font is immutable and safe to share.
+func GetFontFace() font.Face {
+	return newFace(labelFontFaceSize)
+}
+
+// GetValueFontFace returns a fresh font.Face at the value size (~10% larger
+// than the label size). See GetFontFace for the concurrency note.
+func GetValueFontFace() font.Face {
+	return newFace(valueFontFaceSize)
+}
+
+func newFace(size float64) font.Face {
+	if loadedFont == nil {
+		return nil
+	}
+	face, err := opentype.NewFace(loadedFont, &opentype.FaceOptions{
+		Size:    size,
 		DPI:     72,
 		Hinting: font.HintingNone,
 	})
 	if err != nil {
-		return err
+		return nil
 	}
-	loadedFontFace = face
-	return nil
-}
-
-func GetFontFace() font.Face {
-	return loadedFontFace
+	return face
 }
 
 func loadFontFromData(data []byte) (font.Face, error) {
@@ -128,30 +152,31 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		position = settings.EpisodePosition
 	}
 
-	f := GetFontFace()
-	if f == nil {
+	valueFace := GetValueFontFace()
+	labelFace := GetFontFace()
+	if valueFace == nil || labelFace == nil {
 		return nil, fmt.Errorf("font not loaded")
 	}
 
 	switch kind {
 	case "poster":
-		return RenderPosterSync(imageBytes, badges, f, f, quality,
+		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.PosterBadgeSize,
 			settings.PosterBadgeSplit, settings.PosterFit)
 
 	case "logo":
-		return RenderLogoSync(imageBytes, badges, f, f,
+		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
 			badgeStyle, labelStyle, appearance, targetW, badgeScale)
 
 	case "backdrop":
-		return RenderBackdropSync(imageBytes, badges, f, f, quality,
+		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.BackdropBadgeSize,
 			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
 
 	case "episode":
-		return RenderEpisodeSync(imageBytes, badges, f, f, quality,
+		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.EpisodeBadgeSize, settings.EpisodeBlur)
 	}
