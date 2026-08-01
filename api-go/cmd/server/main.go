@@ -18,6 +18,7 @@ import (
 
 	"openposterdb/internal/config"
 	"openposterdb/internal/handlers"
+	"openposterdb/internal/image"
 	"openposterdb/internal/router"
 	"openposterdb/internal/services"
 )
@@ -111,6 +112,13 @@ func main() {
 		os.MkdirAll(cfg.CacheDir, 0755)
 	}
 	os.MkdirAll(cfg.DBDir, 0755)
+
+	if err := image.LoadFont("assets/fonts/Inter-Bold.ttf"); err != nil {
+		slog.Warn("failed to load font, image previews will not render", "error", err)
+	} else {
+		slog.Info("font loaded")
+	}
+	image.LoadIcons()
 
 	pendingLastUsed := &sync.Map{}
 	go startFlushWorker(db, pendingLastUsed, 60*time.Second)
