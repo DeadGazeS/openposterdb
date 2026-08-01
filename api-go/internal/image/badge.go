@@ -10,6 +10,8 @@ import (
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 var darkBG = color.RGBA{0, 0, 0, 200}
@@ -192,6 +194,65 @@ func iconShadow(icon *image.RGBA) *image.RGBA {
 	return shadow
 }
 
+// iconScaledWidth scales an icon to a target height, preserving aspect ratio.
+func iconScaledWidth(icon *image.RGBA, targetHeight uint32) uint32 {
+	if icon == nil || icon.Bounds().Dy() == 0 {
+		return targetHeight
+	}
+	return uint32(math.Ceil(float64(icon.Bounds().Dx()) * float64(targetHeight) / float64(icon.Bounds().Dy())))
+}
+
+// iconFitInBox fits an icon within a boxSize x boxSize square, preserving aspect ratio.
+func iconFitInBox(icon *image.RGBA, boxSize uint32) (uint32, uint32) {
+	if icon == nil || icon.Bounds().Dx() == 0 || icon.Bounds().Dy() == 0 {
+		return boxSize, boxSize
+	}
+	w := float64(icon.Bounds().Dx())
+	h := float64(icon.Bounds().Dy())
+	scale := math.Min(float64(boxSize)/w, float64(boxSize)/h)
+	return uint32(math.Round(w * scale)), uint32(math.Round(h * scale))
+}
+
+// badgeIconAndSize selects the icon for a badge and computes its target size.
+func badgeIconAndSize(badge *services.RatingBadge, labelStyle services.LabelStyle, iconHeight uint32, icon *image.RGBA) (uint32, uint32) {
+	if labelStyle == services.LabelStyleOfficial {
+		return iconFitInBox(icon, iconHeight)
+	}
+	return iconScaledWidth(icon, iconHeight), iconHeight
+}
+
+func scaleIcon(icon *image.RGBA, w, h uint32) *image.RGBA {
+	if icon == nil {
+		return nil
+	}
+	if uint32(icon.Bounds().Dx()) == w && uint32(icon.Bounds().Dy()) == h {
+		return icon
+	}
+	if w == 0 || h == 0 {
+		return icon
+	}
+	scaled := image.NewRGBA(image.Rect(0, 0, int(w), int(h)))
+	xdraw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), icon, icon.Bounds(), xdraw.Src, nil)
+	return scaled
+}
+
+func overlayIconShadowed(img, icon *image.RGBA, x, y int, shadow int) {
+	if icon == nil {
+		return
+	}
+	if shadow > 0 {
+		overlay(img, iconShadow(icon), x+shadow, y+shadow)
+	}
+	overlay(img, icon, x, y)
+}
+
+func iconForBadge(badge *services.RatingBadge, labelStyle services.LabelStyle) *image.RGBA {
+	if labelStyle == services.LabelStyleOfficial {
+		return OfficialIconForBadge(badge)
+	}
+	return IconForSource(badge.Source)
+}
+
 func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.Face, maxLabelW, maxValueW int, labelStyle services.LabelStyle, appearance services.BadgeAppearance, dims scaledDims) *image.RGBA {
 	label := badge.Source.Label
 	value := badge.Value
@@ -227,7 +288,20 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	ascentVal := fontFace.Metrics().Ascent.Ceil()
 	labelAscent := labelFontFace.Metrics().Ascent.Ceil()
 
-	if !useIcon {
+	if useIcon {
+		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			iconW, iconH := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
+			scaledIcon := scaleIcon(icon, iconW, iconH)
+			ix := int(pillPad) + int(labelPad) + (maxLabelW-int(iconW))/2
+			iy := (badgeH - int(iconH)) / 2
+			overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
+		} else {
+			actualLabelW := textWidth(label, labelFontFace)
+			labelX := int(pillPad) + int(labelPad) + (maxLabelW-actualLabelW)/2 + 2
+			labelY := badgeH/2 + labelAscent/2 - 2
+			drawTextShadowed(img, color.RGBA{255, 255, 255, 255}, labelX, labelY, labelFontFace, label, shadowPx)
+		}
+	} else {
 		actualLabelW := textWidth(label, labelFontFace)
 		labelX := int(pillPad) + int(labelPad) + (maxLabelW-actualLabelW)/2 + 2
 		labelY := badgeH/2 + labelAscent/2 - 2
@@ -242,9 +316,23 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	return img
 }
 
+func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims) int {
+	switch labelStyle {
+	case services.LabelStyleOfficial:
+		return int(dims.iconHeight)
+	case services.LabelStyleIcon:
+		if icon := IconForSource(badge.Source); icon != nil {
+			return int(iconScaledWidth(icon, dims.iconHeight))
+		}
+		return textWidth(badge.Source.Label, labelFontFace)
+	default:
+		return textWidth(badge.Source.Label, labelFontFace)
+	}
+}
+
 func RenderBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32) *image.RGBA {
 	dims := newScaledDims(badgeScale)
-	maxLabelW := textWidth(badge.Source.Label, labelFontFace)
+	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims)
 	maxValueW := textWidth(badge.Value, fontFace)
 	return renderBadgeInner(badge, fontFace, labelFontFace, maxLabelW, maxValueW, labelStyle, appearance, dims)
 }
@@ -257,7 +345,7 @@ func RenderBadgesUniform(badges []services.RatingBadge, fontFace, labelFontFace 
 	dims := newScaledDims(badgeScale)
 	var maxLabelW, maxValueW int
 	for _, b := range badges {
-		if w := textWidth(b.Source.Label, labelFontFace); w > maxLabelW {
+		if w := labelWidthForStyle(&b, labelStyle, labelFontFace, dims); w > maxLabelW {
 			maxLabelW = w
 		}
 		if w := textWidth(b.Value, fontFace); w > maxValueW {
@@ -273,6 +361,7 @@ func RenderBadgesUniform(badges []services.RatingBadge, fontFace, labelFontFace 
 }
 
 func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32) *image.RGBA {
+	useIcon := labelStyle.UsesIcon()
 	vertBadgeW := int(math.Round(float64(baseVertBadgeWidth) * float64(badgeScale)))
 	var pillPad uint32
 	if appearance.Shape == services.BadgeShapePill {
@@ -282,10 +371,15 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	labelH := uint32(math.Round(float64(baseVertLabelFontSize) * float64(badgeScale)))
 	valueH := uint32(math.Round(float64(baseVertValueFontSize) * float64(badgeScale)))
 	gap := uint32(math.Round(4.0 * float64(badgeScale)))
-	totalH := int(vertPadV + labelH + gap + valueH + vertPadV)
+	iconHeight := uint32(math.Round(float64(baseIconHeight) * float64(badgeScale)))
+	labelAreaH := labelH
+	if useIcon {
+		labelAreaH = iconHeight
+	}
+	totalH := int(vertPadV + labelAreaH + gap + valueH + vertPadV)
 
 	img := image.NewRGBA(image.Rect(0, 0, vertBadgeW, totalH))
-	valueAreaY := int(vertPadV + labelH + gap/2)
+	valueAreaY := int(vertPadV + labelAreaH + gap/2)
 
 	labelBG, valueBG, hasBG := sectionColors(appearance.Background, labelStyle, badge.Source)
 	if hasBG {
@@ -300,10 +394,26 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 
 	label := badge.Source.Label
 	value := badge.Value
-	labelW := textWidth(label, labelFontFace)
-	labelX := (vertBadgeW - labelW) / 2
-	labelY := int(vertPadV) + int(labelH)/2 + labelAscent/2
-	drawTextShadowed(img, color.RGBA{255, 255, 255, 255}, labelX, labelY, labelFontFace, label, shadowPx)
+
+	if useIcon {
+		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			iconW, iconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
+			scaledIcon := scaleIcon(icon, iconW, iconH)
+			ix := (vertBadgeW - int(iconW)) / 2
+			iy := (valueAreaY - int(iconH)) / 2
+			overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
+		} else {
+			labelW := textWidth(label, labelFontFace)
+			labelX := (vertBadgeW - labelW) / 2
+			labelY := int(vertPadV) + int(labelH)/2 + labelAscent/2
+			drawTextShadowed(img, color.RGBA{255, 255, 255, 255}, labelX, labelY, labelFontFace, label, shadowPx)
+		}
+	} else {
+		labelW := textWidth(label, labelFontFace)
+		labelX := (vertBadgeW - labelW) / 2
+		labelY := int(vertPadV) + int(labelH)/2 + labelAscent/2
+		drawTextShadowed(img, color.RGBA{255, 255, 255, 255}, labelX, labelY, labelFontFace, label, shadowPx)
+	}
 
 	valueW := textWidth(value, fontFace)
 	valueX := (vertBadgeW - valueW) / 2

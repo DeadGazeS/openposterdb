@@ -26,28 +26,30 @@ type Config struct {
 	ExternalCacheOnly   bool
 	FreeKeyEnabled      *bool
 	DisablePublicPages  bool
+	LogLevel            string
 }
 
 func FromEnv() *Config {
 	c := &Config{
-		TMDBAPIKey:          optionalSecret("TMDB_API_KEY"),
-		OMDBAPIKey:          optionalSecret("OMDB_API_KEY"),
-		MDBListAPIKeys:      optionalSecrets("MDBLIST_API_KEY"),
-		FanartAPIKey:        optionalSecret("FANART_API_KEY"),
-		TraktClientID:       optionalSecret("TRAKT_CLIENT_ID"),
-		CacheDir:            envOrDefault("CACHE_DIR", "./cache"),
-		DBDir:               envOrDefault("DB_DIR", "./db"),
-		ListenAddr:          envOrDefault("LISTEN_ADDR", "0.0.0.0:3000"),
+		TMDBAPIKey:          sanitizeValue(optionalSecret("TMDB_API_KEY")),
+		OMDBAPIKey:          sanitizeValue(optionalSecret("OMDB_API_KEY")),
+		MDBListAPIKeys:      sanitizeSecrets(optionalSecrets("MDBLIST_API_KEY")),
+		FanartAPIKey:        sanitizeValue(optionalSecret("FANART_API_KEY")),
+		TraktClientID:       sanitizeValue(optionalSecret("TRAKT_CLIENT_ID")),
+		CacheDir:            sanitizeValue(envOrDefault("CACHE_DIR", "./cache")),
+		DBDir:               sanitizeValue(envOrDefault("DB_DIR", "./db")),
+		ListenAddr:          sanitizeValue(envOrDefault("LISTEN_ADDR", "0.0.0.0:3000")),
 		RatingsMinStaleSecs: envUint64OrDefault("RATINGS_STALE_SECS", 86400),
 		RatingsMaxAgeSecs:   envUint64OrDefault("RATINGS_MAX_AGE_SECS", 31536000),
 		ImageStaleSecs:      envUint64OrDefault("IMAGE_STALE_SECS", 0),
 		ImageQuality:        envUint8OrDefault("IMAGE_QUALITY", 85),
 		ImageMemCacheMB:     envUint64OrDefault("IMAGE_MEM_CACHE_MB", 512),
-		StaticDir:           os.Getenv("STATIC_DIR"),
-		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
+		StaticDir:           sanitizeValue(os.Getenv("STATIC_DIR")),
+		CORSOrigin:          sanitizeValue(os.Getenv("CORS_ORIGIN")),
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
+		LogLevel:            sanitizeValue(envOrDefault("LOG_LEVEL", "info")),
 	}
 
 	if v := os.Getenv("FREE_KEY_ENABLED"); v != "" {
@@ -121,4 +123,25 @@ func envUint8OrDefault(key string, def uint8) uint8 {
 func envBool(key string) bool {
 	v := os.Getenv(key)
 	return v == "true" || v == "1"
+}
+
+// sanitizeValue guards against trailing annotations accidentally ending up in a
+// value. Docker's env_file does not strip inline comments, so a line like
+// "LOG_LEVEL=debug (optional)" would otherwise set the whole string.
+func sanitizeValue(v string) string {
+	v = strings.TrimSpace(v)
+	if i := strings.IndexAny(v, " \t("); i >= 0 {
+		v = v[:i]
+	}
+	return v
+}
+
+func sanitizeSecrets(keys []string) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if s := sanitizeValue(k); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

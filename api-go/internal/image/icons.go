@@ -5,7 +5,10 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"strings"
 	"sync"
+
+	"golang.org/x/image/webp"
 
 	"openposterdb/internal/services"
 )
@@ -39,6 +42,34 @@ func loadPNG(path string) (*image.RGBA, error) {
 	return rgba, nil
 }
 
+// loadIcon loads a single icon file, trying PNG first and falling back to WebP.
+func loadIcon(path string) (*image.RGBA, error) {
+	if img, err := loadPNG(path); err == nil {
+		return img, nil
+	}
+	if strings.HasSuffix(path, ".png") {
+		webpPath := strings.TrimSuffix(path, ".png") + ".webp"
+		f, err := os.Open(webpPath)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		img, err := webp.Decode(f)
+		if err != nil {
+			return nil, err
+		}
+		bounds := img.Bounds()
+		rgba := image.NewRGBA(bounds)
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				rgba.Set(x, y, img.At(x, y))
+			}
+		}
+		return rgba, nil
+	}
+	return nil, fmt.Errorf("unsupported icon format")
+}
+
 func LoadIcons() {
 	iconCacheMu.Lock()
 	defer iconCacheMu.Unlock()
@@ -65,7 +96,7 @@ func LoadIcons() {
 
 	for _, s := range sources {
 		path := "assets/icons/" + s.key + ".png"
-		if img, err := loadPNG(path); err == nil {
+		if img, err := loadIcon(path); err == nil {
 			iconCache[s.source] = img
 		}
 	}
@@ -80,7 +111,7 @@ func LoadIcons() {
 
 	for _, key := range officialKeys {
 		path := "assets/icons/official/" + key + ".png"
-		if img, err := loadPNG(path); err == nil {
+		if img, err := loadIcon(path); err == nil {
 			officialCache[key] = img
 		}
 	}

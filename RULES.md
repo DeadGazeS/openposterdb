@@ -1,100 +1,71 @@
+Here is the complete rule set as a plain text block you can save as `RULES.md` or a `.txt` file:
+
+```txt
 # Autonomous Agent Rules
 
 ## Authority
 
-The only source of truth for these rules is:
+The repository-specific source of truth is:
 
-`/home/alex/Desktop/Private/openposterdb/openposterdb/RULES.md`
+RULES.md
 
-Before doing anything else:
+Before doing anything else inside the repository:
 
-1. Read `RULES.md` completely.
+1. Read RULES.md completely.
 2. Follow its current contents exactly.
-3. If `RULES.md` changes, immediately discard all previous rules and use the new version.
-4. If `RULES.md` is empty, there are no active rules.
+3. If RULES.md changes, immediately discard all previous repository-specific rules and use the new version.
+4. If RULES.md is empty, there are no active repository-specific rules.
+
+After the initial read of RULES.md, the agent must immediately begin following its contents.
 
 ---
 
 # Repository Boundary
 
-The repository root is:
+The agent must treat the repository as the complete working environment.
 
-`/home/alex/Desktop/Private/openposterdb/openposterdb`
-
-The agent must behave as though nothing exists outside this directory.
+The agent must not intentionally access files outside the repository unless the user explicitly authorizes it.
 
 The agent must never:
 
-* Read any file outside the repository.
 * Search outside the repository.
 * Enumerate directories outside the repository.
 * Traverse above the repository root.
-* Use relative paths (`..`) to leave the repository.
+* Use paths such as `..` to leave the repository.
+* Inspect unrelated host files.
+* Discover tools, binaries, or files outside the repository.
 
-The following are explicitly forbidden:
+The agent must not attempt to repair the environment.
 
-* `/usr`
-* `/bin`
-* `/sbin`
-* `/etc`
-* `/opt`
-* `/var`
-* `/tmp`
-* `/home`
-* `$HOME`
-* `~`
-* any mounted filesystem outside the repository
-
-The agent must never attempt to discover tools or files outside the repository.
-
-If a required executable is unavailable, the agent must stop and report the problem instead of attempting to locate it.
+If a required executable or dependency is unavailable, the agent must stop and report the issue.
 
 ---
 
 # Allowed Operations
 
-The only allowed actions are:
+The agent may:
 
 * Read repository files.
 * Write permitted repository files.
-* Execute `date`.
-* Execute `go build`.
-* Execute `go test`.
-* Execute `go mod tidy`.
-* Execute `cargo build`.
-* Execute `cargo test`.
-* Access the internet only for documentation and research.
+* Modify files allowed by this rule set.
+* Execute commands explicitly allowed by this rule set.
+* Access documentation resources only when permitted.
 
-No other commands are allowed.
+The agent must not:
 
-Forbidden examples include (but are not limited to):
+* Install software.
+* Download binaries.
+* Modify system configuration.
+* Modify PATH.
+* Modify environment variables.
+* Run unrelated helper scripts.
+* Execute arbitrary commands.
+* Clone repositories.
+* Use package managers unless explicitly allowed.
 
-* `find`
-* `which`
-* `whereis`
-* `locate`
-* `ls`
-* `tree`
-* `pwd`
-* `env`
-* `printenv`
-* `export`
-* `cd` outside the repository
-* shell scripts
-* arbitrary executables
-* package managers
-* installers
-* downloading binaries
-* cloning repositories
-* installing Go
-* installing Rust
-* modifying PATH
-* modifying environment variables
-* executing any program not explicitly listed above
+If an allowed command fails, stop and report the failure.
 
-If an allowed command cannot be executed successfully, the agent must stop and report the failure.
-
-The agent must never attempt to repair its execution environment.
+Do not attempt workarounds that violate these rules.
 
 ---
 
@@ -102,7 +73,7 @@ The agent must never attempt to repair its execution environment.
 
 All commands must execute from inside the repository.
 
-The agent must never change into any directory outside the repository.
+The agent must not change into directories outside the repository.
 
 ---
 
@@ -110,217 +81,220 @@ The agent must never change into any directory outside the repository.
 
 Internet access is allowed only for:
 
-* Go documentation
-* Rust documentation
-* Standard library documentation
-* Language references
-* Library documentation
-* Equivalent Go libraries
-* Compiler errors
-* Build errors
+* Official language documentation.
+* Standard library documentation.
+* Library documentation.
+* Compiler errors.
+* Build errors.
+* Technical references directly required for implementation.
 
-Internet access is **not** allowed for:
+Internet access is not allowed for:
 
-* downloading software
-* downloading binaries
-* package installers
-* repository cloning
-* code generation websites
-* unrelated browsing
+* Downloading software.
+* Downloading binaries.
+* Installing dependencies manually.
+* Repository cloning.
+* Code generation websites.
+* Unrelated browsing.
 
-Research findings must be documented in `NOTES.md`.
+Any research performed must be documented in NOTES.md.
 
-Include:
+Research notes must include:
 
-* links
-* reasoning
-* decisions
+* Link.
+* Reasoning.
+* Decision made.
 
 ---
 
 # File Modification Rules
 
-Allowed writes:
+Only modify files explicitly permitted by the project rules.
 
-* any file in `api-go/`
-* `NOTES.md`
-* any file located directly in the repository root
+Default restrictions:
 
 Allowed:
 
-* create Go files in `api-go/`
-* modify existing Go files in `api-go/`
-* modify root files
-* update `go.mod`
-* update `go.sum`
+* Creating new files only where permitted.
+* Modifying existing files only where permitted.
+* Updating dependency files only where permitted.
 
 Forbidden:
 
-* modifying anything inside `api/`
-* deleting any file
-* renaming files
-* moving files
+* Deleting files.
+* Renaming files.
+* Moving files.
+* Modifying protected directories.
 
-The `api/` directory is immutable.
+Protected files and directories must remain unchanged.
 
 ---
 
 # Initial Analysis Phase
 
-Before writing any Go code the agent must:
+Before writing implementation code:
 
-1. Read every file in the repository.
-2. Read every file completely.
-3. Read every file regardless of extension.
-4. Inspect binary files without external tools.
-5. Understand project structure.
-6. Understand migration requirements.
-7. Determine a reading order.
-8. Create `NOTES.md`.
+1. Read the repository structure.
+2. Read all files required to understand the project.
+3. Understand the existing architecture.
+4. Understand migration requirements.
+5. Determine the implementation order.
+6. Create NOTES.md.
 
-No Go code may be written before analysis is complete.
+No implementation code may be written before analysis is complete.
 
 ---
 
 # NOTES.md
 
-`NOTES.md` is mandatory.
+NOTES.md is mandatory.
 
-It must always exist.
+It must exist during development.
 
-The first section must be:
+The first section must always be:
 
 ## Potential Issues
 
 This section must contain:
 
-* migration risks
-* unclear behavior
-* design concerns
-* unresolved questions
-* compatibility issues
+* Migration risks.
+* Unclear behavior.
+* Design concerns.
+* Compatibility issues.
+* Open questions.
 
-The remainder of the document must contain:
+The remaining sections should contain:
 
-* repository understanding
-* file summaries
-* reading progress
-* migration order
-* completed work
-* remaining work
-* internet research
-* implementation decisions
+* Repository understanding.
+* File summaries.
+* Analysis progress.
+* Migration order.
+* Completed work.
+* Remaining work.
+* Research notes.
+* Implementation decisions.
 
-The agent may reorganize or rewrite the notes at any time.
+NOTES.md may be updated whenever necessary.
 
 ---
 
 # Waiting State
 
-After analysis completes the agent must stop.
+After completing the analysis phase, the agent must stop.
 
-It must wait until the user explicitly says:
+The agent must wait for explicit user approval before starting implementation.
+
+Accepted approval examples:
 
 * go
 * begin
 * start migration
 * convert
-* or another unmistakable equivalent
+* proceed
 
-No Go code may be written before that instruction.
+No implementation work may begin before approval.
 
 ---
 
-# Go Migration Rules
+# Implementation Rules
 
-Once permission is given:
+Once approval is given:
 
-1. Write the migration workflow into `NOTES.md`.
-2. Work on one Go file at a time.
-3. Finish one file before another.
-4. Preserve behavior exactly.
+1. Document the workflow in NOTES.md.
+2. Work on one file at a time.
+3. Finish one file before modifying another.
+4. Preserve existing behavior.
 5. Do not redesign architecture.
-6. Do not optimize behavior.
+6. Do not optimize unless requested.
 7. Do not change APIs unless required.
-8. Existing `api-go/` files may be modified.
-9. Root files may be modified as needed.
+8. Keep changes minimal.
+9. Follow existing project conventions.
 
 ---
 
-# Build Rules
+# Build and Test Rules
 
-Only these commands may be used:
+Only execute commands explicitly allowed by the repository rules.
 
-* `go build`
-* `go test`
-* `go mod tidy`
-* `cargo build`
-* `cargo test`
+Do not:
 
-The agent must never:
+* Search for missing tools.
+* Install missing tools.
+* Modify PATH.
+* Modify environment variables.
+* Use alternative build systems.
 
-* search for Go
-* search for Cargo
-* modify PATH
-* export environment variables
-* install missing software
-* execute helper scripts
+If required tooling is unavailable:
 
-If any build tool is unavailable, immediately stop and report the error.
+Stop and report the problem.
 
 ---
 
 # Dependency Rules
 
-Running `go mod tidy` is allowed.
+Do not manually install dependencies.
 
-If it downloads Go modules, that is acceptable.
+Do not:
 
-The agent must not:
+* Install compilers.
+* Install languages.
+* Install system packages.
+* Download dependencies manually.
 
-* manually download dependencies
-* install Go
-* install Cargo
-* install system packages
-* install build tools
-* install compilers
-
-The agent must rely solely on the existing environment.
+Use only project-approved dependency mechanisms.
 
 ---
 
 # Timing Rules
 
-The only timing command allowed is:
+If the repository rules require periodic checks:
 
-`date`
+After the specified amount of work:
 
-After approximately every 200 lines read or written:
+1. Execute the allowed timing command.
+2. Re-read RULES.md.
+3. Apply updated rules immediately.
+4. Confirm:
 
-1. Execute `date`.
-2. Re-read `RULES.md`.
-3. Apply the newest rules immediately.
-4. Print:
+Rules Read
 
-`Rules Read`
+After completing a file:
 
-After every completed file:
+1. Re-read RULES.md.
+2. Apply any changes.
+3. Confirm:
 
-1. Execute `date`.
-2. Re-read `RULES.md`.
-3. Print:
+Rules Read
 
-`Rules Read`
+---
+
+# Git Rules
+
+Never run:
+
+* git commit
+* git push
+
+unless the user explicitly requests it.
+
+If the user requests a commit or push:
+
+* Perform exactly the requested action.
+* Do not create additional commits.
+* Do not push additional times.
+* Do not commit unrelated changes.
+
+A new commit or push requires a new explicit user request.
 
 ---
 
 # Interruptions
 
-If the user requests any action outside these rules, respond with exactly:
+If the user requests an action that violates these rules, respond exactly:
 
-> I cannot do that under the current rules.
+I cannot do that under the current rules.
 
-Do not explain further.
+Do not provide additional explanation.
 
 ---
 
@@ -328,35 +302,34 @@ Do not explain further.
 
 The task is complete only when:
 
-* every repository file has been read
-* `NOTES.md` is complete
-* Go migration is complete
-* required builds/tests have completed
+* Required analysis is complete.
+* Required documentation is complete.
+* Requested implementation is complete.
+* Required builds/tests have completed.
+* No prohibited actions were performed.
 
-After completion the only allowed actions are:
+After completion:
 
-* rereading `RULES.md`
-* executing `date`
-* following newly updated rules
-
-No further work may be performed until new instructions are received.
+Only perform actions explicitly requested by the user.
 
 ---
 
 # Agent Summary
 
-1. Read `RULES.md`.
-2. Read every repository file.
-3. Never leave the repository.
-4. Never inspect the host system.
-5. Never search for executables.
-6. Never modify PATH.
-7. Never install software.
-8. Never repair the environment.
-9. Maintain `NOTES.md`.
-10. Wait for permission.
-11. Convert one Go file at a time.
-12. Preserve behavior.
-13. Build and test only with the permitted commands.
-14. Re-read `RULES.md` at every timing checkpoint.
-15. Stop immediately if a required tool is unavailable.
+1. Read RULES.md first.
+2. Follow RULES.md continuously.
+3. Treat repository rules as authoritative for project behavior.
+4. Stay inside the repository.
+5. Do not inspect unrelated systems.
+6. Do not search for tools.
+7. Do not install software.
+8. Do not modify the environment.
+9. Maintain NOTES.md.
+10. Analyze before coding.
+11. Wait for permission before implementation.
+12. Make minimal changes.
+13. Preserve behavior.
+14. Build and test only with approved commands.
+15. Never commit or push without explicit user instruction.
+16. Perform commits and pushes only once per explicit request.
+```

@@ -26,14 +26,13 @@ func TestRotationAfterConsecutive429s(t *testing.T) {
 	pool := NewAPIKeyPool([]string{"key1", "key2"})
 
 	pool.Report429()
-	pool.Report429()
-	if pool.ActiveKeyRaw() != "key1" {
-		t.Error("2 429s should not trigger rotation")
+	if pool.ActiveKeyRaw() != "key2" {
+		t.Error("1st 429 should rotate to key2")
 	}
 
 	pool.Report429()
-	if pool.ActiveKeyRaw() != "key2" {
-		t.Error("3rd 429 should rotate to key2")
+	if pool.ActiveKeyRaw() != "key1" {
+		t.Error("2nd 429 should wrap back to key1")
 	}
 }
 
@@ -41,36 +40,35 @@ func TestSuccessResetsConsecutiveCount(t *testing.T) {
 	pool := NewAPIKeyPool([]string{"key1", "key2"})
 
 	pool.Report429()
-	pool.Report429()
-	pool.ReportSuccess()
-	pool.Report429()
-	pool.Report429()
+	if pool.ActiveKeyRaw() != "key2" {
+		t.Error("429 should rotate to key2")
+	}
 
+	pool.ReportSuccess()
+	if pool.ActiveKeyRaw() != "key2" {
+		t.Error("success should not rotate")
+	}
+
+	pool.Report429()
 	if pool.ActiveKeyRaw() != "key1" {
-		t.Error("success should reset 429 counter")
+		t.Error("429 after success should rotate to key1")
 	}
 }
 
 func TestWrapsAround(t *testing.T) {
 	pool := NewAPIKeyPool([]string{"key1", "key2", "key3"})
 
-	for i := 0; i < 3; i++ {
-		pool.Report429()
-	}
+	pool.Report429()
 	if pool.ActiveKeyRaw() != "key2" {
 		t.Error("should rotate to key2")
 	}
 
-	for i := 0; i < 3; i++ {
-		pool.Report429()
-	}
+	pool.Report429()
 	if pool.ActiveKeyRaw() != "key3" {
 		t.Error("should rotate to key3")
 	}
 
-	for i := 0; i < 3; i++ {
-		pool.Report429()
-	}
+	pool.Report429()
 	if pool.ActiveKeyRaw() != "key1" {
 		t.Error("should wrap back to key1")
 	}

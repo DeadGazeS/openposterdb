@@ -8,7 +8,8 @@ A self-hosted, drop-in replacement for [RPDB (Rating Poster Database)](https://r
 
 ```bash
 cp api-go/.env.example .env
-# Set TMDB_API_KEY, MDBLIST_API_KEY (or OMDB_API_KEY), and JWT_SECRET in .env
+# Set a JWT_SECRET (openssl rand -hex 32). Add TMDB_API_KEY for artwork,
+# and MDBLIST_API_KEY (or OMDB_API_KEY) for ratings — or set them later in the admin UI.
 docker compose up -d
 ```
 
@@ -16,7 +17,7 @@ Then open **http://localhost:3000** and create your admin account.
 
 ## API Keys
 
-TMDB is required for artwork. MDBList is recommended (one key covers all 9 rating sources). For Fanart.tv, OMDb, and Trakt, keys can be set via the admin UI without restarting — each supports **comma-separated multi-key pools** with automatic rotation and hashed logging.
+TMDB is required for artwork — set it in `.env` or via the admin UI (Settings → External API Keys) without restarting. MDBList is recommended (one key covers all 9 rating sources). For Fanart.tv, OMDb, and Trakt, keys can be set via the admin UI without restarting — each supports **comma-separated multi-key pools** with automatic rotation and hashed logging.
 
 ## Features
 
