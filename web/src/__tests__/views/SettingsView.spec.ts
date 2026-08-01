@@ -145,9 +145,9 @@ describe('SettingsView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    // Check fanart to trigger auto-save
     await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
@@ -168,7 +168,8 @@ describe('SettingsView', () => {
     await flushPromises()
 
     await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.text-green-500').exists()).toBe(true)
@@ -186,7 +187,8 @@ describe('SettingsView', () => {
     await flushPromises()
 
     await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Invalid language')
@@ -211,7 +213,8 @@ describe('SettingsView', () => {
 
     // Toggle fanart to trigger auto-save
     await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
@@ -231,7 +234,8 @@ describe('SettingsView', () => {
     await flushPromises()
 
     await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Failed to save')
@@ -285,6 +289,8 @@ describe('SettingsView', () => {
     const toggle = wrapper.find('button[role="switch"]')
     await toggle.trigger('click')
     await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
+    await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -293,7 +299,7 @@ describe('SettingsView', () => {
     )
   })
 
-  it('auto-save does not include free_api_key_enabled', async () => {
+  it('save button includes free_api_key_enabled', async () => {
     vi.useFakeTimers()
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
@@ -308,20 +314,18 @@ describe('SettingsView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    // Toggle fanart to trigger auto-save
-    await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        free_api_key_enabled: expect.anything(),
+      expect.objectContaining({
+        free_api_key_enabled: true,
       }),
     )
     vi.useRealTimers()
   })
 
-  it('auto-save payload includes episode settings', async () => {
+  it('save button payload includes episode settings', async () => {
     vi.useFakeTimers()
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
@@ -342,9 +346,7 @@ describe('SettingsView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    // Toggle fanart to trigger auto-save
-    await wrapper.find('[data-testid="fanart-checkbox"]').setValue(true)
-    vi.advanceTimersByTime(700)
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
@@ -367,8 +369,7 @@ describe('SettingsView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const toggle = wrapper.find('button[role="switch"]')
-    await toggle.trigger('click')
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
@@ -404,8 +405,9 @@ describe('SettingsView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const toggle = wrapper.find('button[role="switch"]')
-    await toggle.trigger('click')
+    await wrapper.find('button[role="switch"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(

@@ -1,11 +1,24 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
 import { adminApi, type SaveSettingsPayload } from '@/lib/api'
 import { FREE_API_KEY } from '@/lib/constants'
 import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import ClearCacheButton from '@/components/ClearCacheButton.vue'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
 
 type SettingsResponse = RenderSettings & { free_api_key_enabled: boolean; free_api_key_locked: boolean }
@@ -89,33 +102,96 @@ async function loadSettings(): Promise<RenderSettings | null> {
 }
 
 async function saveSettings(s: SaveSettingsPayload): Promise<string | null> {
-  const res = await adminApi.updateSettings(s)
+  const res = await adminApi.updateSettings({
+    ...s,
+    free_api_key_enabled: freeApiKeyEnabled.value,
+  })
   if (res.ok) return null
   const data = await res.json().catch(() => null)
   return data?.error || 'Failed to save settings'
 }
 
-async function toggleFreeApiKey() {
-  if (!settings.value) return
-  freeKeyLoading.value = true
-  freeKeyError.value = ''
-  const newVal = !freeApiKeyEnabled.value
-  // Forward the full settings unchanged (admin update is a full replace where every
-  // omitted field is written back as its serde default). Spreading guards against
-  // silently resetting any field not explicitly listed — e.g. backdrop position,
-  // direction, and edge insets. The read-only free_api_key_locked field is ignored
-  // by the backend.
-  const res = await adminApi.updateSettings({
-    ...settings.value,
-    free_api_key_enabled: newVal,
-  })
-  if (res.ok) {
-    freeApiKeyEnabled.value = newVal
-  } else {
-    const data = await res.json().catch(() => null)
-    freeKeyError.value = data?.error || 'Failed to save'
+function toggleFreeApiKey() {
+  if (!settings.value || settings.value.free_api_key_locked) return
+  freeApiKeyEnabled.value = !freeApiKeyEnabled.value
+}
+
+const formRef = ref<{
+  save: () => Promise<void>
+  discard: () => void
+  dirty: boolean
+  saving: boolean
+  showCheck: boolean
+  error: string
+} | null>(null)
+
+// --- Backup & Restore ---
+const exportDialogOpen = ref(false)
+const exportServiceKeys = ref(true)
+const exportAPIKeys = ref(true)
+const exportLoading = ref(false)
+const exportError = ref('')
+
+const importBusy = ref(false)
+const importError = ref('')
+const importFileInput = ref<HTMLInputElement | null>(null)
+type ImportResult = {
+  restored_settings?: number
+  restored_keys?: number
+  regenerated_keys?: { name: string; key: string; key_prefix: string }[]
+}
+const importResult = ref<ImportResult | null>(null)
+
+async function runExport() {
+  exportLoading.value = true
+  exportError.value = ''
+  try {
+    const res = await adminApi.exportSettings(exportServiceKeys.value, exportAPIKeys.value)
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      exportError.value = data?.error || 'Export failed'
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `openposterdb-settings-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    exportDialogOpen.value = false
+  } catch {
+    exportError.value = 'Export failed'
+  } finally {
+    exportLoading.value = false
   }
-  freeKeyLoading.value = false
+}
+
+async function onImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importBusy.value = true
+  importError.value = ''
+  importResult.value = null
+  try {
+    const payload = JSON.parse(await file.text())
+    const res = await adminApi.importSettings(payload)
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      importError.value = data?.error || 'Import failed'
+      return
+    }
+    importResult.value = data
+    await refetch()
+  } catch {
+    importError.value = 'Import failed — not a valid settings file'
+  } finally {
+    importBusy.value = false
+  }
 }
 </script>
 
@@ -123,10 +199,30 @@ async function toggleFreeApiKey() {
   <div class="space-y-8">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-bold">Settings</h1>
-      <RefreshButton :fetching="isFetching" @refresh="refetch()" />
+      <div class="flex items-center gap-2">
+        <Button
+          v-if="formRef?.dirty"
+          variant="outline"
+          size="sm"
+          data-testid="discard-settings-button"
+          @click="formRef?.discard()"
+        >
+          Discard changes
+        </Button>
+        <span v-if="formRef?.showCheck" class="flex items-center gap-1.5 text-sm text-green-500">
+          <Check class="size-4" />
+          Saved
+        </span>
+        <Button size="sm" data-testid="save-settings-button" @click="formRef?.save()">
+          <Loader2 v-if="formRef?.saving" class="size-4 animate-spin mr-1" />
+          Save
+        </Button>
+        <span v-if="formRef?.error" class="text-sm text-destructive">{{ formRef.error }}</span>
+        <RefreshButton :fetching="isFetching" @refresh="refetch()" />
+      </div>
     </div>
 
-    <div class="max-w-lg space-y-6">
+    <div class="max-w-3xl space-y-6">
       <div class="rounded-lg border p-6 space-y-4">
         <h2 class="text-lg font-semibold">Free API Key</h2>
         <p class="text-sm text-muted-foreground">
@@ -212,8 +308,10 @@ async function toggleFreeApiKey() {
 
         <RenderSettingsForm
           v-if="settings"
+          ref="formRef"
           :settings="settings"
           uid="global"
+          :show-actions="false"
           :load-settings="loadSettings"
           :save-settings="saveSettings"
           :fetch-preview="adminApi.previewPoster"
@@ -221,6 +319,89 @@ async function toggleFreeApiKey() {
           :fetch-backdrop-preview="adminApi.previewBackdrop"
           :fetch-episode-preview="adminApi.previewEpisode"
         />
+      </div>
+
+      <div class="rounded-lg border p-6 space-y-4">
+        <h2 class="text-lg font-semibold">Backup &amp; Restore</h2>
+        <p class="text-sm text-muted-foreground">
+          Export the current settings to a file, or restore them from a previous export.
+          API keys can optionally be included.
+        </p>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <Dialog v-model:open="exportDialogOpen">
+            <DialogTrigger as-child>
+              <Button variant="outline" size="sm">
+                <Download class="size-4 mr-1" />
+                Export settings
+              </Button>
+            </DialogTrigger>
+            <DialogContent class="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Export settings</DialogTitle>
+                <DialogDescription>
+                  Choose what to include in the export file.
+                </DialogDescription>
+              </DialogHeader>
+              <div class="space-y-3 py-2">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    :model-value="exportServiceKeys"
+                    @update:model-value="(v: unknown) => (exportServiceKeys = !!v)"
+                  />
+                  <span class="text-sm">
+                    External API keys
+                    <span class="text-muted-foreground text-xs">(TMDB, MDBList, OMDb, Fanart.tv, Trakt)</span>
+                  </span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    :model-value="exportAPIKeys"
+                    @update:model-value="(v: unknown) => (exportAPIKeys = !!v)"
+                  />
+                  <span class="text-sm">
+                    API keys
+                    <span class="text-muted-foreground text-xs">
+                      (poster-serving keys + their settings — existing key values can't be
+                      recovered, so missing keys are recreated on import)
+                    </span>
+                  </span>
+                </label>
+                <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
+              </div>
+              <DialogFooter>
+                <DialogClose as-child>
+                  <Button variant="outline" size="sm">Cancel</Button>
+                </DialogClose>
+                <Button size="sm" :disabled="exportLoading" @click="runExport">
+                  <Loader2 v-if="exportLoading" class="size-4 animate-spin mr-1" />
+                  Export
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Button variant="outline" size="sm" :disabled="importBusy" @click="importFileInput?.click()">
+            <Upload class="size-4 mr-1" />
+            {{ importBusy ? 'Importing...' : 'Import settings' }}
+          </Button>
+          <input ref="importFileInput" type="file" accept="application/json,.json" class="hidden" @change="onImportFile" />
+        </div>
+
+        <p v-if="importError" class="text-sm text-destructive">{{ importError }}</p>
+        <div v-if="importResult" class="space-y-2 text-sm">
+          <p class="text-muted-foreground">
+            Import complete: {{ importResult.restored_settings ?? 0 }} settings and
+            {{ importResult.restored_keys ?? 0 }} service keys restored.
+          </p>
+          <template v-if="importResult.regenerated_keys?.length">
+            <p class="font-medium">Newly created API keys (values are shown once — save them now):</p>
+            <div v-for="k in importResult.regenerated_keys" :key="k.name" class="rounded border bg-muted px-3 py-2 font-mono text-xs">
+              <div class="font-semibold">{{ k.name }}</div>
+              <div>{{ k.key }}</div>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
   </div>

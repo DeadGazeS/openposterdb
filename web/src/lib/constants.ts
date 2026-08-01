@@ -63,6 +63,55 @@ export const ALL_RATING_SOURCES = [
 
 export const DEFAULT_RATINGS_ORDER = 'mal,imdb,lb,rt,mc,rta,tmdb,trakt,mdblist,ebert'
 
+/** Sample values used to render a badge for each source in the settings UI.
+ * Sources with multiple logos (Rotten Tomatoes) render one badge per variant —
+ * the value also picks the logo, matching real behaviour. */
+export const SOURCE_BADGE_SAMPLES: Record<string, { value: string; label: string }[]> = {
+  imdb: [{ value: '8.7', label: 'IMDb' }],
+  tmdb: [{ value: '92%', label: 'TMDB' }],
+  rt: [
+    { value: '90%', label: 'Critics · Certified Fresh' },
+    { value: '65%', label: 'Critics · Fresh' },
+    { value: '40%', label: 'Critics · Rotten' },
+  ],
+  rta: [
+    { value: '90%', label: 'Audience · Verified Hot' },
+    { value: '65%', label: 'Audience · Fresh' },
+    { value: '40%', label: 'Audience · Rotten' },
+  ],
+  mc: [{ value: '86', label: 'Metacritic' }],
+  trakt: [{ value: '97%', label: 'Trakt' }],
+  lb: [{ value: '4.1', label: 'Letterboxd' }],
+  mal: [{ value: '8.70', label: 'MyAnimeList' }],
+  mdblist: [{ value: '95', label: 'MDBList' }],
+  ebert: [{ value: '4.0', label: 'Roger Ebert' }],
+}
+
+/** The six Rotten Tomatoes logo variants, each with its own badge color
+ * settings (keys match the backend `RatingColorKey`). */
+export const RT_COLOR_VARIANTS = [
+  { key: 'rt_cf', label: 'Rotten Tomatoes (Critics) · Certified Fresh', color: '#b92308' },
+  { key: 'rt_pos', label: 'Rotten Tomatoes (Critics) · Fresh', color: '#b92308' },
+  { key: 'rt_rot', label: 'Rotten Tomatoes (Critics) · Rotten', color: '#b92308' },
+  { key: 'rta_hot', label: 'Rotten Tomatoes (Audience) · Verified Hot', color: '#b92308' },
+  { key: 'rta_pos', label: 'Rotten Tomatoes (Audience) · Fresh', color: '#b92308' },
+  { key: 'rta_neg', label: 'Rotten Tomatoes (Audience) · Rotten', color: '#b92308' },
+] as const
+
+/** Rows for the "Rating Colors" section: the non-Rotten-Tomatoes sources plus
+ * one row per Rotten Tomatoes logo variant, in the natural source order. */
+export const RATING_COLOR_ROWS = [
+  { key: 'imdb', label: 'IMDb', color: '#b4910f' },
+  { key: 'tmdb', label: 'TMDB', color: '#019b58' },
+  ...RT_COLOR_VARIANTS,
+  { key: 'mc', label: 'Metacritic', color: '#4b9626' },
+  { key: 'trakt', label: 'Trakt', color: '#af0f2d' },
+  { key: 'lb', label: 'Letterboxd', color: '#009b58' },
+  { key: 'mal', label: 'MyAnimeList', color: '#223c78' },
+  { key: 'mdblist', label: 'MDBList', color: '#4284CA' },
+  { key: 'ebert', label: 'Roger Ebert', color: '#e8590c' },
+]
+
 // Maps from the short enum codes used by the image query params / settings API
 // to human-readable labels. Used to show what a server "default" resolves to in
 // the free-key "Try it out" form. `d` (style/direction) means "auto" — resolved

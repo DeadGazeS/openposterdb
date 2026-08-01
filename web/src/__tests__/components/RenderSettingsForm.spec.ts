@@ -45,10 +45,10 @@ const defaultSettings: RenderSettings = {
   logo_badge_shape: 'r',
   backdrop_badge_shape: 'r',
   episode_badge_shape: 'r',
-  poster_badge_background: 'd',
-  logo_badge_background: 'd',
-  backdrop_badge_background: 'd',
-  episode_badge_background: 'd',
+  poster_badge_alpha: 80,
+  logo_badge_alpha: 80,
+  backdrop_badge_alpha: 80,
+  episode_badge_alpha: 80,
 }
 
 function makeFetchPreview() {
@@ -95,7 +95,7 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'bc', 'h', 'i', 'd', 'm', '', false, 'r', 'd', 'native')
+    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'bc', 'h', 'i', 'd', 'm', '', false, 'r', 80, 'native', {})
   })
 
   it('calls fetchPreview with correct params for custom settings', async () => {
@@ -103,7 +103,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ ratings_limit: 5, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), '', false, 'r', 'd', 'native')
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), '', false, 'r', 80, 'native', {})
   })
 
   it('sets preview src from blob after fetch', async () => {
@@ -130,7 +130,7 @@ describe('RenderSettingsForm', () => {
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), '', false, 'r', 'd', 'native')
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), '', false, 'r', 80, 'native', {})
   })
 
   it('shows loading state while preview loads', async () => {
@@ -187,7 +187,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_position: 'l' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'l', 'h', 'i', 'd', 'm', '', false, 'r', 'd', 'native')
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'l', 'h', 'i', 'd', 'm', '', false, 'r', 80, 'native', {})
   })
 
   it('hides fanart checkbox when fanart_available is false', () => {
@@ -228,8 +228,10 @@ describe('RenderSettingsForm', () => {
       },
     })
 
-    // Trigger auto-save by toggling textless to verify lang defaults to 'en'
+    // Toggle textless, then save via the Save button
     await wrapper.find('[data-testid="textless-checkbox"]').setValue(true)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
 
     expect(saveSettings).toHaveBeenCalledWith(
@@ -276,6 +278,8 @@ describe('RenderSettingsForm', () => {
 
     await wrapper.find('[data-testid="exclude-rt-checkbox"]').setValue(true)
     await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
+    await flushPromises()
 
     expect(saveSettings).toHaveBeenCalledWith(
       expect.objectContaining({ ratings_exclude: 'rt' }),
@@ -287,7 +291,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_badge_direction: 'v' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'bc', 'h', 'i', 'v', 'm', '', false, 'r', 'd', 'native')
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'bc', 'h', 'i', 'v', 'm', '', false, 'r', 80, 'native', {})
   })
 
   // --- Episode preview ---
@@ -346,7 +350,8 @@ describe('RenderSettingsForm', () => {
       false, // episode_blur
       '', // ratings_exclude
       'r', // episode_badge_shape
-      'd', // episode_badge_background
+      80, // episode_badge_alpha
+      {},
     )
   })
 
@@ -432,9 +437,10 @@ describe('RenderSettingsForm', () => {
       'v', // backdrop_badge_direction
       '', // ratings_exclude
       'r', // backdrop_badge_shape
-      'd', // backdrop_badge_background
+      80, // backdrop_badge_alpha
       12, // backdrop_edge_inset_x
       7, // backdrop_edge_inset_y
+      {},
     )
   })
 
@@ -444,9 +450,55 @@ describe('RenderSettingsForm', () => {
 
     await wrapper.find('[data-testid="backdrop-edge-inset-y"]').setValue(15)
     await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
+    await flushPromises()
 
     expect(saveSettings).toHaveBeenCalledWith(
       expect.objectContaining({ backdrop_edge_inset_y: 15 }),
     )
+  })
+
+  it('is not dirty on fresh load (Discard hidden)', async () => {
+    const settings = { ...defaultSettings, colors: { imdb: { accent: '#b4910f', value: '#000000c8', border: '', text: '#ffffff' } } }
+    const wrapper = mount(RenderSettingsForm, {
+      props: {
+        settings,
+        loadSettings: vi.fn().mockResolvedValue(settings),
+        saveSettings: vi.fn().mockResolvedValue(null),
+        fetchPreview: makeFetchPreview(),
+      },
+      global: {
+        plugins: [createPinia()],
+        stubs: shadcnStubs,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(false)
+  })
+
+  it('hides Discard after saving', async () => {
+    const saveSettings = vi.fn().mockResolvedValue(null)
+    const settings = { ...defaultSettings }
+    const wrapper = mount(RenderSettingsForm, {
+      props: {
+        settings,
+        loadSettings: vi.fn().mockResolvedValue(settings),
+        saveSettings,
+        fetchPreview: makeFetchPreview(),
+      },
+      global: {
+        plugins: [createPinia()],
+        stubs: shadcnStubs,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="textless-checkbox"]').setValue(true)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(false)
   })
 })

@@ -36,7 +36,7 @@ export const LabelStub = {
 }
 
 export const ButtonStub = {
-  template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
+  template: '<button :disabled="disabled" :data-testid="$attrs[\'data-testid\']" @click="$emit(\'click\')"><slot /></button>',
   props: ['disabled', 'variant', 'size'],
 }
 
