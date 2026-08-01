@@ -72,7 +72,12 @@ func main() {
 
 	httpClient := buildHTTPClient()
 
-	tmdbClient := services.NewTmdbClient(cfg.TMDBAPIKey, httpClient)
+	var tmdbClient *services.TmdbClient
+	if cfg.TMDBAPIKey != "" {
+		tmdbClient = services.NewTmdbClient(cfg.TMDBAPIKey, httpClient)
+	} else {
+		slog.Warn("TMDB_API_KEY is not set — image endpoints will return 503 until a key is configured in the admin UI")
+	}
 
 	mgr := services.NewServiceKeyManager(db, jwtSecret, httpClient,
 		cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID)
@@ -260,6 +265,7 @@ func buildHTTPClient() *http.Client {
 
 func logConfig(cfg *config.Config) {
 	slog.Info("rating providers configured",
+		"tmdb", cfg.TMDBAPIKey != "",
 		"mdblist", !isEmptySlice(cfg.MDBListAPIKeys),
 		"omdb", cfg.OMDBAPIKey != "",
 		"fanart", cfg.FanartAPIKey != "",

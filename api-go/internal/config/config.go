@@ -30,7 +30,7 @@ type Config struct {
 
 func FromEnv() *Config {
 	c := &Config{
-		TMDBAPIKey:          requireEnv("TMDB_API_KEY"),
+		TMDBAPIKey:          optionalSecret("TMDB_API_KEY"),
 		OMDBAPIKey:          optionalSecret("OMDB_API_KEY"),
 		MDBListAPIKeys:      optionalSecrets("MDBLIST_API_KEY"),
 		FanartAPIKey:        optionalSecret("FANART_API_KEY"),
