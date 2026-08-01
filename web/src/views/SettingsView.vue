@@ -9,6 +9,7 @@ import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import ClearCacheButton from '@/components/ClearCacheButton.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogClose,
@@ -106,7 +107,12 @@ async function saveSettings(s: SaveSettingsPayload): Promise<string | null> {
     ...s,
     free_api_key_enabled: freeApiKeyEnabled.value,
   })
-  if (res.ok) return null
+  if (res.ok) {
+    // Keep the react-query cache fresh so revisiting the page doesn't briefly
+    // mount the form with pre-save settings (which made previews look stale).
+    refetch()
+    return null
+  }
   const data = await res.json().catch(() => null)
   return data?.error || 'Failed to save settings'
 }
@@ -196,7 +202,7 @@ async function onImportFile(e: Event) {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-bold">Settings</h1>
       <div class="flex items-center gap-2">
@@ -206,7 +212,7 @@ async function onImportFile(e: Event) {
           size="sm"
           data-testid="discard-settings-button"
           @click="formRef?.discard()"
-        >
+      >
           Discard changes
         </Button>
         <span v-if="formRef?.showCheck" class="flex items-center gap-1.5 text-sm text-green-500">
@@ -222,187 +228,232 @@ async function onImportFile(e: Event) {
       </div>
     </div>
 
-    <div class="max-w-3xl space-y-6">
-      <div class="rounded-lg border p-6 space-y-4">
-        <h2 class="text-lg font-semibold">Free API Key</h2>
-        <p class="text-sm text-muted-foreground">
-          When enabled, the key <code class="font-mono text-xs bg-muted px-1 py-0.5 rounded">{{ FREE_API_KEY }}</code>
-          can be used for poster serving with global default settings.
-          It does not grant access to self-service features.
-        </p>
-        <label class="flex items-center gap-3 cursor-pointer">
-          <button
-            type="button"
-            role="switch"
-            :aria-checked="freeApiKeyEnabled"
-            :disabled="freeKeyLoading || !settings || settings?.free_api_key_locked"
-            class="relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            :class="freeApiKeyEnabled ? 'bg-primary' : 'bg-input'"
-            @click="toggleFreeApiKey"
-          >
-            <span
-              class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform"
-              :class="freeApiKeyEnabled ? 'translate-x-4' : 'translate-x-0'"
-            />
-          </button>
-          <span class="text-sm font-medium">{{ freeApiKeyEnabled ? 'Enabled' : 'Disabled' }}</span>
-          <span v-if="freeKeyError" class="text-sm text-destructive">{{ freeKeyError }}</span>
-        </label>
-        <p v-if="settings?.free_api_key_locked" class="text-sm text-muted-foreground">
-          Controlled by <code class="font-mono text-xs bg-muted px-1 py-0.5 rounded">FREE_KEY_ENABLED</code> environment variable.
-        </p>
-      </div>
-
-      <div class="rounded-lg border p-6 space-y-4">
-        <h2 class="text-lg font-semibold">External API Keys</h2>
-        <p class="text-sm text-muted-foreground">
-          API keys for external rating and image providers. Keys set via environment
-          variables are locked and cannot be changed here. After saving, the running
-          service is updated without a restart.
-        </p>
-        <p v-if="serviceKeysError" class="text-sm text-destructive">{{ serviceKeysError }}</p>
-
-        <div v-for="service in (['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const)" :key="service" class="space-y-2">
-          <label :for="`key-${service}`" class="text-sm font-medium flex items-center gap-2">
-            {{ serviceLabels[service] }}
-            <span v-if="serviceKeys?.[service]?.locked" class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">env</span>
-          </label>
-          <div v-if="serviceKeys?.[service]?.locked && serviceKeys?.[service]?.masked" class="text-sm text-muted-foreground font-mono">
-            {{ serviceKeys?.[service]?.masked }}
-          </div>
-          <div v-else class="flex gap-2">
-            <input
-              :id="`key-${service}`"
-              v-model="serviceKeyInputs[service]"
-              type="text"
-              class="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-              :placeholder="serviceKeys?.[service]?.has_key ? serviceKeys?.[service]?.masked ?? '' : 'Enter key...'"
-            />
-            <button
-              type="button"
-              class="inline-flex items-center justify-center rounded-md h-9 px-4 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              :disabled="serviceKeysSaving !== null"
-              @click="saveServiceKey(service)"
-            >
-              {{ serviceKeysSaving === service ? 'Saving...' : 'Save' }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="rounded-lg border p-6 space-y-4">
-        <h2 class="text-lg font-semibold">Cache</h2>
-        <p class="text-sm text-muted-foreground">
-          Clear all cached images (posters, logos, backdrops, episodes). They are
-          regenerated on the next request, so the first load of each title is slower.
-        </p>
-        <ClearCacheButton @cleared="(m: string) => (cacheMessage = m)" />
-        <p v-if="cacheMessage" class="text-sm text-muted-foreground">{{ cacheMessage }}</p>
-      </div>
-
-      <div class="rounded-lg border p-6 space-y-4">
-        <h2 class="text-lg font-semibold">Global Image Settings</h2>
-        <p class="text-sm text-muted-foreground">
-          These defaults apply to all API keys unless overridden per-key.
-        </p>
-
-        <RenderSettingsForm
-          v-if="settings"
-          ref="formRef"
-          :settings="settings"
-          uid="global"
-          :show-actions="false"
-          :load-settings="loadSettings"
-          :save-settings="saveSettings"
-          :fetch-preview="adminApi.previewPoster"
-          :fetch-logo-preview="adminApi.previewLogo"
-          :fetch-backdrop-preview="adminApi.previewBackdrop"
-          :fetch-episode-preview="adminApi.previewEpisode"
-        />
-      </div>
-
-      <div class="rounded-lg border p-6 space-y-4">
-        <h2 class="text-lg font-semibold">Backup &amp; Restore</h2>
-        <p class="text-sm text-muted-foreground">
-          Export the current settings to a file, or restore them from a previous export.
-          API keys can optionally be included.
-        </p>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <Dialog v-model:open="exportDialogOpen">
-            <DialogTrigger as-child>
-              <Button variant="outline" size="sm">
-                <Download class="size-4 mr-1" />
-                Export settings
-              </Button>
-            </DialogTrigger>
-            <DialogContent class="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Export settings</DialogTitle>
-                <DialogDescription>
-                  Choose what to include in the export file.
-                </DialogDescription>
-              </DialogHeader>
-              <div class="space-y-3 py-2">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    :model-value="exportServiceKeys"
-                    @update:model-value="(v: unknown) => (exportServiceKeys = !!v)"
-                  />
-                  <span class="text-sm">
-                    External API keys
-                    <span class="text-muted-foreground text-xs">(TMDB, MDBList, OMDb, Fanart.tv, Trakt)</span>
-                  </span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    :model-value="exportAPIKeys"
-                    @update:model-value="(v: unknown) => (exportAPIKeys = !!v)"
-                  />
-                  <span class="text-sm">
-                    API keys
-                    <span class="text-muted-foreground text-xs">
-                      (poster-serving keys + their settings — existing key values can't be
-                      recovered, so missing keys are recreated on import)
-                    </span>
-                  </span>
-                </label>
-                <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
+    <Tabs default-value="general" :unmount-on-hide="false" class="grid w-full grid-cols-1 gap-4 lg:grid-cols-[300px,1fr]">
+      <!-- Settings section nav (sidebar on desktop, horizontal strip on mobile) -->
+      <div class="pb-4">
+        <div class="relative group/settings-nav lg:block lg:rounded-lg lg:border lg:bg-card/50 lg:p-2">
+          <div class="flex flex-col items-center justify-between gap-4 md:flex-row">
+            <div class="my-2 space-y-1 px-2">
+              <div class="flex items-center justify-center gap-2 md:justify-start">
+                <h4 class="text-sm font-semibold">Sections</h4>
               </div>
-              <DialogFooter>
-                <DialogClose as-child>
-                  <Button variant="outline" size="sm">Cancel</Button>
-                </DialogClose>
-                <Button size="sm" :disabled="exportLoading" @click="runExport">
-                  <Loader2 v-if="exportLoading" class="size-4 animate-spin mr-1" />
-                  Export
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Button variant="outline" size="sm" :disabled="importBusy" @click="importFileInput?.click()">
-            <Upload class="size-4 mr-1" />
-            {{ importBusy ? 'Importing...' : 'Import settings' }}
-          </Button>
-          <input ref="importFileInput" type="file" accept="application/json,.json" class="hidden" @change="onImportFile" />
-        </div>
-
-        <p v-if="importError" class="text-sm text-destructive">{{ importError }}</p>
-        <div v-if="importResult" class="space-y-2 text-sm">
-          <p class="text-muted-foreground">
-            Import complete: {{ importResult.restored_settings ?? 0 }} settings and
-            {{ importResult.restored_keys ?? 0 }} service keys restored.
-          </p>
-          <template v-if="importResult.regenerated_keys?.length">
-            <p class="font-medium">Newly created API keys (values are shown once — save them now):</p>
-            <div v-for="k in importResult.regenerated_keys" :key="k.name" class="rounded border bg-muted px-3 py-2 font-mono text-xs">
-              <div class="font-semibold">{{ k.name }}</div>
-              <div>{{ k.key }}</div>
             </div>
-          </template>
+          </div>
+          <TabsList class="flex h-fit w-full flex-wrap items-center justify-center gap-1 p-0 lg:h-auto lg:flex-col lg:items-stretch lg:space-y-1 lg:bg-transparent">
+            <TabsTrigger value="general" class="h-9 w-fit px-3 lg:w-full lg:justify-start">General</TabsTrigger>
+            <TabsTrigger value="image" class="h-9 w-fit px-3 lg:w-full lg:justify-start">Image</TabsTrigger>
+            <TabsTrigger value="cache" class="h-9 w-fit px-3 lg:w-full lg:justify-start">Cache</TabsTrigger>
+            <TabsTrigger value="backup" class="h-9 w-fit px-3 lg:w-full lg:justify-start">Backup</TabsTrigger>
+          </TabsList>
         </div>
       </div>
-    </div>
+
+      <div class="relative space-y-4">
+        <!-- General -->
+        <TabsContent value="general">
+          <div class="space-y-4">
+            <div class="rounded-lg border p-6 space-y-4">
+              <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                Free API Key
+              </h3>
+              <p class="text-sm text-muted-foreground">
+                When enabled, the key <code class="font-mono text-xs bg-muted px-1 py-0.5 rounded">{{ FREE_API_KEY }}</code>
+                can be used for poster serving with global default settings.
+                It does not grant access to self-service features.
+              </p>
+              <label class="flex items-center gap-3 cursor-pointer">
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="freeApiKeyEnabled"
+                  :disabled="freeKeyLoading || !settings || settings?.free_api_key_locked"
+                  class="relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  :class="freeApiKeyEnabled ? 'bg-primary' : 'bg-input'"
+                  @click="toggleFreeApiKey"
+              >
+                  <span
+                    class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform"
+                    :class="freeApiKeyEnabled ? 'translate-x-4' : 'translate-x-0'"
+                  />
+                </button>
+                <span class="text-sm font-medium">{{ freeApiKeyEnabled ? 'Enabled' : 'Disabled' }}</span>
+                <span v-if="freeKeyError" class="text-sm text-destructive">{{ freeKeyError }}</span>
+              </label>
+              <p v-if="settings?.free_api_key_locked" class="text-sm text-muted-foreground">
+                Controlled by <code class="font-mono text-xs bg-muted px-1 py-0.5 rounded">FREE_KEY_ENABLED</code> environment variable.
+              </p>
+            </div>
+
+            <div class="rounded-lg border p-6 space-y-4">
+              <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                External API Keys
+              </h3>
+              <p class="text-sm text-muted-foreground">
+                API keys for external rating and image providers. Keys set via environment
+                variables are locked and cannot be changed here. After saving, the running
+                service is updated without a restart.
+              </p>
+              <p v-if="serviceKeysError" class="text-sm text-destructive">{{ serviceKeysError }}</p>
+
+              <div v-for="service in (['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const)" :key="service" class="space-y-2">
+                <label :for="`key-${service}`" class="text-sm font-medium flex items-center gap-2">
+                  {{ serviceLabels[service] }}
+                  <span v-if="serviceKeys?.[service]?.locked" class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">env</span>
+                </label>
+                <div v-if="serviceKeys?.[service]?.locked && serviceKeys?.[service]?.masked" class="text-sm text-muted-foreground font-mono">
+                  {{ serviceKeys?.[service]?.masked }}
+                </div>
+                <div v-else class="flex gap-2">
+                  <input
+                    :id="`key-${service}`"
+                    v-model="serviceKeyInputs[service]"
+                    type="text"
+                    class="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                    :placeholder="serviceKeys?.[service]?.has_key ? serviceKeys?.[service]?.masked ?? '' : 'Enter key...'"
+                  />
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-md h-9 px-4 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    :disabled="serviceKeysSaving !== null"
+                    @click="saveServiceKey(service)"
+                >
+                    {{ serviceKeysSaving === service ? 'Saving...' : 'Save' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <!-- Image -->
+        <TabsContent value="image">
+          <div class="rounded-lg border p-6 space-y-4">
+            <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+              Global Image Settings
+            </h3>
+            <p class="text-sm text-muted-foreground">
+              These defaults apply to all API keys unless overridden per-key.
+            </p>
+
+            <RenderSettingsForm
+              v-if="settings"
+              ref="formRef"
+              :settings="settings"
+              uid="global"
+              :show-actions="false"
+              :load-settings="loadSettings"
+              :save-settings="saveSettings"
+              :fetch-preview="adminApi.previewPoster"
+              :fetch-logo-preview="adminApi.previewLogo"
+              :fetch-backdrop-preview="adminApi.previewBackdrop"
+              :fetch-episode-preview="adminApi.previewEpisode"
+            />
+          </div>
+        </TabsContent>
+
+        <!-- Cache -->
+        <TabsContent value="cache">
+          <div class="rounded-lg border p-6 space-y-4">
+            <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+              Cache
+            </h3>
+            <p class="text-sm text-muted-foreground">
+              Clear all cached images (posters, logos, backdrops, episodes). They are
+              regenerated on the next request, so the first load of each title is slower.
+            </p>
+            <ClearCacheButton @cleared="(m: string) => (cacheMessage = m)" />
+            <p v-if="cacheMessage" class="text-sm text-muted-foreground">{{ cacheMessage }}</p>
+          </div>
+        </TabsContent>
+
+        <!-- Backup -->
+        <TabsContent value="backup">
+          <div class="rounded-lg border p-6 space-y-4">
+            <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+              Backup &amp; Restore
+            </h3>
+            <p class="text-sm text-muted-foreground">
+              Export the current settings to a file, or restore them from a previous export.
+              API keys can optionally be included.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <Dialog v-model:open="exportDialogOpen">
+                <DialogTrigger as-child>
+                  <Button variant="outline" size="sm">
+                    <Download class="size-4 mr-1" />
+                    Export settings
+                  </Button>
+                </DialogTrigger>
+                <DialogContent class="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Export settings</DialogTitle>
+                    <DialogDescription>
+                      Choose what to include in the export file.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div class="space-y-3 py-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        :model-value="exportServiceKeys"
+                        @update:model-value="(v: unknown) => (exportServiceKeys = !!v)"
+                      />
+                      <span class="text-sm">
+                        External API keys
+                        <span class="text-muted-foreground text-xs">(TMDB, MDBList, OMDb, Fanart.tv, Trakt)</span>
+                      </span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        :model-value="exportAPIKeys"
+                        @update:model-value="(v: unknown) => (exportAPIKeys = !!v)"
+                      />
+                      <span class="text-sm">
+                        API keys
+                        <span class="text-muted-foreground text-xs">
+                          (poster-serving keys + their settings — existing key values can't be
+                          recovered, so missing keys are recreated on import)
+                        </span>
+                      </span>
+                    </label>
+                    <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
+                  </div>
+                  <DialogFooter>
+                    <DialogClose as-child>
+                      <Button variant="outline" size="sm">Cancel</Button>
+                    </DialogClose>
+                    <Button size="sm" :disabled="exportLoading" @click="runExport">
+                      <Loader2 v-if="exportLoading" class="size-4 animate-spin mr-1" />
+                      Export
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Button variant="outline" size="sm" :disabled="importBusy" @click="importFileInput?.click()">
+                <Upload class="size-4 mr-1" />
+                {{ importBusy ? 'Importing...' : 'Import settings' }}
+              </Button>
+              <input ref="importFileInput" type="file" accept="application/json,.json" class="hidden" @change="onImportFile" />
+            </div>
+
+            <p v-if="importError" class="text-sm text-destructive">{{ importError }}</p>
+            <div v-if="importResult" class="space-y-2 text-sm">
+              <p class="text-muted-foreground">
+                Import complete: {{ importResult.restored_settings ?? 0 }} settings and
+                {{ importResult.restored_keys ?? 0 }} service keys restored.
+              </p>
+              <template v-if="importResult.regenerated_keys?.length">
+                <p class="font-medium">Newly created API keys (values are shown once — save them now):</p>
+                <div v-for="k in importResult.regenerated_keys" :key="k.name" class="rounded border bg-muted px-3 py-2 font-mono text-xs">
+                  <div class="font-semibold">{{ k.name }}</div>
+                  <div>{{ k.key }}</div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </TabsContent>
+      </div>
+    </Tabs>
   </div>
 </template>
