@@ -22,13 +22,17 @@ TMDB is required for artwork — set it in `.env` or via the admin UI (Settings 
 ## Features
 
 - **Multi-source ratings** — MDBList, OMDb, Trakt, Fanart.tv (optional). Supports IMDb, RT Critics, RT Audience, Metacritic, Trakt, Letterboxd, MAL, MDBList score, and Roger Ebert
-- **Posters** — configurable badge position, direction, style, shape, size, background, aspect ratio fit, split badges, textless
-- **Logos** — badges horizontally below with configurable style, size, shape, background
+- **Per-source badge colours** — logo/text backgrounds, border, and text colour for every rating source, with separate settings per Rotten Tomatoes logo variant (Certified Fresh, Fresh, Rotten, Verified Hot, …); badge background opacity is a per-kind slider
+- **Anti-aliased badges** — smooth rounded/pill shapes and border rings via `golang.org/x/image/vector`, with correct premultiplied-alpha colour compositing
+- **Live badge gallery** — the Settings page previews a sample badge per source (all Rotten Tomatoes variants) using your current colour settings, matching the real render
+- **Posters** — configurable badge position, direction, style, shape, size, aspect ratio fit, split badges, textless
+- **Logos** — badges horizontally below with configurable style, size, shape
 - **Backdrops** — vertical badges with configurable position, edge inset, direction
 - **Episodes** — horizontal badges with optional blur (spoiler protection), configurable position
 - **Per-key settings** — override image source, language, textless, badge settings per API key
 - **Multi-key pools** — comma-separated keys with automatic rotation and hashed logging (MDBList, Fanart.tv, OMDb, Trakt)
 - **Encrypted key storage** — service keys encrypted at rest in SQLite
+- **Settings backup & restore** — export/import the global settings (optionally including external service keys and API keys) from the Settings page
 - **Multi-layer caching** — filesystem and SQLite with staleness-based refresh
 - **Admin UI** — Vue 3 panel for dashboard, key management, per-key settings, cache purging (all/kind/single-row)
 - **Auth** — Argon2, JWT, rotating refresh tokens, API key access
