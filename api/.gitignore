@@ -1,5 +1,0 @@
-/target
-.env
-# Application data
-/cache
-/db
