@@ -92,10 +92,10 @@ for val in t i o; do
 done
 end_section
 
-add_section "Poster - badge_size"
-for val in xs s m l xl; do
-    path=$(fetch_image "badge_size=$val" "poster-default" "badge_size=$val" "jpg")
-    add_image "badge_size=$val" "$path"
+add_section "Poster - text_size"
+for val in 50 75 100 150 200; do
+    path=$(fetch_image "text_size=$val" "poster-default" "text_size=$val" "jpg")
+    add_image "text_size=$val" "$path"
 done
 end_section
 
@@ -161,12 +161,12 @@ for bs in h v; do
 done
 end_section
 
-# Combined: position × badge_size
-add_section "Poster - position × badge_size"
+# Combined: position × text_size
+add_section "Poster - position × text_size"
 for pos in bc tc l r; do
-    for sz in xs s m l xl; do
-        path=$(fetch_image "pos=${pos}_sz=${sz}" "poster-default" "position=${pos}&badge_size=${sz}" "jpg")
-        add_image "position=$pos badge_size=$sz" "$path"
+    for sz in 50 75 100 150 200; do
+        path=$(fetch_image "pos=${pos}_sz=${sz}" "poster-default" "position=${pos}&text_size=${sz}" "jpg")
+        add_image "position=$pos text_size=$sz" "$path"
     done
 done
 end_section
@@ -194,10 +194,10 @@ for val in t i o; do
 done
 end_section
 
-add_section "Logo - badge_size"
-for val in xs s m l xl; do
-    path=$(fetch_image "logo_badge_size=$val" "logo-default" "badge_size=$val" "png")
-    add_image "badge_size=$val" "$path"
+add_section "Logo - text_size"
+for val in 50 75 100 150 200; do
+    path=$(fetch_image "logo_text_size=$val" "logo-default" "text_size=$val" "png")
+    add_image "text_size=$val" "$path"
 done
 end_section
 
@@ -255,10 +255,10 @@ for val in t i o; do
 done
 end_section
 
-add_section "Backdrop - badge_size"
-for val in xs s m l xl; do
-    path=$(fetch_image "backdrop_badge_size=$val" "backdrop-default" "badge_size=$val" "jpg")
-    add_image "badge_size=$val" "$path"
+add_section "Backdrop - text_size"
+for val in 50 75 100 150 200; do
+    path=$(fetch_image "backdrop_text_size=$val" "backdrop-default" "text_size=$val" "jpg")
+    add_image "text_size=$val" "$path"
 done
 end_section
 
@@ -340,10 +340,10 @@ for val in t i o; do
 done
 end_section
 
-add_section "Episode - badge_size"
-for val in xs s m l xl; do
-    path=$(fetch_image "episode_badge_size=$val" "episode-default" "badge_size=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "badge_size=$val" "$path"
+add_section "Episode - text_size"
+for val in 50 75 100 150 200; do
+    path=$(fetch_image "episode_text_size=$val" "episode-default" "text_size=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
+    add_image "text_size=$val" "$path"
 done
 end_section
 

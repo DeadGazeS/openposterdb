@@ -7,7 +7,6 @@ import {
   BADGE_STYLE_LABELS,
   BADGE_DIRECTION_LABELS,
   LABEL_STYLE_LABELS,
-  BADGE_SIZE_LABELS,
   BADGE_SHAPE_LABELS,
   BADGE_BACKGROUND_LABELS,
   IMAGE_SOURCE_LABELS,
@@ -109,11 +108,6 @@ describe('enum code → label maps', () => {
 
   it('label style maps the t/i/o codes', () => {
     expect(LABEL_STYLE_LABELS).toEqual({ t: 'Text', i: 'Icon', o: 'Official' })
-  })
-
-  it('badge size maps every xs–xl code', () => {
-    expect(Object.keys(BADGE_SIZE_LABELS).sort()).toEqual(['l', 'm', 's', 'xl', 'xs'])
-    expect(BADGE_SIZE_LABELS.m).toBe('Medium')
   })
 
   it('badge shape maps the r/p codes', () => {

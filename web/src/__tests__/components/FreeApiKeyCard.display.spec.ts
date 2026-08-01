@@ -23,11 +23,14 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     poster_badge_style: 'v', logo_badge_style: 'v', backdrop_badge_style: 'h',
     poster_label_style: 'o', logo_label_style: 'o', backdrop_label_style: 'o',
     poster_badge_direction: 'd', poster_badge_split: false,
-    poster_badge_size: 'm', logo_badge_size: 'm', backdrop_badge_size: 'm',
+    poster_text_size: 100, logo_text_size: 100, backdrop_text_size: 100,
+    poster_badge_size: 100, logo_badge_size: 100, backdrop_badge_size: 100,
+    poster_logo_size: 100, logo_logo_size: 100, backdrop_logo_size: 100,
     backdrop_position: 'tc', backdrop_badge_direction: 'd',
     backdrop_edge_inset_x: 0, backdrop_edge_inset_y: 0,
     episode_ratings_limit: 3, episode_badge_style: 'v', episode_label_style: 'o',
-    episode_badge_size: 'm', episode_position: 'bc', episode_badge_direction: 'd',
+    episode_text_size: 100, episode_badge_size: 100, episode_logo_size: 100,
+    episode_position: 'bc', episode_badge_direction: 'd',
     episode_blur: false, poster_fit: 'native', ...overrides,
   }
 }
