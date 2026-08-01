@@ -4,7 +4,7 @@ Most self-hosters should use Docker (see the [README](../README.md)). These inst
 
 ## Requirements
 
-- Rust toolchain
+- Go 1.25+
 - Node.js 20.19+ (for the admin UI)
 - A [TMDB API key](https://www.themoviedb.org/settings/api)
 - At least one ratings source: [MDBList API key](https://mdblist.com/preferences/) (preferred — covers all 9 rating sources), [OMDb API key](https://www.omdbapi.com/apikey.aspx), or [Trakt Client ID](https://trakt.tv/oauth/applications)
@@ -13,10 +13,10 @@ Most self-hosters should use Docker (see the [README](../README.md)). These inst
 ## API
 
 ```bash
-cd api
+cd api-go
 cp .env.example .env
 # Edit .env — at minimum set TMDB_API_KEY, MDBLIST_API_KEY (or OMDB), and JWT_SECRET
-cargo run --release
+go run ./cmd/server/
 ```
 
 See [Configuration](configuration.md) for the full list of environment variables.
@@ -36,7 +36,7 @@ If you access the UI over plain HTTP (no reverse proxy with TLS), add `COOKIE_SE
 
 ## Tech stack
 
-- **API**: Rust, Axum, SeaORM + SQLite, image/imageproc for rendering
+- **API**: Go, net/http + SQLite, image for rendering
 - **Web**: Vue 3, TypeScript, Tailwind CSS, Vite
 
 See [Architecture](architecture.md) for how caching and rendering work internally.
