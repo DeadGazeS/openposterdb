@@ -9,17 +9,14 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/test.yml"
-      - "api/**"
+      - "api-go/**"
       - "web/**"
   pull_request:
     branches: [main]
     paths:
       - ".github/workflows/test.yml"
-      - "api/**"
+      - "api-go/**"
       - "web/**"
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   backend:
@@ -28,15 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
         with:
-          workspaces: api
+          go-version: "1.25"
+          cache-dependency-path: api-go/go.sum
 
       - name: Run tests
-        working-directory: api
-        run: cargo test
+        working-directory: api-go
+        run: go test ./...
 
   frontend-unit:
     name: Frontend unit tests
@@ -64,11 +60,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
         with:
-          workspaces: api
+          go-version: "1.25"
+          cache-dependency-path: api-go/go.sum
 
       - uses: actions/setup-node@v4
         with:
@@ -89,8 +84,8 @@ jobs:
         run: npm run build-only
 
       - name: Build backend
-        working-directory: api
-        run: cargo build --release --features test-support
+        working-directory: api-go
+        run: go build -o openposterdb ./cmd/server/
 
       - name: Start backend
         env:
@@ -106,7 +101,7 @@ jobs:
           STATIC_DIR: web/dist
         run: |
           mkdir -p "$CACHE_DIR"
-          api/target/release/openposterdb-api &
+          api-go/openposterdb &
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:3333/api/auth/status > /dev/null 2>&1; then
               echo "Backend ready"
