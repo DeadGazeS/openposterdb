@@ -1,6 +1,6 @@
 # Configuration
 
-OpenPosterDB is configured entirely through environment variables. When using Docker Compose, set them in a `.env` file at the project root (copy `api/.env.example` to get started); when using `docker run`, pass them with `-e`.
+OpenPosterDB is configured entirely through environment variables. When using Docker Compose, set them in a `.env` file at the project root (copy `api-go/.env.example` to get started); when using `docker run`, pass them with `-e`.
 
 ## API keys
 
@@ -52,4 +52,6 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 
 | Variable | Default | Description |
 |---|---|---|
-| `RUST_LOG` | `warn` | Log level filter — levels: `error`, `warn`, `info`, `debug`, `trace`. Supports comma-separated per-module overrides. Relevant modules: `openposterdb_api` (app), `tower_http` (HTTP tracing), `sea_orm` / `sqlx` (database), `reqwest` / `hyper` (HTTP client/server). Example: `warn,openposterdb_api=info,tower_http=debug` |
+| `LOG_LEVEL` | `info` | Log verbosity: `debug` (shows actions — image requests, cache hits, generation, settings saves), `info` (default), `warn` (only warnings and errors), `error`, `off`. |
+
+*(The original Rust backend used `RUST_LOG`; the Go backend uses `LOG_LEVEL`.)*
