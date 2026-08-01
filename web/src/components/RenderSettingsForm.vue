@@ -37,9 +37,15 @@ export interface RenderSettings {
   poster_badge_direction: string
   poster_badge_split: boolean
   poster_fit: string
-  poster_badge_size: string
-  logo_badge_size: string
-  backdrop_badge_size: string
+  poster_text_size: number
+  logo_text_size: number
+  backdrop_text_size: number
+  poster_badge_size: number
+  logo_badge_size: number
+  backdrop_badge_size: number
+  poster_logo_size: number
+  logo_logo_size: number
+  backdrop_logo_size: number
   backdrop_position: string
   backdrop_badge_direction: string
   backdrop_edge_inset_x: number
@@ -47,7 +53,9 @@ export interface RenderSettings {
   episode_ratings_limit: number
   episode_badge_style: string
   episode_label_style: string
-  episode_badge_size: string
+  episode_text_size: number
+  episode_badge_size: number
+  episode_logo_size: number
   episode_position: string
   episode_badge_direction: string
   episode_blur: boolean
@@ -69,10 +77,10 @@ const props = withDefaults(defineProps<{
   loadSettings: () => Promise<RenderSettings | null>
   saveSettings: (s: SaveSettingsPayload) => Promise<string | null>
   resetSettings?: () => Promise<boolean>
-  fetchPreview: (ratingsLimit: number, ratingsOrder: string, posterPosition?: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, badgeSize?: string, ratingsExclude?: string, posterSplit?: boolean, badgeShape?: string, badgeAlpha?: number, posterFit?: string, colors?: Record<string, SourceColors>) => Promise<Response>
-  fetchLogoPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeSize?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, colors?: Record<string, SourceColors>) => Promise<Response>
-  fetchBackdropPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeSize?: string, position?: string, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, colors?: Record<string, SourceColors>) => Promise<Response>
-  fetchEpisodePreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeSize?: string, position?: string, badgeDirection?: string, blur?: boolean, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, colors?: Record<string, SourceColors>) => Promise<Response>
+  fetchPreview: (ratingsLimit: number, ratingsOrder: string, posterPosition?: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, textSize?: number, ratingsExclude?: string, posterSplit?: boolean, badgeShape?: string, badgeAlpha?: number, posterFit?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
+  fetchLogoPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
+  fetchBackdropPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, position?: string, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
+  fetchEpisodePreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, position?: string, badgeDirection?: string, blur?: boolean, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
 }>(), {
   showActions: true,
 })
@@ -98,9 +106,15 @@ const editBackdropLabelStyle = ref(props.settings.backdrop_label_style || 'o')
 const editPosterBadgeDirection = ref(props.settings.poster_badge_direction || 'd')
 const editPosterBadgeSplit = ref(props.settings.poster_badge_split ?? false)
 const editPosterFit = ref(props.settings.poster_fit || 'native')
-const editPosterBadgeSize = ref(props.settings.poster_badge_size || 'm')
-const editLogoBadgeSize = ref(props.settings.logo_badge_size || 'm')
-const editBackdropBadgeSize = ref(props.settings.backdrop_badge_size || 'm')
+const editPosterTextSize = ref(props.settings.poster_text_size ?? 100)
+const editLogoTextSize = ref(props.settings.logo_text_size ?? 100)
+const editBackdropTextSize = ref(props.settings.backdrop_text_size ?? 100)
+const editPosterBadgeSize = ref(props.settings.poster_badge_size ?? 100)
+const editLogoBadgeSize = ref(props.settings.logo_badge_size ?? 100)
+const editBackdropBadgeSize = ref(props.settings.backdrop_badge_size ?? 100)
+const editPosterLogoSize = ref(props.settings.poster_logo_size ?? 100)
+const editLogoLogoSize = ref(props.settings.logo_logo_size ?? 100)
+const editBackdropLogoSize = ref(props.settings.backdrop_logo_size ?? 100)
 const editBackdropPosition = ref(props.settings.backdrop_position || 'tr')
 const editBackdropBadgeDirection = ref(props.settings.backdrop_badge_direction || 'd')
 const editBackdropEdgeInsetX = ref(props.settings.backdrop_edge_inset_x ?? 0)
@@ -108,7 +122,9 @@ const editBackdropEdgeInsetY = ref(props.settings.backdrop_edge_inset_y ?? 0)
 const editEpisodeRatingsLimit = ref(props.settings.episode_ratings_limit ?? 1)
 const editEpisodeBadgeStyle = ref(props.settings.episode_badge_style || 'v')
 const editEpisodeLabelStyle = ref(props.settings.episode_label_style || 'o')
-const editEpisodeBadgeSize = ref(props.settings.episode_badge_size || 'l')
+const editEpisodeTextSize = ref(props.settings.episode_text_size ?? 100)
+const editEpisodeBadgeSize = ref(props.settings.episode_badge_size ?? 100)
+const editEpisodeLogoSize = ref(props.settings.episode_logo_size ?? 100)
 const editEpisodePosition = ref(props.settings.episode_position || 'tr')
 const editEpisodeBadgeDirection = ref(props.settings.episode_badge_direction || 'v')
 const editEpisodeBlur = ref(props.settings.episode_blur ?? false)
@@ -120,7 +136,7 @@ const editPosterBadgeAlpha = ref(props.settings.poster_badge_alpha ?? 80)
 const editLogoBadgeAlpha = ref(props.settings.logo_badge_alpha ?? 80)
 const editBackdropBadgeAlpha = ref(props.settings.backdrop_badge_alpha ?? 80)
 const editEpisodeBadgeAlpha = ref(props.settings.episode_badge_alpha ?? 80)
-const editColors = ref<Record<string, SourceColors>>({ ...(props.settings.colors ?? {}) })
+const editColors = ref<Record<string, SourceColors>>({ ...props.settings.colors })
 
 // Which edges the current backdrop position anchors to. The horizontal inset
 // only applies to left/right positions and the vertical inset only to top/bottom
@@ -153,9 +169,15 @@ function applySettings(s: RenderSettings) {
   editPosterBadgeDirection.value = s.poster_badge_direction || 'd'
   editPosterBadgeSplit.value = s.poster_badge_split ?? false
   editPosterFit.value = s.poster_fit || 'native'
-  editPosterBadgeSize.value = s.poster_badge_size || 'm'
-  editLogoBadgeSize.value = s.logo_badge_size || 'm'
-  editBackdropBadgeSize.value = s.backdrop_badge_size || 'm'
+  editPosterTextSize.value = s.poster_text_size ?? 100
+  editLogoTextSize.value = s.logo_text_size ?? 100
+  editBackdropTextSize.value = s.backdrop_text_size ?? 100
+  editPosterBadgeSize.value = s.poster_badge_size ?? 100
+  editLogoBadgeSize.value = s.logo_badge_size ?? 100
+  editBackdropBadgeSize.value = s.backdrop_badge_size ?? 100
+  editPosterLogoSize.value = s.poster_logo_size ?? 100
+  editLogoLogoSize.value = s.logo_logo_size ?? 100
+  editBackdropLogoSize.value = s.backdrop_logo_size ?? 100
   editBackdropPosition.value = s.backdrop_position || 'tr'
   editBackdropBadgeDirection.value = s.backdrop_badge_direction || 'd'
   editBackdropEdgeInsetX.value = s.backdrop_edge_inset_x ?? 0
@@ -163,7 +185,9 @@ function applySettings(s: RenderSettings) {
   editEpisodeRatingsLimit.value = s.episode_ratings_limit ?? 1
   editEpisodeBadgeStyle.value = s.episode_badge_style || 'v'
   editEpisodeLabelStyle.value = s.episode_label_style || 'o'
-  editEpisodeBadgeSize.value = s.episode_badge_size || 'l'
+  editEpisodeTextSize.value = s.episode_text_size ?? 100
+  editEpisodeBadgeSize.value = s.episode_badge_size ?? 100
+  editEpisodeLogoSize.value = s.episode_logo_size ?? 100
   editEpisodePosition.value = s.episode_position || 'tr'
   editEpisodeBadgeDirection.value = s.episode_badge_direction || 'v'
   editEpisodeBlur.value = s.episode_blur ?? false
@@ -175,11 +199,11 @@ function applySettings(s: RenderSettings) {
   editLogoBadgeAlpha.value = s.logo_badge_alpha ?? 80
   editBackdropBadgeAlpha.value = s.backdrop_badge_alpha ?? 80
   editEpisodeBadgeAlpha.value = s.episode_badge_alpha ?? 80
-  editColors.value = { ...(s.colors ?? {}) }
+  editColors.value = { ...s.colors }
 }
 
 function setColor(sourceKey: string, attr: keyof SourceColors, value: string) {
-  const cur = { ...(editColors.value[sourceKey] ?? {}) }
+  const cur = { ...editColors.value[sourceKey] }
   if (value === '') delete cur[attr]
   else cur[attr] = value
   editColors.value = { ...editColors.value, [sourceKey]: cur }
@@ -223,9 +247,15 @@ function editsSnapshot() {
     poster_badge_direction: editPosterBadgeDirection.value,
     poster_badge_split: editPosterBadgeSplit.value,
     poster_fit: editPosterFit.value,
+    poster_text_size: editPosterTextSize.value,
+    logo_text_size: editLogoTextSize.value,
+    backdrop_text_size: editBackdropTextSize.value,
     poster_badge_size: editPosterBadgeSize.value,
     logo_badge_size: editLogoBadgeSize.value,
     backdrop_badge_size: editBackdropBadgeSize.value,
+    poster_logo_size: editPosterLogoSize.value,
+    logo_logo_size: editLogoLogoSize.value,
+    backdrop_logo_size: editBackdropLogoSize.value,
     backdrop_position: editBackdropPosition.value,
     backdrop_badge_direction: editBackdropBadgeDirection.value,
     backdrop_edge_inset_x: editBackdropEdgeInsetX.value,
@@ -233,7 +263,9 @@ function editsSnapshot() {
     episode_ratings_limit: editEpisodeRatingsLimit.value,
     episode_badge_style: editEpisodeBadgeStyle.value,
     episode_label_style: editEpisodeLabelStyle.value,
+    episode_text_size: editEpisodeTextSize.value,
     episode_badge_size: editEpisodeBadgeSize.value,
+    episode_logo_size: editEpisodeLogoSize.value,
     episode_position: editEpisodePosition.value,
     episode_badge_direction: editEpisodeBadgeDirection.value,
     episode_blur: editEpisodeBlur.value,
@@ -269,9 +301,15 @@ function settingsSnapshot(s: RenderSettings) {
     poster_badge_direction: s.poster_badge_direction || 'd',
     poster_badge_split: s.poster_badge_split ?? false,
     poster_fit: s.poster_fit || 'native',
-    poster_badge_size: s.poster_badge_size || 'm',
-    logo_badge_size: s.logo_badge_size || 'm',
-    backdrop_badge_size: s.backdrop_badge_size || 'm',
+    poster_text_size: s.poster_text_size ?? 100,
+    logo_text_size: s.logo_text_size ?? 100,
+    backdrop_text_size: s.backdrop_text_size ?? 100,
+    poster_badge_size: s.poster_badge_size ?? 100,
+    logo_badge_size: s.logo_badge_size ?? 100,
+    backdrop_badge_size: s.backdrop_badge_size ?? 100,
+    poster_logo_size: s.poster_logo_size ?? 100,
+    logo_logo_size: s.logo_logo_size ?? 100,
+    backdrop_logo_size: s.backdrop_logo_size ?? 100,
     backdrop_position: s.backdrop_position || 'tr',
     backdrop_badge_direction: s.backdrop_badge_direction || 'd',
     backdrop_edge_inset_x: s.backdrop_edge_inset_x ?? 0,
@@ -279,7 +317,9 @@ function settingsSnapshot(s: RenderSettings) {
     episode_ratings_limit: s.episode_ratings_limit ?? 1,
     episode_badge_style: s.episode_badge_style || 'v',
     episode_label_style: s.episode_label_style || 'o',
-    episode_badge_size: s.episode_badge_size || 'l',
+    episode_text_size: s.episode_text_size ?? 100,
+    episode_badge_size: s.episode_badge_size ?? 100,
+    episode_logo_size: s.episode_logo_size ?? 100,
     episode_position: s.episode_position || 'tr',
     episode_badge_direction: s.episode_badge_direction || 'v',
     episode_blur: s.episode_blur ?? false,
@@ -299,10 +339,18 @@ const dirty = computed(() => JSON.stringify(editsSnapshot()) !== JSON.stringify(
 
 watch(() => props.settings, (s) => {
   syncing = true
+  const before = JSON.stringify(editsSnapshot())
   currentSettings.value = s
   applySettings(s)
   nextTick(() => {
     syncing = false
+    // External settings updates (react-query refetch, post-save reload) are
+    // applied while `syncing` blocks the edit watchers, so previews would
+    // otherwise stay on their stale render. Refresh them when the applied
+    // values actually changed.
+    if (JSON.stringify(editsSnapshot()) !== before) {
+      updateAllPreviews()
+    }
   })
 })
 
@@ -345,9 +393,15 @@ async function save() {
       poster_badge_direction: editPosterBadgeDirection.value,
       poster_badge_split: editPosterBadgeSplit.value,
       poster_fit: editPosterFit.value,
+      poster_text_size: editPosterTextSize.value,
+      logo_text_size: editLogoTextSize.value,
+      backdrop_text_size: editBackdropTextSize.value,
       poster_badge_size: editPosterBadgeSize.value,
       logo_badge_size: editLogoBadgeSize.value,
       backdrop_badge_size: editBackdropBadgeSize.value,
+      poster_logo_size: editPosterLogoSize.value,
+      logo_logo_size: editLogoLogoSize.value,
+      backdrop_logo_size: editBackdropLogoSize.value,
       backdrop_position: editBackdropPosition.value,
       backdrop_badge_direction: editBackdropBadgeDirection.value,
       backdrop_edge_inset_x: coerceInset(editBackdropEdgeInsetX.value),
@@ -355,7 +409,9 @@ async function save() {
       episode_ratings_limit: editEpisodeRatingsLimit.value,
       episode_badge_style: editEpisodeBadgeStyle.value,
       episode_label_style: editEpisodeLabelStyle.value,
+      episode_text_size: editEpisodeTextSize.value,
       episode_badge_size: editEpisodeBadgeSize.value,
+      episode_logo_size: editEpisodeLogoSize.value,
       episode_position: editEpisodePosition.value,
       episode_badge_direction: editEpisodeBadgeDirection.value,
       episode_blur: editEpisodeBlur.value,
@@ -481,24 +537,24 @@ let backdropPreviewTimer: ReturnType<typeof setTimeout> | null = null
 let episodePreviewTimer: ReturnType<typeof setTimeout> | null = null
 
 function updatePosterPreview() {
-  fetchPreviewImage(posterPreview.value, (_limit, order) => props.fetchPreview(editRatingsLimit.value, order, editPosterPosition.value, editPosterBadgeStyle.value, editPosterLabelStyle.value, editPosterBadgeDirection.value, editPosterBadgeSize.value, editRatingsExclude.value.join(','), editPosterBadgeSplit.value, editPosterBadgeShape.value, editPosterBadgeAlpha.value, editPosterFit.value, editColors.value))
+  fetchPreviewImage(posterPreview.value, (_limit, order) => props.fetchPreview(editRatingsLimit.value, order, editPosterPosition.value, editPosterBadgeStyle.value, editPosterLabelStyle.value, editPosterBadgeDirection.value, editPosterTextSize.value, editRatingsExclude.value.join(','), editPosterBadgeSplit.value, editPosterBadgeShape.value, editPosterBadgeAlpha.value, editPosterFit.value, editPosterBadgeSize.value, editPosterLogoSize.value, editColors.value))
 }
 
 function updateLogoPreview() {
   if (props.fetchLogoPreview) {
-    fetchPreviewImage(logoPreview.value, (_limit, order) => props.fetchLogoPreview!(editLogoRatingsLimit.value, order, editLogoBadgeStyle.value, editLogoLabelStyle.value, editLogoBadgeSize.value, editRatingsExclude.value.join(','), editLogoBadgeShape.value, editLogoBadgeAlpha.value, editColors.value))
+    fetchPreviewImage(logoPreview.value, (_limit, order) => props.fetchLogoPreview!(editLogoRatingsLimit.value, order, editLogoBadgeStyle.value, editLogoLabelStyle.value, editLogoTextSize.value, editRatingsExclude.value.join(','), editLogoBadgeShape.value, editLogoBadgeAlpha.value, editLogoBadgeSize.value, editLogoLogoSize.value, editColors.value))
   }
 }
 
 function updateBackdropPreview() {
   if (props.fetchBackdropPreview) {
-    fetchPreviewImage(backdropPreview.value, (_limit, order) => props.fetchBackdropPreview!(editBackdropRatingsLimit.value, order, editBackdropBadgeStyle.value, editBackdropLabelStyle.value, editBackdropBadgeSize.value, editBackdropPosition.value, editBackdropBadgeDirection.value, editRatingsExclude.value.join(','), editBackdropBadgeShape.value, editBackdropBadgeAlpha.value, editBackdropEdgeInsetX.value, editBackdropEdgeInsetY.value, editColors.value))
+    fetchPreviewImage(backdropPreview.value, (_limit, order) => props.fetchBackdropPreview!(editBackdropRatingsLimit.value, order, editBackdropBadgeStyle.value, editBackdropLabelStyle.value, editBackdropTextSize.value, editBackdropPosition.value, editBackdropBadgeDirection.value, editRatingsExclude.value.join(','), editBackdropBadgeShape.value, editBackdropBadgeAlpha.value, editBackdropEdgeInsetX.value, editBackdropEdgeInsetY.value, editBackdropBadgeSize.value, editBackdropLogoSize.value, editColors.value))
   }
 }
 
 function updateEpisodePreview() {
   if (props.fetchEpisodePreview) {
-    fetchPreviewImage(episodePreview.value, (_limit, order) => props.fetchEpisodePreview!(editEpisodeRatingsLimit.value, order, editEpisodeBadgeStyle.value, editEpisodeLabelStyle.value, editEpisodeBadgeSize.value, editEpisodePosition.value, editEpisodeBadgeDirection.value, editEpisodeBlur.value, editRatingsExclude.value.join(','), editEpisodeBadgeShape.value, editEpisodeBadgeAlpha.value, editColors.value))
+    fetchPreviewImage(episodePreview.value, (_limit, order) => props.fetchEpisodePreview!(editEpisodeRatingsLimit.value, order, editEpisodeBadgeStyle.value, editEpisodeLabelStyle.value, editEpisodeTextSize.value, editEpisodePosition.value, editEpisodeBadgeDirection.value, editEpisodeBlur.value, editRatingsExclude.value.join(','), editEpisodeBadgeShape.value, editEpisodeBadgeAlpha.value, editEpisodeBadgeSize.value, editEpisodeLogoSize.value, editColors.value))
   }
 }
 
@@ -523,28 +579,28 @@ watch([editRatingsOrder, editRatingsExclude, editColors], () => {
 }, { deep: true })
 
 // Poster-only settings
-watch([editRatingsLimit, editPosterPosition, editPosterBadgeStyle, editPosterLabelStyle, editPosterBadgeDirection, editPosterBadgeSplit, editPosterFit, editPosterBadgeSize, editPosterBadgeShape, editPosterBadgeAlpha], () => {
+watch([editRatingsLimit, editPosterPosition, editPosterBadgeStyle, editPosterLabelStyle, editPosterBadgeDirection, editPosterBadgeSplit, editPosterFit, editPosterTextSize, editPosterBadgeSize, editPosterLogoSize, editPosterBadgeShape, editPosterBadgeAlpha], () => {
   if (syncing) return
   if (posterPreviewTimer) clearTimeout(posterPreviewTimer)
   posterPreviewTimer = setTimeout(updatePosterPreview, 500)
 })
 
 // Logo-only settings
-watch([editLogoRatingsLimit, editLogoBadgeStyle, editLogoLabelStyle, editLogoBadgeSize, editLogoBadgeShape, editLogoBadgeAlpha], () => {
+watch([editLogoRatingsLimit, editLogoBadgeStyle, editLogoLabelStyle, editLogoTextSize, editLogoBadgeSize, editLogoLogoSize, editLogoBadgeShape, editLogoBadgeAlpha], () => {
   if (syncing) return
   if (logoPreviewTimer) clearTimeout(logoPreviewTimer)
   logoPreviewTimer = setTimeout(updateLogoPreview, 500)
 })
 
 // Backdrop-only settings
-watch([editBackdropRatingsLimit, editBackdropBadgeStyle, editBackdropLabelStyle, editBackdropBadgeSize, editBackdropPosition, editBackdropBadgeDirection, editBackdropEdgeInsetX, editBackdropEdgeInsetY, editBackdropBadgeShape, editBackdropBadgeAlpha], () => {
+watch([editBackdropRatingsLimit, editBackdropBadgeStyle, editBackdropLabelStyle, editBackdropTextSize, editBackdropBadgeSize, editBackdropLogoSize, editBackdropPosition, editBackdropBadgeDirection, editBackdropEdgeInsetX, editBackdropEdgeInsetY, editBackdropBadgeShape, editBackdropBadgeAlpha], () => {
   if (syncing) return
   if (backdropPreviewTimer) clearTimeout(backdropPreviewTimer)
   backdropPreviewTimer = setTimeout(updateBackdropPreview, 500)
 })
 
 // Episode-only settings
-watch([editEpisodeRatingsLimit, editEpisodeBadgeStyle, editEpisodeLabelStyle, editEpisodeBadgeSize, editEpisodePosition, editEpisodeBadgeDirection, editEpisodeBlur, editEpisodeBadgeShape, editEpisodeBadgeAlpha], () => {
+watch([editEpisodeRatingsLimit, editEpisodeBadgeStyle, editEpisodeLabelStyle, editEpisodeTextSize, editEpisodeBadgeSize, editEpisodeLogoSize, editEpisodePosition, editEpisodeBadgeDirection, editEpisodeBlur, editEpisodeBadgeShape, editEpisodeBadgeAlpha], () => {
   if (syncing) return
   if (episodePreviewTimer) clearTimeout(episodePreviewTimer)
   episodePreviewTimer = setTimeout(updateEpisodePreview, 500)
@@ -929,22 +985,55 @@ function toggleExclude(key: string, checked: boolean) {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label :for="inputId('poster-badge-size')">Badge size</Label>
-            <Select
-              :model-value="editPosterBadgeSize"
-              @update:model-value="editPosterBadgeSize = $event as string"
-            >
-              <SelectTrigger :id="inputId('poster-badge-size')" class="max-w-xs" data-testid="poster-badge-size-select">
-                <SelectValue placeholder="Select size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="xs">Extra Small</SelectItem>
-                <SelectItem value="s">Small</SelectItem>
-                <SelectItem value="m">Medium</SelectItem>
-                <SelectItem value="l">Large</SelectItem>
-                <SelectItem value="xl">Extra Large</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('poster-text-size')">Text size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterTextSize }}%</span>
+            </div>
+            <input
+              :id="inputId('poster-text-size')"
+              v-model.number="editPosterTextSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`poster-text-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('poster-badge-size')">Badge size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterBadgeSize }}%</span>
+            </div>
+            <input
+              :id="inputId('poster-badge-size')"
+              v-model.number="editPosterBadgeSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`poster-badge-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('poster-logo-size')">Logo size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterLogoSize }}%</span>
+            </div>
+            <input
+              :id="inputId('poster-logo-size')"
+              v-model.number="editPosterLogoSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`poster-logo-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
           </div>
           <div class="space-y-2">
             <Label :for="inputId('poster-badge-shape')">Badge shape</Label>
@@ -1091,22 +1180,55 @@ function toggleExclude(key: string, checked: boolean) {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label :for="inputId('logo-badge-size')">Badge size</Label>
-            <Select
-              :model-value="editLogoBadgeSize"
-              @update:model-value="editLogoBadgeSize = $event as string"
-            >
-              <SelectTrigger :id="inputId('logo-badge-size')" class="max-w-xs" data-testid="logo-badge-size-select">
-                <SelectValue placeholder="Select size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="xs">Extra Small</SelectItem>
-                <SelectItem value="s">Small</SelectItem>
-                <SelectItem value="m">Medium</SelectItem>
-                <SelectItem value="l">Large</SelectItem>
-                <SelectItem value="xl">Extra Large</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('logo-text-size')">Text size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoTextSize }}%</span>
+            </div>
+            <input
+              :id="inputId('logo-text-size')"
+              v-model.number="editLogoTextSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`logo-text-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('logo-badge-size')">Badge size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoBadgeSize }}%</span>
+            </div>
+            <input
+              :id="inputId('logo-badge-size')"
+              v-model.number="editLogoBadgeSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`logo-badge-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('logo-logo-size')">Logo size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoLogoSize }}%</span>
+            </div>
+            <input
+              :id="inputId('logo-logo-size')"
+              v-model.number="editLogoLogoSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`logo-logo-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
           </div>
           <div class="space-y-2">
             <Label :for="inputId('logo-badge-shape')">Badge shape</Label>
@@ -1210,22 +1332,55 @@ function toggleExclude(key: string, checked: boolean) {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label :for="inputId('backdrop-badge-size')">Badge size</Label>
-            <Select
-              :model-value="editBackdropBadgeSize"
-              @update:model-value="editBackdropBadgeSize = $event as string"
-            >
-              <SelectTrigger :id="inputId('backdrop-badge-size')" class="max-w-xs" data-testid="backdrop-badge-size-select">
-                <SelectValue placeholder="Select size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="xs">Extra Small</SelectItem>
-                <SelectItem value="s">Small</SelectItem>
-                <SelectItem value="m">Medium</SelectItem>
-                <SelectItem value="l">Large</SelectItem>
-                <SelectItem value="xl">Extra Large</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('backdrop-text-size')">Text size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropTextSize }}%</span>
+            </div>
+            <input
+              :id="inputId('backdrop-text-size')"
+              v-model.number="editBackdropTextSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`backdrop-text-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('backdrop-badge-size')">Badge size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropBadgeSize }}%</span>
+            </div>
+            <input
+              :id="inputId('backdrop-badge-size')"
+              v-model.number="editBackdropBadgeSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`backdrop-badge-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('backdrop-logo-size')">Logo size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropLogoSize }}%</span>
+            </div>
+            <input
+              :id="inputId('backdrop-logo-size')"
+              v-model.number="editBackdropLogoSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`backdrop-logo-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
           </div>
           <div class="space-y-2">
             <Label :for="inputId('backdrop-badge-shape')">Badge shape</Label>
@@ -1439,22 +1594,55 @@ function toggleExclude(key: string, checked: boolean) {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label :for="inputId('episode-badge-size')">Badge size</Label>
-            <Select
-              :model-value="editEpisodeBadgeSize"
-              @update:model-value="editEpisodeBadgeSize = $event as string"
-            >
-              <SelectTrigger :id="inputId('episode-badge-size')" class="max-w-xs" data-testid="episode-badge-size-select">
-                <SelectValue placeholder="Select size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="xs">Extra Small</SelectItem>
-                <SelectItem value="s">Small</SelectItem>
-                <SelectItem value="m">Medium</SelectItem>
-                <SelectItem value="l">Large</SelectItem>
-                <SelectItem value="xl">Extra Large</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('episode-text-size')">Text size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeTextSize }}%</span>
+            </div>
+            <input
+              :id="inputId('episode-text-size')"
+              v-model.number="editEpisodeTextSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`episode-text-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('episode-badge-size')">Badge size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeBadgeSize }}%</span>
+            </div>
+            <input
+              :id="inputId('episode-badge-size')"
+              v-model.number="editEpisodeBadgeSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`episode-badge-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <Label :for="inputId('episode-logo-size')">Logo size</Label>
+              <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeLogoSize }}%</span>
+            </div>
+            <input
+              :id="inputId('episode-logo-size')"
+              v-model.number="editEpisodeLogoSize"
+              type="range"
+              min="50"
+              max="200"
+              step="1"
+              :data-testid="`episode-logo-size-slider`"
+              class="w-full max-w-xs accent-primary"
+            />
+            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
           </div>
           <div class="space-y-2">
             <Label :for="inputId('episode-badge-shape')">Badge shape</Label>
