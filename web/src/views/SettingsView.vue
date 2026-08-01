@@ -10,10 +10,58 @@ import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
 
 type SettingsResponse = RenderSettings & { free_api_key_enabled: boolean; free_api_key_locked: boolean }
 
+type ServiceKey = { locked: boolean; has_key: boolean; masked: string | null }
+type ServiceKeysResponse = { mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
+
 const freeApiKeyEnabled = ref(false)
 const freeKeyLoading = ref(false)
 const freeKeyError = ref('')
 const cacheMessage = ref('')
+
+const serviceKeysSaving = ref<string | null>(null)
+const serviceKeysError = ref('')
+
+const serviceKeyInputs = ref({
+  mdblist: '',
+  omdb: '',
+  fanart: '',
+  trakt: '',
+})
+
+const {
+  data: serviceKeys,
+  refetch: refetchServiceKeys,
+} = useQuery<ServiceKeysResponse>({
+  queryKey: ['service-keys'],
+  queryFn: async () => {
+    const res = await adminApi.getServiceKeys()
+    if (!res.ok) throw new Error('Failed to fetch service keys')
+    return res.json()
+  },
+})
+
+async function saveServiceKey(service: string) {
+  if (serviceKeysSaving.value) return
+  serviceKeysSaving.value = service
+  serviceKeysError.value = ''
+  const value = serviceKeyInputs.value[service as keyof typeof serviceKeyInputs.value]
+  const res = await adminApi.updateServiceKeys({ [service]: value || '' })
+  if (res.ok) {
+    serviceKeyInputs.value[service as keyof typeof serviceKeyInputs.value] = service === 'mdblist' && !value ? '' : ''
+    await refetchServiceKeys()
+  } else {
+    const data = await res.json().catch(() => null)
+    serviceKeysError.value = data?.error || 'Failed to save'
+  }
+  serviceKeysSaving.value = null
+}
+
+const serviceLabels: Record<string, string> = {
+  mdblist: 'MDBList',
+  omdb: 'OMDb',
+  fanart: 'Fanart.tv',
+  trakt: 'Trakt',
+}
 
 const {
   data: settings,
@@ -105,6 +153,43 @@ async function toggleFreeApiKey() {
         <p v-if="settings?.free_api_key_locked" class="text-sm text-muted-foreground">
           Controlled by <code class="font-mono text-xs bg-muted px-1 py-0.5 rounded">FREE_KEY_ENABLED</code> environment variable.
         </p>
+      </div>
+
+      <div class="rounded-lg border p-6 space-y-4">
+        <h2 class="text-lg font-semibold">External API Keys</h2>
+        <p class="text-sm text-muted-foreground">
+          API keys for external rating and image providers. Keys set via environment
+          variables are locked and cannot be changed here. After saving, the running
+          service is updated without a restart.
+        </p>
+        <p v-if="serviceKeysError" class="text-sm text-destructive">{{ serviceKeysError }}</p>
+
+        <div v-for="service in (['mdblist', 'omdb', 'fanart', 'trakt'] as const)" :key="service" class="space-y-2">
+          <label :for="`key-${service}`" class="text-sm font-medium flex items-center gap-2">
+            {{ serviceLabels[service] }}
+            <span v-if="serviceKeys?.[service]?.locked" class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">env</span>
+          </label>
+          <div v-if="serviceKeys?.[service]?.locked && serviceKeys?.[service]?.masked" class="text-sm text-muted-foreground font-mono">
+            {{ serviceKeys?.[service]?.masked }}
+          </div>
+          <div v-else class="flex gap-2">
+            <input
+              :id="`key-${service}`"
+              v-model="serviceKeyInputs[service]"
+              type="text"
+              class="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+              :placeholder="serviceKeys?.[service]?.has_key ? serviceKeys?.[service]?.masked ?? '' : 'Enter key...'"
+            />
+            <button
+              type="button"
+              class="inline-flex items-center justify-center rounded-md h-9 px-4 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              :disabled="serviceKeysSaving !== null"
+              @click="saveServiceKey(service)"
+            >
+              {{ serviceKeysSaving === service ? 'Saving...' : 'Save' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="rounded-lg border p-6 space-y-4">
