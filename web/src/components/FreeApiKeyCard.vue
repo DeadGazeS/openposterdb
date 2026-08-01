@@ -11,7 +11,6 @@ import {
   BADGE_STYLE_LABELS,
   BADGE_DIRECTION_LABELS,
   LABEL_STYLE_LABELS,
-  BADGE_SIZE_LABELS,
   BADGE_SHAPE_LABELS,
   BADGE_BACKGROUND_LABELS,
   IMAGE_SOURCE_LABELS,
@@ -54,7 +53,9 @@ const lang = ref('any')
 const imageSize = ref<'default' | 'small' | 'medium' | 'large' | 'verylarge'>('default')
 const badgeStyle = ref('default')
 const labelStyle = ref('default')
-const badgeSize = ref('default')
+const textSize = ref('')
+const badgeSizePct = ref('')
+const logoSizePct = ref('')
 const badgeShape = ref('default')
 const badgeBackground = ref('default')
 const ratingsLimit = ref('default')
@@ -141,13 +142,13 @@ const typeDefaults = computed(() => {
   if (!d) return null
   switch (imageType.value) {
     case 'logo':
-      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, badge_size: d.logo_badge_size, ratings_limit: d.logo_ratings_limit, position: null as string | null, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_background: d.logo_badge_background }
+      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, position: null as string | null, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_background: d.logo_badge_background }
     case 'backdrop':
-      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, badge_size: d.backdrop_badge_size, ratings_limit: d.backdrop_ratings_limit, position: d.backdrop_position, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_background: d.backdrop_badge_background }
+      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, position: d.backdrop_position, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_background: d.backdrop_badge_background }
     case 'episode':
-      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, badge_size: d.episode_badge_size, ratings_limit: d.episode_ratings_limit, position: d.episode_position, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_background: d.episode_badge_background }
+      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, position: d.episode_position, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_background: d.episode_badge_background }
     default: // poster
-      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, badge_size: d.poster_badge_size, ratings_limit: d.ratings_limit, position: d.poster_position, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_background: d.poster_badge_background }
+      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, position: d.poster_position, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_background: d.poster_badge_background }
   }
 })
 
@@ -166,7 +167,18 @@ const ratingsLimitDefaultLabel = computed(() => {
 })
 const badgeStyleDefaultLabel = computed(() => annotate('Badge style', typeDefaults.value?.badge_style, BADGE_STYLE_LABELS))
 const labelStyleDefaultLabel = computed(() => annotate('Label style', typeDefaults.value?.label_style, LABEL_STYLE_LABELS))
-const badgeSizeDefaultLabel = computed(() => annotate('Badge size', typeDefaults.value?.badge_size, BADGE_SIZE_LABELS))
+const textSizeDefaultLabel = computed(() => {
+  const ts = typeDefaults.value?.text_size
+  return ts == null ? 'Text size: default' : `Text size: default (${ts}%)`
+})
+const badgeSizeDefaultLabel = computed(() => {
+  const bs = typeDefaults.value?.badge_size
+  return bs == null ? 'Badge size: default' : `Badge size: default (${bs}%)`
+})
+const logoSizeDefaultLabel = computed(() => {
+  const ls = typeDefaults.value?.logo_size
+  return ls == null ? 'Logo size: default' : `Logo size: default (${ls}%)`
+})
 const badgeShapeDefaultLabel = computed(() => annotate('Badge shape', typeDefaults.value?.badge_shape, BADGE_SHAPE_LABELS))
 // Pills always render horizontally, so the badge style choice has no effect.
 // Covers both an explicit pill choice and 'default' resolving to a pill server default.
@@ -201,7 +213,9 @@ watch(imageType, (newType) => {
   // appropriate defaults for the newly selected image type.
   badgeStyle.value = 'default'
   labelStyle.value = 'default'
-  badgeSize.value = 'default'
+  textSize.value = ''
+  badgeSizePct.value = ''
+  logoSizePct.value = ''
   ratingsLimit.value = 'default'
   badgeDirection.value = 'default'
   imagePosition.value = 'default'
@@ -254,7 +268,21 @@ const queryString = computed(() => {
   if (ratingsExcludeChanged.value) params.set('ratings_exclude', ratingsExcludeList.value.join(','))
   if (badgeStyle.value !== 'default') params.set('badge_style', badgeStyle.value)
   if (labelStyle.value !== 'default') params.set('label_style', labelStyle.value)
-  if (badgeSize.value !== 'default') params.set('badge_size', badgeSize.value)
+  const textSizeVal = String(textSize.value).trim()
+  if (textSizeVal !== '') {
+    const n = Math.round(Number(textSizeVal))
+    if (Number.isFinite(n)) params.set('text_size', String(Math.min(200, Math.max(50, n))))
+  }
+  const badgeSizeVal = String(badgeSizePct.value).trim()
+  if (badgeSizeVal !== '') {
+    const n = Math.round(Number(badgeSizeVal))
+    if (Number.isFinite(n)) params.set('badge_size', String(Math.min(200, Math.max(50, n))))
+  }
+  const logoSizeVal = String(logoSizePct.value).trim()
+  if (logoSizeVal !== '') {
+    const n = Math.round(Number(logoSizeVal))
+    if (Number.isFinite(n)) params.set('logo_size', String(Math.min(200, Math.max(50, n))))
+  }
   if (badgeShape.value !== 'default') params.set('badge_shape', badgeShape.value)
   if (badgeBackground.value !== 'default') params.set('badge_background', badgeBackground.value)
   if (ratingsLimit.value !== 'default') params.set('ratings_limit', ratingsLimit.value)
@@ -394,19 +422,45 @@ async function handleFetch() {
               <SelectItem value="o">Official</SelectItem>
             </SelectContent>
           </Select>
-          <Select v-model="badgeSize">
-            <SelectTrigger id="free-badge-size" aria-label="Badge size" class="bg-background">
-              <SelectValue placeholder="Badge size: default" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default" :key="badgeSizeDefaultLabel">{{ badgeSizeDefaultLabel }}</SelectItem>
-              <SelectItem value="xs">Extra Small</SelectItem>
-              <SelectItem value="s">Small</SelectItem>
-              <SelectItem value="m">Medium</SelectItem>
-              <SelectItem value="l">Large</SelectItem>
-              <SelectItem value="xl">Extra Large</SelectItem>
-            </SelectContent>
-          </Select>
+          <div class="flex items-center gap-2">
+            <Label for="free-text-size" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Text size %</Label>
+            <Input
+              id="free-text-size"
+              v-model="textSize"
+              type="number"
+              min="50"
+              max="200"
+              :placeholder="textSizeDefaultLabel"
+              aria-label="Badge text size (percent, 50-200)"
+              class="bg-background min-w-0"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <Label for="free-badge-size" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Badge size %</Label>
+            <Input
+              id="free-badge-size"
+              v-model="badgeSizePct"
+              type="number"
+              min="50"
+              max="200"
+              :placeholder="badgeSizeDefaultLabel"
+              aria-label="Badge size (percent, 50-200)"
+              class="bg-background min-w-0"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <Label for="free-logo-size" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Logo size %</Label>
+            <Input
+              id="free-logo-size"
+              v-model="logoSizePct"
+              type="number"
+              min="50"
+              max="200"
+              :placeholder="logoSizeDefaultLabel"
+              aria-label="Rating logo size (percent, 50-200)"
+              class="bg-background min-w-0"
+            />
+          </div>
           <Select v-model="badgeShape">
             <SelectTrigger id="free-badge-shape" aria-label="Badge shape" class="bg-background">
               <SelectValue placeholder="Badge shape: default" />
