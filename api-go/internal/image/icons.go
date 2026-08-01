@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -19,6 +20,68 @@ var (
 	iconCacheMu   sync.RWMutex
 	iconsLoaded   = false
 )
+
+// iconSourceKeys and officialIconKeys are the whitelisted keys served by
+// ServeIcon. They are also the keys LoadIcons loads at startup.
+var iconSourceKeys = []string{"imdb", "tmdb", "rt", "rta", "mc", "trakt", "lb", "mal", "mdblist", "ebert"}
+
+var officialIconKeys = []string{
+	"imdb", "tmdb", "metacritic", "trakt", "letterboxd", "mal", "mdblist", "ebert",
+	"Rotten_Tomatoes_critic_positive", "Rotten_Tomatoes_critic_rotten",
+	"Rotten_Tomatoes_critic_certified_fresh",
+	"Rotten_Tomatoes_positive_audience", "Rotten_Tomatoes_negative_audience",
+	"Rotten_Tomatoes_verified_hot_audience",
+}
+
+func iconKeyAllowed(kind, key string) bool {
+	switch kind {
+	case "default":
+		for _, k := range iconSourceKeys {
+			if k == key {
+				return true
+			}
+		}
+	case "official":
+		for _, k := range officialIconKeys {
+			if k == key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ServeIcon writes the bytes of a whitelisted icon to w. kind is "default"
+// (assets/icons) or "official" (assets/icons/official). It prefers the .png
+// file and falls back to .webp. Returns false when the icon is unknown.
+func ServeIcon(w http.ResponseWriter, kind, key string) bool {
+	if !iconKeyAllowed(kind, key) {
+		return false
+	}
+	dir := "assets/icons"
+	if kind == "official" {
+		dir += "/official"
+	}
+	for _, ext := range []string{".png", ".webp"} {
+		path := dir + "/" + key + ext
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		if ext == ".webp" {
+			w.Header().Set("Content-Type", "image/webp")
+		} else {
+			w.Header().Set("Content-Type", "image/png")
+		}
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Write(data)
+		return true
+	}
+	return false
+}
 
 func loadPNG(path string) (*image.RGBA, error) {
 	f, err := os.Open(path)
@@ -101,15 +164,7 @@ func LoadIcons() {
 		}
 	}
 
-	officialKeys := []string{
-		"imdb", "tmdb", "metacritic", "trakt", "letterboxd", "mal", "mdblist", "ebert",
-		"Rotten_Tomatoes_critic_positive", "Rotten_Tomatoes_critic_rotten",
-		"Rotten_Tomatoes_critic_certified_fresh",
-		"Rotten_Tomatoes_positive_audience", "Rotten_Tomatoes_negative_audience",
-		"Rotten_Tomatoes_verified_hot_audience",
-	}
-
-	for _, key := range officialKeys {
+	for _, key := range officialIconKeys {
 		path := "assets/icons/official/" + key + ".png"
 		if img, err := loadIcon(path); err == nil {
 			officialCache[key] = img

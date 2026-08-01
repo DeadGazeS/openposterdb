@@ -163,22 +163,22 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.PosterBadgeSize,
-			settings.PosterBadgeSplit, settings.PosterFit)
+			settings.PosterBadgeSplit, settings.PosterFit, settings.Colors)
 
 	case "logo":
 		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
-			badgeStyle, labelStyle, appearance, targetW, badgeScale)
+			badgeStyle, labelStyle, appearance, targetW, badgeScale, settings.Colors)
 
 	case "backdrop":
 		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, settings.BackdropBadgeSize,
-			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
+			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY, settings.Colors)
 
 	case "episode":
 		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, settings.EpisodeBadgeSize, settings.EpisodeBlur)
+			targetW, badgeScale, settings.EpisodeBadgeSize, settings.EpisodeBlur, settings.Colors)
 	}
 
 	return nil, fmt.Errorf("unknown image kind: %s", kind)
@@ -680,6 +680,35 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// DemoIMDBID is the demo title used by the admin preview endpoints. It is a TV
+// series; the episode preview resolves its season 1, episode 1 still.
+const DemoIMDBID = "tt12637874"
+const DemoEpisodeID = "episode-tt12637874-S1E1"
+
+// DemoArtwork fetches the base artwork for the preview endpoints' demo title
+// (IMDb tt12637874; S01E01 for the episode preview). It prefers the on-disk
+// base cache and returns an error when TMDB is unavailable or no artwork
+// exists for the kind.
+func DemoArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, kind string, imageSize services.ImageSize) ([]byte, error) {
+	idValue := DemoIMDBID
+	if kind == "episode" {
+		idValue = DemoEpisodeID
+	}
+	resolved, err := services.ResolveID(services.IDTypeIMDB, idValue, tmdb)
+	if err != nil {
+		return nil, err
+	}
+	settings := &services.RenderSettings{Lang: "en", Textless: false}
+	bytes, err := fetchTmdbArtwork(tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
+	if err != nil {
+		return nil, err
+	}
+	if bytes == nil {
+		return nil, apperr.NewIDNotFound("no " + kind + " artwork available for the demo title")
+	}
+	return bytes, nil
 }
 
 func badgeSourceString(badges []services.RatingBadge) string {

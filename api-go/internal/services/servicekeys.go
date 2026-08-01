@@ -260,6 +260,24 @@ func (m *ServiceKeyManager) EnvLocked(service string) bool {
 	return false
 }
 
+// PlaintextKeys returns the decrypted DB-stored service keys keyed by service
+// (comma-joined for multi-key services). Env-locked services are excluded since
+// their keys live in the environment, not the database.
+func (m *ServiceKeyManager) PlaintextKeys() map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]string)
+	for _, svc := range []string{"tmdb", "mdblist", "omdb", "fanart", "trakt"} {
+		if m.EnvLocked(svc) {
+			continue
+		}
+		if v := m.loadFromDB(svc); v != nil && len(*v) > 0 {
+			out[svc] = strings.Join(*v, ",")
+		}
+	}
+	return out
+}
+
 func (m *ServiceKeyManager) GetStatus() ServiceKeysResponse {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -253,19 +253,19 @@ func (r *Router) registerRoutes() {
 
 	// Admin preview routes
 	r.mux.Handle("/api/admin/preview/poster", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandlePoster(w, req)
 	}))
 	r.mux.Handle("/api/admin/preview/logo", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandleLogo(w, req)
 	}))
 	r.mux.Handle("/api/admin/preview/backdrop", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandleBackdrop(w, req)
 	}))
 	r.mux.Handle("/api/admin/preview/episode", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandleEpisode(w, req)
 	}))
 
@@ -359,19 +359,19 @@ func (r *Router) registerRoutes() {
 
 	// Key self-service preview routes
 	r.mux.Handle("/api/key/me/preview/poster", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandlePoster(w, req)
 	})))
 	r.mux.Handle("/api/key/me/preview/logo", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandleLogo(w, req)
 	})))
 	r.mux.Handle("/api/key/me/preview/backdrop", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandleBackdrop(w, req)
 	})))
 	r.mux.Handle("/api/key/me/preview/episode", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		preview := handlers.NewPreviewHandler(s.DB, &handlers.PreviewConfig{CacheDir: s.Config.CacheDir, ExternalCacheOnly: s.Config.ExternalCacheOnly, ImageQuality: s.Config.ImageQuality})
+		preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
 		preview.HandleEpisode(w, req)
 	})))
 
@@ -418,7 +418,15 @@ func (r *Router) registerRoutes() {
 		}
 	}))
 
+	r.mux.HandleFunc("/api/admin/settings/export", r.requireAuth(handlers.HandleExportSettings(s.DB, s.ServiceKeys)))
+	r.mux.HandleFunc("/api/admin/settings/import", r.requireAuth(handlers.HandleImportSettings(s.DB, s.ServiceKeys)))
+
 	r.mux.HandleFunc("/api/free-key/settings", handlers.HandleFreeKeySettings(s.DB, s.isFreeAPIKeyEnabled))
+
+	// Public rating-source logos used by the admin UI (plain brand icons, not
+	// sensitive). Served without auth so <img> tags can load them.
+	r.mux.Handle("/api/icons/{kind}/{key}", http.HandlerFunc(handlers.HandleIcon))
+	r.mux.HandleFunc("/api/icons/badge", handlers.HandleBadgePreview(s.DB))
 
 	// Image/isValid routes via catch-all
 	imageHandler := handlers.HandleImage(s.DB, s.imageServeConfig(), s.TMDB, s.OMDB, s.MDBList, s.Trakt, s.Fanart, s.isFreeAPIKeyEnabled)
@@ -445,6 +453,19 @@ func (s *AppState) SetupTMDB(key string) {
 		s.TMDB = services.NewTmdbClient(key, s.HTTPClient)
 	} else {
 		s.TMDB = nil
+	}
+}
+
+// previewConfig builds the shared config for the admin/key preview handlers.
+func (s *AppState) previewConfig() *handlers.PreviewConfig {
+	return &handlers.PreviewConfig{
+		CacheDir:          s.Config.CacheDir,
+		ExternalCacheOnly: s.Config.ExternalCacheOnly,
+		ImageQuality:      s.Config.ImageQuality,
+		TMDB:              s.TMDB,
+		OMDB:              s.OMDB,
+		MDBList:           s.MDBList,
+		Trakt:             s.Trakt,
 	}
 }
 

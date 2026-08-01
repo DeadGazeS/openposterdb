@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -58,14 +59,14 @@ func previewRenderSettings(
 		s.PosterPosition = position
 		s.PosterBadgeDirection = badgeDirection
 		s.PosterBadgeShape = appearance.Shape
-		s.PosterBadgeBackground = appearance.Background
+		s.PosterBadgeAlpha = appearance.Alpha
 	case "logo":
 		s.LogoRatingsLimit = ratingsLimit
 		s.LogoBadgeStyle = badgeStyle
 		s.LogoLabelStyle = labelStyle
 		s.LogoBadgeSize = badgeSize
 		s.LogoBadgeShape = appearance.Shape
-		s.LogoBadgeBackground = appearance.Background
+		s.LogoBadgeAlpha = appearance.Alpha
 	case "backdrop":
 		s.BackdropRatingsLimit = ratingsLimit
 		s.BackdropBadgeStyle = badgeStyle
@@ -74,7 +75,7 @@ func previewRenderSettings(
 		s.BackdropPosition = position
 		s.BackdropBadgeDirection = badgeDirection
 		s.BackdropBadgeShape = appearance.Shape
-		s.BackdropBadgeBackground = appearance.Background
+		s.BackdropBadgeAlpha = appearance.Alpha
 	case "episode":
 		s.EpisodeRatingsLimit = ratingsLimit
 		s.EpisodeBadgeStyle = badgeStyle
@@ -83,7 +84,7 @@ func previewRenderSettings(
 		s.EpisodePosition = position
 		s.EpisodeBadgeDirection = badgeDirection
 		s.EpisodeBadgeShape = appearance.Shape
-		s.EpisodeBadgeBackground = appearance.Background
+		s.EpisodeBadgeAlpha = appearance.Alpha
 	}
 	return &s
 }
@@ -108,6 +109,96 @@ type PreviewConfig struct {
 	CacheDir          string
 	ExternalCacheOnly bool
 	ImageQuality      uint8
+	TMDB              *services.TmdbClient
+	OMDB              *services.OmdbClient
+	MDBList           *services.MdblistClient
+	Trakt             *services.TraktClient
+}
+
+// demoArtworkBytes returns the base artwork for the demo title (IMDb
+// tt12637874; S01E01 for the episode preview), preferring the on-disk base
+// cache. Falls back to the built-in sample gradient if TMDB is unavailable or
+// the title can't be resolved, so the settings page never errors on artwork.
+func (p *PreviewHandler) demoArtworkBytes(kind string) ([]byte, error) {
+	if p.cfg.TMDB == nil {
+		return sampleArtwork(kind), nil
+	}
+	bytes, err := image.DemoArtwork(p.cfg.TMDB, p.cfg.CacheDir, p.cfg.ExternalCacheOnly, 0, kind, services.ImageSizeMedium)
+	if err != nil || len(bytes) == 0 {
+		return sampleArtwork(kind), nil
+	}
+	return bytes, nil
+}
+
+func sampleArtwork(kind string) []byte {
+	switch kind {
+	case "logo":
+		return image.SampleLogoPNG
+	case "backdrop", "episode":
+		return image.SampleBackdropPNG
+	default:
+		return image.SamplePosterPNG
+	}
+}
+
+// demoBadges returns the demo title's ratings for the preview of the given
+// kind. Ratings are fetched once from the external providers and persisted in
+// available_ratings so subsequent previews are served from the cache. When no
+// ratings can be fetched (or no providers are configured) it falls back to the
+// built-in sample badge set so every source's colors stay testable.
+func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
+	idValue := image.DemoIMDBID
+	if kind == "episode" {
+		idValue = image.DemoEpisodeID
+	}
+	idKey := "imdb/" + idValue
+
+	if p.cfg.TMDB != nil {
+		if sources, _, _, err := services.ReadAvailableRatings(p.db, idKey); err == nil {
+			if badges := services.UnmarshalRatingBadges(sources); len(badges) > 0 {
+				return badges
+			}
+		}
+
+		if badges := p.fetchDemoRatings(idValue); len(badges) > 0 {
+			if encoded := services.MarshalRatingBadges(badges); encoded != "" {
+				_ = services.UpsertAvailableRatings(p.db, idKey, encoded, nil)
+			}
+			return badges
+		}
+	}
+
+	return sampleBadges()
+}
+
+func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge {
+	resolved, err := services.ResolveID(services.IDTypeIMDB, idValue, p.cfg.TMDB)
+	if err != nil {
+		return nil
+	}
+	mediaType := "movie"
+	switch resolved.MediaType {
+	case services.MediaTypeTV:
+		mediaType = "tv"
+	case services.MediaTypeEpisode:
+		mediaType = "episode"
+	}
+	var imdbID *string
+	if resolved.IMDbID != nil && *resolved.IMDbID != "" {
+		imdbID = resolved.IMDbID
+	}
+	var showID uint64
+	var season, episode uint32
+	if resolved.Episode != nil {
+		showID = resolved.Episode.ShowTMDbID
+		season = resolved.Episode.SeasonNumber
+		episode = resolved.Episode.EpisodeNumber
+	}
+	_, _, _, _, badges := services.FetchRatings(
+		resolved.TMDbID, mediaType, imdbID, showID, season, episode,
+		p.cfg.TMDB, p.cfg.OMDB, p.cfg.MDBList, p.cfg.Trakt,
+	)
+	return badges
 }
 
 func NewPreviewHandler(db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
@@ -179,11 +270,11 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	if query.BadgeShape != nil {
 		shape = services.BadgeShape(*query.BadgeShape)
 	}
-	background := services.BadgeBackgroundDefault
-	if query.BadgeBackground != nil {
-		background = services.BadgeBackground(*query.BadgeBackground)
+	alpha := services.DefaultBadgeAlpha()
+	if query.BadgeAlpha != nil {
+		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Background: background}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
 	split := false
 	if query.Split != nil {
@@ -199,9 +290,8 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	settings.PosterBadgeSplit = split
 	settings.PosterFit = posterFit
 
-	badges := sampleBadges()
+	badges := p.demoBadges("poster")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-
 	valueFace := image.GetValueFontFace()
 	labelFace := image.GetFontFace()
 	if valueFace == nil || labelFace == nil {
@@ -209,9 +299,17 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rendered, err := image.RenderPosterSync(image.SamplePosterPNG, badges, valueFace, labelFace, p.cfg.ImageQuality,
+	colors := parsePreviewColors(r)
+
+	posterBytes, err := p.demoArtworkBytes("poster")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	rendered, err := image.RenderPosterSync(posterBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeSize, split, posterFit)
+		targetWidth, badgeScale, badgeSize, split, posterFit, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -277,15 +375,14 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	if query.BadgeShape != nil {
 		shape = services.BadgeShape(*query.BadgeShape)
 	}
-	background := services.BadgeBackgroundDefault
-	if query.BadgeBackground != nil {
-		background = services.BadgeBackground(*query.BadgeBackground)
+	alpha := services.DefaultBadgeAlpha()
+	if query.BadgeAlpha != nil {
+		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Background: background}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
-	badges := sampleBadges()
+	badges := p.demoBadges("logo")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-
 	valueFace := image.GetValueFontFace()
 	labelFace := image.GetFontFace()
 	if valueFace == nil || labelFace == nil {
@@ -293,8 +390,16 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rendered, err := image.RenderLogoSync(image.SampleLogoPNG, badges, valueFace, labelFace,
-		badgeStyle, labelStyle, appearance, targetWidth, badgeScale)
+	colors := parsePreviewColors(r)
+
+	logoBytes, err := p.demoArtworkBytes("logo")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	rendered, err := image.RenderLogoSync(logoBytes, badges, valueFace, labelFace,
+		badgeStyle, labelStyle, appearance, targetWidth, badgeScale, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -370,11 +475,11 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	if query.BadgeShape != nil {
 		shape = services.BadgeShape(*query.BadgeShape)
 	}
-	background := services.BadgeBackgroundDefault
-	if query.BadgeBackground != nil {
-		background = services.BadgeBackground(*query.BadgeBackground)
+	alpha := services.DefaultBadgeAlpha()
+	if query.BadgeAlpha != nil {
+		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Background: background}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
 	edgeInsetX := int32(0)
 	if query.EdgeInsetX != nil {
@@ -385,9 +490,8 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 		edgeInsetY = *query.EdgeInsetY
 	}
 
-	badges := sampleBadges()
+	badges := p.demoBadges("backdrop")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-
 	valueFace := image.GetValueFontFace()
 	labelFace := image.GetFontFace()
 	if valueFace == nil || labelFace == nil {
@@ -395,9 +499,17 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rendered, err := image.RenderBackdropSync(image.SampleBackdropPNG, badges, valueFace, labelFace, p.cfg.ImageQuality,
+	colors := parsePreviewColors(r)
+
+	backdropBytes, err := p.demoArtworkBytes("backdrop")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	rendered, err := image.RenderBackdropSync(backdropBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeSize, edgeInsetX, edgeInsetY)
+		targetWidth, badgeScale, badgeSize, edgeInsetX, edgeInsetY, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -473,20 +585,19 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	if query.BadgeShape != nil {
 		shape = services.BadgeShape(*query.BadgeShape)
 	}
-	background := services.BadgeBackgroundDefault
-	if query.BadgeBackground != nil {
-		background = services.BadgeBackground(*query.BadgeBackground)
+	alpha := services.DefaultBadgeAlpha()
+	if query.BadgeAlpha != nil {
+		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Background: background}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
 	blur := false
 	if query.Blur != nil {
 		blur = *query.Blur
 	}
 
-	badges := sampleBadges()
+	badges := p.demoBadges("episode")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-
 	valueFace := image.GetValueFontFace()
 	labelFace := image.GetFontFace()
 	if valueFace == nil || labelFace == nil {
@@ -494,9 +605,17 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rendered, err := image.RenderEpisodeSync(image.SampleBackdropPNG, badges, valueFace, labelFace, p.cfg.ImageQuality,
+	colors := parsePreviewColors(r)
+
+	episodeBytes, err := p.demoArtworkBytes("episode")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	rendered, err := image.RenderEpisodeSync(episodeBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeSize, blur)
+		targetWidth, badgeScale, badgeSize, blur, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -609,6 +728,23 @@ func kindFromType(imageType string) (string, bool) {
 		return "episode", true
 	}
 	return "", false
+}
+
+// parsePreviewColors reads the `colors` query parameter (JSON object of
+// per-source color overrides) used for live previews of unsaved changes.
+func parsePreviewColors(r *http.Request) map[string]services.SourceColorSet {
+	raw := r.URL.Query().Get("colors")
+	if raw == "" {
+		return nil
+	}
+	var colors map[string]services.SourceColorSet
+	if err := json.Unmarshal([]byte(raw), &colors); err != nil {
+		return nil
+	}
+	if services.ValidateSourceColors(colors) != nil {
+		return nil
+	}
+	return colors
 }
 
 func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCacheOnly bool) http.HandlerFunc {
