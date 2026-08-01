@@ -11,7 +11,7 @@ import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
 type SettingsResponse = RenderSettings & { free_api_key_enabled: boolean; free_api_key_locked: boolean }
 
 type ServiceKey = { locked: boolean; has_key: boolean; masked: string | null }
-type ServiceKeysResponse = { mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
+type ServiceKeysResponse = { tmdb: ServiceKey; mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
 
 const freeApiKeyEnabled = ref(false)
 const freeKeyLoading = ref(false)
@@ -22,6 +22,7 @@ const serviceKeysSaving = ref<string | null>(null)
 const serviceKeysError = ref('')
 
 const serviceKeyInputs = ref({
+  tmdb: '',
   mdblist: '',
   omdb: '',
   fanart: '',
@@ -57,6 +58,7 @@ async function saveServiceKey(service: string) {
 }
 
 const serviceLabels: Record<string, string> = {
+  tmdb: 'TMDB',
   mdblist: 'MDBList',
   omdb: 'OMDb',
   fanart: 'Fanart.tv',
@@ -164,7 +166,7 @@ async function toggleFreeApiKey() {
         </p>
         <p v-if="serviceKeysError" class="text-sm text-destructive">{{ serviceKeysError }}</p>
 
-        <div v-for="service in (['mdblist', 'omdb', 'fanart', 'trakt'] as const)" :key="service" class="space-y-2">
+        <div v-for="service in (['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const)" :key="service" class="space-y-2">
           <label :for="`key-${service}`" class="text-sm font-medium flex items-center gap-2">
             {{ serviceLabels[service] }}
             <span v-if="serviceKeys?.[service]?.locked" class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">env</span>
