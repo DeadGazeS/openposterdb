@@ -146,6 +146,8 @@ export const adminApi = {
     get(`/api/admin/posters/${key}/image`),
   getSettings: (): Promise<Response> => get('/api/admin/settings'),
   updateSettings: (settings: Partial<SaveSettingsPayload> & { image_source: string; free_api_key_enabled?: boolean }): Promise<Response> => put('/api/admin/settings', settings),
+  getServiceKeys: (): Promise<Response> => get('/api/admin/settings/services'),
+  updateServiceKeys: (keys: Record<string, string | null>): Promise<Response> => put('/api/admin/settings/services', keys),
   fetchPoster: (idType: string, idValue: string): Promise<Response> =>
     post(`/api/admin/posters/${idType}/${idValue}/fetch`),
   purgePoster: (idType: string, idValue: string, scope: PurgeScope = 'title'): Promise<Response> =>
