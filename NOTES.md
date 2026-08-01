@@ -9,6 +9,11 @@
 
 ### Fixes applied (all in `api-go/`)
 
+0. **Fourth round — font concurrency crash (2026-08-01):**
+   - **Crash**: under parallel image requests (e.g. a Plex library grid), the server panicked with `runtime error: index out of range [15] with length 0` in `golang.org/x/image/font/sfnt.(*Font).LoadGlyph`, killing one poster request per occurrence.
+   - **Root cause**: a single global `opentype.Face` (`loadedFontFace`) was shared by every concurrent request. Per the x/image docs, "A Face is not safe to use concurrently" — it owns a mutable `sfnt.Buffer` + `vector.Rasterizer`, so parallel `Glyph` calls corrupted the buffer and produced a bogus glyph index. (It was NOT a bad character in the font.)
+   - **Fix**: `LoadFont` now keeps the immutable `*sfnt.Font` (documented thread-safe) and `GetFontFace()` returns a **fresh** `opentype.Face` per caller. Each render (GenerateImage + the four preview handlers) gets its own face, so no shared mutable state. Also made `drawText`/`textWidth` panic-safe per rune as defense-in-depth. Added `api-go/internal/image/serve_test.go` (`TestConcurrentRendering`) which runs clean under `-race`; verified with a 20-way concurrent fetch burst (0 panics).
+
 0. **Third round — logging, key pool rotation, key validation (2026-08-01):**
    - **LOG_LEVEL value mangling.** Docker's `env_file` does not strip inline comments, so `LOG_LEVEL=debug (optional — ...)` set the whole string as the value; `setupLogging` only matched exact strings so debug never engaged. Added `sanitizeValue`/`sanitizeSecrets` in `config.go` (truncate at first space/`(`/tab) applied to all env values, and the same truncation in `setupLogging`. Any accidental annotation in a value is now ignored.
    - **MDBList key pool never rotated.** `maxConsecutive429s` was 3, and each failed fetch only reports one 429 → the second key was never used. Lowered to 1 so the pool rotates to the next key on the first 429. Updated `apikeypool_test.go` for the new threshold.

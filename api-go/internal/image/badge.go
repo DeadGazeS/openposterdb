@@ -114,11 +114,23 @@ func newScaledDims(badgeScale float32) scaledDims {
 	}
 }
 
+// safeGlyphAdvance returns the advance width for a rune, or 0 if the font
+// cannot produce it. Inter-Bold.ttf contains a glyph whose data is malformed,
+// and golang.org/x/image/sfnt panics ("index out of range") when that glyph is
+// rasterized instead of returning a missing-glyph sentinel. Recovering here
+// lets a single bad rune be skipped instead of crashing the whole request.
+func safeGlyphAdvance(face font.Face, r rune) fixed.Int26_6 {
+	defer func() {
+		recover()
+	}()
+	adv, _ := face.GlyphAdvance(r)
+	return adv
+}
+
 func textWidth(text string, face font.Face) int {
 	var w fixed.Int26_6
 	for _, r := range text {
-		adv, _ := face.GlyphAdvance(r)
-		w += adv
+		w += safeGlyphAdvance(face, r)
 	}
 	return w.Ceil()
 }
@@ -128,9 +140,18 @@ func drawText(img *image.RGBA, col color.RGBA, x, y int, f font.Face, text strin
 		Dst:  img,
 		Src:  image.NewUniform(col),
 		Face: f,
-		Dot:  fixed.P(x, y),
 	}
-	d.DrawString(text)
+	dot := fixed.P(x, y)
+	for _, r := range text {
+		d.Dot = dot
+		func() {
+			defer func() {
+				recover()
+			}()
+			d.DrawString(string(r))
+		}()
+		dot.X += safeGlyphAdvance(f, r)
+	}
 }
 
 func drawTextShadowed(img *image.RGBA, col color.RGBA, x, y int, f font.Face, text string, shadow int) {

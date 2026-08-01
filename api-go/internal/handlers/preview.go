@@ -202,13 +202,14 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	badges := sampleBadges()
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 
-	f := image.GetFontFace()
-	if f == nil {
+	valueFace := image.GetValueFontFace()
+	labelFace := image.GetFontFace()
+	if valueFace == nil || labelFace == nil {
 		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
-	rendered, err := image.RenderPosterSync(image.SamplePosterPNG, badges, f, f, p.cfg.ImageQuality,
+	rendered, err := image.RenderPosterSync(image.SamplePosterPNG, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
 		targetWidth, badgeScale, badgeSize, split, posterFit)
 	if err != nil {
@@ -285,13 +286,14 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	badges := sampleBadges()
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 
-	f := image.GetFontFace()
-	if f == nil {
+	valueFace := image.GetValueFontFace()
+	labelFace := image.GetFontFace()
+	if valueFace == nil || labelFace == nil {
 		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
-	rendered, err := image.RenderLogoSync(image.SampleLogoPNG, badges, f, f,
+	rendered, err := image.RenderLogoSync(image.SampleLogoPNG, badges, valueFace, labelFace,
 		badgeStyle, labelStyle, appearance, targetWidth, badgeScale)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -386,13 +388,14 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	badges := sampleBadges()
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 
-	f := image.GetFontFace()
-	if f == nil {
+	valueFace := image.GetValueFontFace()
+	labelFace := image.GetFontFace()
+	if valueFace == nil || labelFace == nil {
 		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
-	rendered, err := image.RenderBackdropSync(image.SampleBackdropPNG, badges, f, f, p.cfg.ImageQuality,
+	rendered, err := image.RenderBackdropSync(image.SampleBackdropPNG, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
 		targetWidth, badgeScale, badgeSize, edgeInsetX, edgeInsetY)
 	if err != nil {
@@ -484,13 +487,14 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	badges := sampleBadges()
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 
-	f := image.GetFontFace()
-	if f == nil {
+	valueFace := image.GetValueFontFace()
+	labelFace := image.GetFontFace()
+	if valueFace == nil || labelFace == nil {
 		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
-	rendered, err := image.RenderEpisodeSync(image.SampleBackdropPNG, badges, f, f, p.cfg.ImageQuality,
+	rendered, err := image.RenderEpisodeSync(image.SampleBackdropPNG, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
 		targetWidth, badgeScale, badgeSize, blur)
 	if err != nil {
