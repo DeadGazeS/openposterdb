@@ -1,60 +1,79 @@
-# OpenPosterDB (OPDB)
+# OpenPosterDB
 
-A self-hosted, drop-in replacement for [RPDB (Rating Poster Database)](https://ratingposterdb.com). Generates movie and TV posters, logos, backdrops, and episode stills with rating overlays — pulling artwork from TMDB (or optionally Fanart.tv) and aggregating ratings from IMDb, Rotten Tomatoes, Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.
+OpenPosterDB is a self-hosted service that generates custom movie and TV posters, logos, backdrops, and episode stills with rating overlays. It's designed as a drop-in replacement for RPDB (Rating Poster Database) and plugs directly into your media server.
 
-[Website](https://openposterdb.com) · [GitHub](https://github.com/PNRxA/openposterdb) · [Docker Hub](https://hub.docker.com/r/pnrxa/openposterdb) · [Documentation](docs/README.md)
+Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings from IMDb, Rotten Tomatoes, Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert — all rendered into clean, branded image overlays you control.
+
+- [Website](https://openposterdb.com)
+- [GitHub](https://github.com/PNRxA/openposterdb)
+- [Docker Hub](https://hub.docker.com/r/pnrxa/openposterdb)
+- [Documentation](docs/README.md)
+
+---
+
+## Highlights
+
+- **Everything self-hosted** — your keys, your data, no third-party dependency for image serving.
+- **Drop-in RPDB compatibility** — same API shape, so existing Plex/Jellyfin/aiometadata setups can switch over.
+- **Fully customisable overlays** — per-source badge colours, shape, size, position, and opacity.
+- **Works with the tools you already use** — Plex, Jellyfin, and aiometadata.
+
+## Features
+
+### Image generation
+- **Posters, logos, backdrops, and episode stills** — generated on demand with rating overlays.
+- **Per-source badge colours** — logo background, text background, border, and text colour for every rating source. Rotten Tomatoes gets separate settings for each logo variant (Certified Fresh, Fresh, Rotten, Verified Hot, and more).
+- **Anti-aliased rendering** — smooth rounded and pill badge shapes with crisp border rings.
+- **Flexible layouts** — badge position, direction, style, shape, size, aspect-ratio fitting, split badges, and textless posters are all configurable.
+- **Episode blur** — optional blur for spoiler protection.
+- **Background opacity** — independent opacity slider for posters, logos, backdrops, and episodes.
+
+### Ratings
+- Aggregates ratings from **MDBList, OMDb, Trakt, and TMDB** across IMDb, Rotten Tomatoes (critics and audience), Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.
+- Configurable **rating order, exclusion, and per-image limits**.
+- Ratings are cached so repeated requests are fast and don't hammer the providers.
+
+### Configuration & keys
+- **Per-key settings** — override image source, language, textless, and badge settings for each API key.
+- **Multi-key pools** — comma-separated keys with automatic rotation and 429 back-off for MDBList, Fanart.tv, OMDb, and Trakt.
+- **Encrypted at rest** — service keys are encrypted in the SQLite database.
+- **Settings backup & restore** — export and import your full configuration, optionally including external service keys and API keys, from the admin panel.
+
+### Operations
+- **Multi-layer caching** — filesystem and SQLite with staleness-aware refresh.
+- **Full admin UI** — a Vue 3 dashboard covering stats, API key management, per-key settings, and cache purging (all / per-kind / per-title).
+- **Secure auth** — Argon2 password hashing, JWT access tokens, rotating refresh tokens, and API-key auth.
 
 ## Self-hosting
 
 ```bash
 cp api-go/.env.example .env
-# Set a JWT_SECRET (openssl rand -hex 32). Add TMDB_API_KEY for artwork,
-# and MDBLIST_API_KEY (or OMDB_API_KEY) for ratings — or set them later in the admin UI.
+# Set a JWT_SECRET (openssl rand -hex 32). Add TMDB_API_KEY for artwork and
+# MDBLIST_API_KEY (or OMDB_API_KEY) for ratings — or add them later in the admin UI.
 docker compose up -d
 ```
 
 Then open **http://localhost:3000** and create your admin account.
 
-## API Keys
-
-TMDB is required for artwork — set it in `.env` or via the admin UI (Settings → External API Keys) without restarting. MDBList is recommended (one key covers all 9 rating sources). For Fanart.tv, OMDb, and Trakt, keys can be set via the admin UI without restarting — each supports **comma-separated multi-key pools** with automatic rotation and hashed logging.
-
-## Features
-
-- **Multi-source ratings** — MDBList, OMDb, Trakt, Fanart.tv (optional). Supports IMDb, RT Critics, RT Audience, Metacritic, Trakt, Letterboxd, MAL, MDBList score, and Roger Ebert
-- **Per-source badge colours** — logo/text backgrounds, border, and text colour for every rating source, with separate settings per Rotten Tomatoes logo variant (Certified Fresh, Fresh, Rotten, Verified Hot, …); badge background opacity is a per-kind slider
-- **Anti-aliased badges** — smooth rounded/pill shapes and border rings via `golang.org/x/image/vector`, with correct premultiplied-alpha colour compositing
-- **Live badge gallery** — the Settings page previews a sample badge per source (all Rotten Tomatoes variants) using your current colour settings, matching the real render
-- **Posters** — configurable badge position, direction, style, shape, size, aspect ratio fit, split badges, textless
-- **Logos** — badges horizontally below with configurable style, size, shape
-- **Backdrops** — vertical badges with configurable position, edge inset, direction
-- **Episodes** — horizontal badges with optional blur (spoiler protection), configurable position
-- **Per-key settings** — override image source, language, textless, badge settings per API key
-- **Multi-key pools** — comma-separated keys with automatic rotation and hashed logging (MDBList, Fanart.tv, OMDb, Trakt)
-- **Encrypted key storage** — service keys encrypted at rest in SQLite
-- **Settings backup & restore** — export/import the global settings (optionally including external service keys and API keys) from the Settings page
-- **Multi-layer caching** — filesystem and SQLite with staleness-based refresh
-- **Admin UI** — Vue 3 panel for dashboard, key management, per-key settings, cache purging (all/kind/single-row)
-- **Auth** — Argon2, JWT, rotating refresh tokens, API key access
-- **CDN redirects, external-cache-only mode, disable-public-pages** — see [Configuration](docs/configuration.md)
+TMDB is required for artwork — it can be set in `.env` or later via the admin UI (Settings → External API Keys) without restarting. MDBList is recommended (a single key covers all nine rating sources). Fanart.tv, OMDb, and Trakt keys can also be added through the admin UI without restarting.
 
 ## Connect your media server
 
-Grab an API key from the admin UI:
+Grab an API key from the admin UI and point your media server at it:
 
 - **[aiometadata](docs/media-servers.md#aiometadata)** — poster/backdrop/logo/episode URL templates
 - **[Jellyfin](docs/media-servers.md#jellyfin)** — dedicated remote image provider plugin
 - **[Plex](docs/media-servers.md#plex)** — Custom Metadata Provider (PMS 1.43+)
 
-Any client fetching images by URL works — see the **[API Reference](docs/api.md)**.
+Any client that fetches images by URL works — see the [API Reference](docs/api.md).
 
 ## Documentation
 
-- **[Connecting a Media Server](docs/media-servers.md)** — aiometadata, Jellyfin, Plex
-- **[Configuration](docs/configuration.md)** — all environment variables
-- **[API Reference](docs/api.md)** — endpoints, parameters, image sizes
-- **[Deployment](docs/deployment.md)** — reverse proxy and CDN
-- **[Architecture](docs/architecture.md)** — caching internals
+- [Connecting a Media Server](docs/media-servers.md) — aiometadata, Jellyfin, Plex
+- [Configuration](docs/configuration.md) — all environment variables
+- [API Reference](docs/api.md) — endpoints, parameters, image sizes
+- [Deployment](docs/deployment.md) — reverse proxy and CDN
+- [Architecture](docs/architecture.md) — caching internals
 
 ## Acknowledgments
 
