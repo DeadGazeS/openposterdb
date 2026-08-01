@@ -15,6 +15,7 @@ use openposterdb_api::services::db;
 use openposterdb_api::services::fanart::FanartClient;
 use openposterdb_api::services::mdblist::MdblistClient;
 use openposterdb_api::services::omdb::OmdbClient;
+use openposterdb_api::services::service_keys::ServiceKeyManager;
 use openposterdb_api::services::tmdb::TmdbClient;
 use openposterdb_api::services::trakt::TraktClient;
 use openposterdb_api::{build_app, upgrade, AppState, FONT_BYTES, MIGRATIONS, SCHEMA_SQL};
@@ -49,33 +50,6 @@ async fn main() {
         .build()
         .expect("failed to build HTTP client");
     let font = FontArc::try_from_slice(FONT_BYTES).expect("failed to load font");
-
-    let omdb = config
-        .omdb_api_key
-        .as_ref()
-        .map(|key| OmdbClient::new(key.clone(), http.clone()));
-
-    let mdblist = if config.mdblist_api_keys.is_empty() {
-        None
-    } else {
-        let pool = ApiKeyPool::new(config.mdblist_api_keys.clone());
-        tracing::info!(
-            key_count = pool.len(),
-            primary_key = %pool.active_key_hash(),
-            "mdblist client initialized"
-        );
-        Some(MdblistClient::new(pool, http.clone()))
-    };
-
-    let fanart = config
-        .fanart_api_key
-        .as_ref()
-        .map(|key| FanartClient::new(key.clone(), http.clone()));
-
-    let trakt = config
-        .trakt_client_id
-        .as_ref()
-        .map(|key| TraktClient::new(key.clone(), http.clone()));
 
     // Load JWT secret
     let jwt_secret = db::load_secret_from_env("JWT_SECRET");
@@ -316,10 +290,24 @@ async fn main() {
 
     let pending_last_used: Arc<DashMap<i32, ()>> = Arc::new(DashMap::new());
 
+    let service_key_manager = ServiceKeyManager::new(
+        database.clone(),
+        &jwt_secret,
+        http.clone(),
+        if config.mdblist_api_keys.is_empty() { None } else { Some(config.mdblist_api_keys.clone()) },
+        config.omdb_api_key.clone(),
+        config.fanart_api_key.clone(),
+        config.trakt_client_id.clone(),
+    );
+    service_key_manager.init().await;
+
     let state = Arc::new(AppState {
-        tmdb: TmdbClient::new(config.tmdb_api_key.clone(), http),
-        omdb,
-        mdblist,
+        tmdb: TmdbClient::new(config.tmdb_api_key.clone(), http.clone()),
+        omdb: arc_swap::ArcSwapOption::from(build_omdb(&service_key_manager, http.clone()).map(Arc::new)),
+        mdblist: arc_swap::ArcSwapOption::from(build_mdblist(&service_key_manager, http.clone()).map(Arc::new)),
+        fanart: arc_swap::ArcSwapOption::from(build_fanart(&service_key_manager, http.clone()).map(Arc::new)),
+        trakt: arc_swap::ArcSwapOption::from(build_trakt(&service_key_manager, http.clone()).map(Arc::new)),
+        service_key_manager,
 
         font,
         refresh_locks,
@@ -332,8 +320,6 @@ async fn main() {
         ratings_cache,
         image_mem_cache,
         pending_last_used: pending_last_used.clone(),
-        fanart,
-        trakt,
         fanart_cache,
         fanart_negative,
         tmdb_images_cache,
@@ -418,4 +404,42 @@ async fn main() {
     .with_graceful_shutdown(shutdown_signal)
     .await
     .expect("server error");
+}
+
+fn build_omdb(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<OmdbClient> {
+    let keys = mgr.omdb_keys();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(OmdbClient::new(ApiKeyPool::new(keys), http))
+}
+
+fn build_mdblist(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<MdblistClient> {
+    let keys = mgr.mdblist_keys();
+    if keys.is_empty() {
+        return None;
+    }
+    let pool = ApiKeyPool::new(keys);
+    tracing::info!(
+        key_count = pool.len(),
+        primary_key = %pool.active_key_hash(),
+        "mdblist client initialized"
+    );
+    Some(MdblistClient::new(pool, http))
+}
+
+fn build_fanart(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<FanartClient> {
+    let keys = mgr.fanart_keys();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(FanartClient::new(ApiKeyPool::new(keys), http))
+}
+
+fn build_trakt(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<TraktClient> {
+    let keys = mgr.trakt_client_ids();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(TraktClient::new(ApiKeyPool::new(keys), http))
 }

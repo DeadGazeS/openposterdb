@@ -123,15 +123,6 @@ impl Config {
                 .unwrap_or(false),
         };
 
-        if config.omdb_api_key.is_none()
-            && config.mdblist_api_keys.is_empty()
-            && config.trakt_client_id.is_none()
-        {
-            panic!(
-                "at least one of OMDB_API_KEY, MDBLIST_API_KEY, or TRAKT_CLIENT_ID must be set"
-            );
-        }
-
         config
     }
 }
@@ -270,13 +261,13 @@ mod tests {
 
     #[test]
     #[serial]
-    #[should_panic(
-        expected = "at least one of OMDB_API_KEY, MDBLIST_API_KEY, or TRAKT_CLIENT_ID must be set"
-    )]
-    fn test_panics_without_ratings_provider() {
+    fn test_starts_without_ratings_provider() {
         unsafe { clear_config_env() };
         unsafe { env::set_var("TMDB_API_KEY", "tmdb_test") };
-        Config::from_env();
+        let cfg = Config::from_env();
+        assert!(cfg.omdb_api_key.is_none());
+        assert!(cfg.mdblist_api_keys.is_empty());
+        assert!(cfg.trakt_client_id.is_none());
     }
 
     #[test]

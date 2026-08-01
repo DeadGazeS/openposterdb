@@ -8,7 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::cache;
 use crate::error::AppError;
 use crate::image::serve::{self, LogoBackdropKind};
+use crate::services::api_key_pool::ApiKeyPool;
 use crate::services::db::{self, default_ratings_limit, default_logo_backdrop_ratings_limit, default_ratings_order, BadgeBackground, BadgeDirection, BadgeShape, BadgeSize, BadgeStyle, LabelStyle, BadgePosition, ImageSource, PosterFit};
+use crate::services::fanart::FanartClient;
+use crate::services::mdblist::MdblistClient;
+use crate::services::omdb::OmdbClient;
+use crate::services::service_keys::{ServiceKeyManager, ServiceKeysResponse, ServiceKeysUpdate};
+use crate::services::trakt::TraktClient;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -173,7 +179,7 @@ pub async fn get_settings(
         image_source: settings.image_source,
         lang: settings.lang.to_string(),
         textless: settings.textless,
-        fanart_available: state.fanart.is_some(),
+        fanart_available: state.fanart.load().is_some(),
         ratings_limit: settings.ratings_limit,
         ratings_order: settings.ratings_order.to_string(),
         ratings_exclude: settings.ratings_exclude.to_string(),
@@ -372,6 +378,66 @@ pub async fn update_settings(
         state.free_api_key_cache.invalidate(&()).await;
     }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn get_service_keys(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ServiceKeysResponse>, AppError> {
+    Ok(Json(state.service_key_manager.get_status()))
+}
+
+pub async fn update_service_keys(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ServiceKeysUpdate>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    state.service_key_manager.update_keys(&req).await?;
+
+    let http = state.service_key_manager.http_client().clone();
+    state.omdb.store(build_omdb_svc(&state.service_key_manager, http.clone()).map(Arc::new));
+    state.mdblist.store(build_mdblist_svc(&state.service_key_manager, http.clone()).map(Arc::new));
+    state.fanart.store(build_fanart_svc(&state.service_key_manager, http.clone()).map(Arc::new));
+    state.trakt.store(build_trakt_svc(&state.service_key_manager, http.clone()).map(Arc::new));
+
+    if req.fanart.is_some() {
+        state.fanart_cache.invalidate_all();
+        state.fanart_negative.invalidate_all();
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn build_omdb_svc(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<OmdbClient> {
+    let keys = mgr.omdb_keys();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(OmdbClient::new(ApiKeyPool::new(keys), http))
+}
+
+fn build_mdblist_svc(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<MdblistClient> {
+    let keys = mgr.mdblist_keys();
+    if keys.is_empty() {
+        return None;
+    }
+    let pool = ApiKeyPool::new(keys);
+    tracing::info!(key_count = pool.len(), primary_key = %pool.active_key_hash(), "mdblist client rebuilt");
+    Some(MdblistClient::new(pool, http))
+}
+
+fn build_fanart_svc(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<FanartClient> {
+    let keys = mgr.fanart_keys();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(FanartClient::new(ApiKeyPool::new(keys), http))
+}
+
+fn build_trakt_svc(mgr: &ServiceKeyManager, http: reqwest::Client) -> Option<TraktClient> {
+    let keys = mgr.trakt_client_ids();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(TraktClient::new(ApiKeyPool::new(keys), http))
 }
 
 pub async fn fetch_poster(

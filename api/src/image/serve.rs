@@ -464,9 +464,9 @@ async fn resolve_with_ratings(
         ratings::fetch_ratings(
             &resolved,
             &state.tmdb,
-            state.omdb.as_ref(),
-            state.mdblist.as_ref(),
-            state.trakt.as_ref(),
+            state.omdb.load().as_deref(),
+            state.mdblist.load().as_deref(),
+            state.trakt.load().as_deref(),
             &state.ratings_cache,
         )
         .await?
@@ -1124,7 +1124,7 @@ fn trigger_logo_backdrop_refresh(
     let settings = settings.clone();
     let cross_id = Some((id_type, cache_suffix.to_string()));
     spawn_background_refresh(state, cache_key, cache_path, cross_id, async move {
-        let fanart = state2.fanart.as_ref();
+        let fanart = state2.fanart.load();
 
         let kind: cache::ImageType = lb_kind.into();
         let lang = match kind {
@@ -1155,7 +1155,7 @@ fn trigger_logo_backdrop_refresh(
         let fanart_is_primary = settings.image_source.is_fanart() && fanart.is_some();
         let image_bytes = if fanart_is_primary {
             // Fanart primary → TMDB fallback
-            let primary = if let Some(fc) = fanart {
+            let primary = if let Some(ref fc) = *fanart {
                 fetch_fanart_image(fc, &state2.tmdb, &state2.fanart_cache, &resolved, lang, textless, kind, &state2.config.cache_dir, state2.config.external_cache_only).await.map(|r| r.bytes)
             } else {
                 None
@@ -1172,7 +1172,7 @@ fn trigger_logo_backdrop_refresh(
             match primary {
                 Some(b) => b,
                 None => {
-                    if let Some(fc) = fanart {
+                    if let Some(ref fc) = *fanart {
                         fetch_fanart_image(fc, &state2.tmdb, &state2.fanart_cache, &resolved, lang, textless, kind, &state2.config.cache_dir, state2.config.external_cache_only)
                             .await
                             .map(|r| r.bytes)
@@ -1331,11 +1331,12 @@ async fn generate_poster_with_source(
     // entirely — `resolved.poster_path` is already the TMDB(default).
     let is_default = &*settings.lang == "en" && !settings.textless;
 
+    let fanart_arc = state.fanart.load();
     let try_fanart = || async {
         if fanart_already_tried {
             return None;
         }
-        if let Some(ref fanart) = state.fanart {
+        if let Some(ref fanart) = *fanart_arc {
             fetch_fanart_image(
                 fanart,
                 &state.tmdb,
@@ -1802,7 +1803,8 @@ pub async fn handle_logo_backdrop_inner(
     lb_kind: LogoBackdropKind,
     image_size: Option<ImageSize>,
 ) -> Result<(Bytes, Option<String>), AppError> {
-    let fanart = state.fanart.as_ref();
+    let fanart_guard = state.fanart.load();
+    let fanart: Option<FanartClient> = (*fanart_guard).as_deref().cloned();
 
     let kind: cache::ImageType = lb_kind.into();
     let id_type = IdType::parse(id_type_str)?;
@@ -1947,7 +1949,7 @@ pub async fn handle_logo_backdrop_inner(
         cache_key: cache_key.clone(),
         cache_path: cache_path.clone(),
         lb_cache_suffix: lb_cache_suffix.clone(),
-        fanart: fanart.cloned(),
+        fanart: fanart.clone(),
         image_source_is_fanart: settings.image_source.is_fanart(),
         skip_fanart,
         neg_textless_key,

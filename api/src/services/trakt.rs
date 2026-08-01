@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::error::AppError;
+use crate::services::api_key_pool::ApiKeyPool;
 use crate::services::retry::{self, TRAKT_RETRY};
 use serde::Deserialize;
-use zeroize::Zeroizing;
 
 #[derive(Clone)]
 pub struct TraktClient {
-    client_id: Arc<Zeroizing<String>>,
+    key_pool: Arc<ApiKeyPool>,
     http: reqwest::Client,
 }
 
@@ -18,9 +18,9 @@ pub struct TraktRatingsResponse {
 }
 
 impl TraktClient {
-    pub fn new(client_id: String, http: reqwest::Client) -> Self {
+    pub fn new(key_pool: ApiKeyPool, http: reqwest::Client) -> Self {
         Self {
-            client_id: Arc::new(Zeroizing::new(client_id)),
+            key_pool: Arc::new(key_pool),
             http,
         }
     }
@@ -30,11 +30,12 @@ impl TraktClient {
     /// Trakt's API requires `Content-Type: application/json` even on GET
     /// requests (no body). This is a quirk of their API spec.
     fn request(&self, url: &str) -> reqwest::RequestBuilder {
+        let client_id = self.key_pool.active_key_raw();
         self.http
             .get(url)
             .header("Content-Type", "application/json")
             .header("trakt-api-version", "2")
-            .header("trakt-api-key", self.client_id.as_str())
+            .header("trakt-api-key", client_id.as_str())
     }
 
     /// Fetch a ratings endpoint. Returns `Ok(None)` when Trakt responds 404
