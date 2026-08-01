@@ -97,9 +97,9 @@ fn overlay_icon_shadowed(img: &mut RgbaImage, icon: &RgbaImage, x: i64, y: i64, 
     imageops::overlay(img, icon, x, y);
 }
 const BASE_BADGE_HEIGHT: u32 = 58;
-const BASE_BADGE_PADDING_H: u32 = 14;
-const BASE_TEXT_LABEL_PADDING_H: u32 = 8;
-const BASE_BADGE_VALUE_PADDING_H: u32 = 10;
+const BASE_BADGE_PADDING_H: u32 = 6;
+const BASE_TEXT_LABEL_PADDING_H: u32 = 4;
+const BASE_BADGE_VALUE_PADDING_H: u32 = 5;
 const BASE_BADGE_RADIUS: u32 = 10;
 /// Extra padding added at a pill badge's rounded ends so the text/icons don't
 /// crowd the fully-rounded caps. Applied to the long-axis ends only (left/right
