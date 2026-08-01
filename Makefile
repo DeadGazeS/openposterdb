@@ -40,7 +40,7 @@ shell:
 	$(COMPOSE) $(FILES) exec openposterdb sh
 
 env:
-	@if [ ! -f .env ]; then cp api/.env.example .env; fi
+	@if [ ! -f .env ]; then cp api-go/.env.example .env; fi
 	@if ! grep -qE '^JWT_SECRET=.+' .env 2>/dev/null; then \
 		SEC=$$(openssl rand -hex 32); \
 		sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$${SEC}/" .env; \
