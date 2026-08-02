@@ -36,7 +36,7 @@ const defaultSettings = {
   ratings_order: 'mal,imdb,lb,rt,rta,mc,tmdb,trakt',
   ratings_exclude: '',
   free_api_key_enabled: false,
-  poster_position: 'bc',
+  poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   logo_ratings_limit: 3,
   backdrop_ratings_limit: 3,
   poster_badge_style: 'h',
@@ -46,8 +46,8 @@ const defaultSettings = {
   logo_label_style: 't',
   backdrop_label_style: 't',
   poster_badge_direction: 'd',
-  poster_badge_split: false,
-  backdrop_position: 'tr',
+  
+  backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   backdrop_badge_direction: 'v',
   backdrop_edge_inset_x: 0,
   backdrop_edge_inset_y: 0,
@@ -55,7 +55,7 @@ const defaultSettings = {
   episode_badge_style: 'v',
   episode_label_style: 'o',
   episode_text_size: 100,
-  episode_position: 'tr',
+  episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   episode_badge_direction: 'v',
   episode_blur: false,
 }
@@ -346,7 +346,7 @@ describe('SettingsView', () => {
           episode_badge_style: 'h',
           episode_label_style: 'i',
           episode_text_size: 120,
-          episode_position: 'tl',
+          episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
           episode_badge_direction: 'h',
           episode_blur: true,
         }),
@@ -365,7 +365,7 @@ describe('SettingsView', () => {
         episode_badge_style: 'h',
         episode_label_style: 'i',
         episode_text_size: 120,
-        episode_position: 'tl',
+        episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
         episode_badge_direction: 'h',
         episode_blur: true,
       }),
@@ -388,7 +388,7 @@ describe('SettingsView', () => {
         episode_badge_style: 'v',
         episode_label_style: 'o',
         episode_text_size: 100,
-        episode_position: 'tr',
+        episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
         episode_badge_direction: 'v',
         episode_blur: false,
       }),
@@ -404,7 +404,7 @@ describe('SettingsView', () => {
       json: () =>
         Promise.resolve({
           ...defaultSettings,
-          backdrop_position: 'bl',
+          backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
           backdrop_badge_direction: 'h',
           backdrop_edge_inset_x: 12,
           backdrop_edge_inset_y: 7,
@@ -423,7 +423,7 @@ describe('SettingsView', () => {
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         free_api_key_enabled: true,
-        backdrop_position: 'bl',
+        backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
         backdrop_badge_direction: 'h',
         backdrop_edge_inset_x: 12,
         backdrop_edge_inset_y: 7,

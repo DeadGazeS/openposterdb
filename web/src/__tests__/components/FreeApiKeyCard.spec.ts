@@ -21,7 +21,7 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     ratings_limit: 3,
     ratings_order: DEFAULT_RATINGS_ORDER,
     ratings_exclude: '',
-    poster_position: 'bc',
+    poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
     logo_ratings_limit: 5,
     backdrop_ratings_limit: 5,
     poster_badge_style: 'v',
@@ -31,7 +31,7 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     logo_label_style: 'o',
     backdrop_label_style: 'o',
     poster_badge_direction: 'd',
-    poster_badge_split: false,
+    
     poster_fit: 'native',
     poster_text_size: 100,
     logo_text_size: 100,
@@ -42,7 +42,7 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     poster_logo_size: 100,
     logo_logo_size: 100,
     backdrop_logo_size: 100,
-    backdrop_position: 'bc',
+    backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
     backdrop_badge_direction: 'd',
     backdrop_edge_inset_x: 0,
     backdrop_edge_inset_y: 0,
@@ -52,7 +52,7 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     episode_text_size: 100,
     episode_badge_size: 100,
     episode_logo_size: 100,
-    episode_position: 'bc',
+    episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
     episode_badge_direction: 'd',
     episode_blur: false,
     ...overrides,
@@ -294,25 +294,21 @@ describe('FreeApiKeyCard', () => {
     const wrapper = mountCard(true)
 
     // Set poster-only controls and general image controls
-    await setSelectById(wrapper, 'free-image-position', 'tl')
     await setSelectById(wrapper, 'free-badge-direction', 'v')
     await setSelectById(wrapper, 'free-image-source', 'f')
     await setSelectById(wrapper, 'free-textless', 'true')
-    expect(findCurlCode(wrapper).text()).toContain('position=tl')
     expect(findCurlCode(wrapper).text()).toContain('badge_direction=v')
     expect(findCurlCode(wrapper).text()).toContain('image_source=f')
     expect(findCurlCode(wrapper).text()).toContain('textless=true')
 
     // Switch to logo — poster-only controls should reset, source persists
     await setSelectById(wrapper, 'free-image-type', 'logo')
-    expect(findCurlCode(wrapper).text()).not.toContain('position=')
     expect(findCurlCode(wrapper).text()).not.toContain('badge_direction=')
     expect(findCurlCode(wrapper).text()).not.toContain('textless=')
     expect(findCurlCode(wrapper).text()).toContain('image_source=f')
 
     // Switch back to poster — poster-only controls at defaults, source still set
     await setSelectById(wrapper, 'free-image-type', 'poster')
-    expect(findCurlCode(wrapper).text()).not.toContain('position=')
     expect(findCurlCode(wrapper).text()).not.toContain('badge_direction=')
     expect(findCurlCode(wrapper).text()).not.toContain('textless=')
     expect(findCurlCode(wrapper).text()).toContain('image_source=f')
@@ -353,16 +349,14 @@ describe('FreeApiKeyCard', () => {
 
   // --- Episode support ---
 
-  it('episode queryString includes badge_direction, position, and blur', async () => {
+  it('episode queryString includes badge_direction and blur', async () => {
     const wrapper = mountCard(true)
     await setSelectById(wrapper, 'free-image-type', 'episode')
     await setSelectById(wrapper, 'free-badge-direction', 'v')
-    await setSelectById(wrapper, 'free-image-position', 'tr')
     await setSelectById(wrapper, 'free-blur', 'true')
 
     const curlText = findCurlCode(wrapper).text()
     expect(curlText).toContain('badge_direction=v')
-    expect(curlText).toContain('position=tr')
     expect(curlText).toContain('blur=true')
   })
 
@@ -456,42 +450,36 @@ describe('FreeApiKeyCard', () => {
     expect(findCurlCode(wrapper).text()).toContain('imageSize=small')
   })
 
-  it('episode keeps position and badge_direction controls', async () => {
+  it('episode keeps badge_direction control', async () => {
     const wrapper = mountCard(true)
     await setSelectById(wrapper, 'free-image-type', 'episode')
 
-    expect(wrapper.find('#free-image-position').exists()).toBe(true)
     expect(wrapper.find('#free-badge-direction').exists()).toBe(true)
   })
 
-  it('backdrop keeps position and badge_direction controls', async () => {
+  it('backdrop keeps badge_direction control', async () => {
     const wrapper = mountCard(true)
     await setSelectById(wrapper, 'free-image-type', 'backdrop')
 
-    expect(wrapper.find('#free-image-position').exists()).toBe(true)
     expect(wrapper.find('#free-badge-direction').exists()).toBe(true)
   })
 
-  it('backdrop queryString includes position and badge_direction', async () => {
+  it('backdrop queryString includes badge_direction', async () => {
     const wrapper = mountCard(true)
     await setSelectById(wrapper, 'free-image-type', 'backdrop')
-    await setSelectById(wrapper, 'free-image-position', 'tl')
     await setSelectById(wrapper, 'free-badge-direction', 'h')
 
     const curlText = findCurlCode(wrapper).text()
-    expect(curlText).toContain('position=tl')
     expect(curlText).toContain('badge_direction=h')
   })
 
-  it('switching from backdrop to logo resets position and badge_direction', async () => {
+  it('switching from backdrop to logo resets badge_direction', async () => {
     const wrapper = mountCard(true)
     await setSelectById(wrapper, 'free-image-type', 'backdrop')
-    await setSelectById(wrapper, 'free-image-position', 'tl')
     await setSelectById(wrapper, 'free-badge-direction', 'h')
-    expect(findCurlCode(wrapper).text()).toContain('position=tl')
+    expect(findCurlCode(wrapper).text()).toContain('badge_direction=h')
 
     await setSelectById(wrapper, 'free-image-type', 'logo')
-    expect(findCurlCode(wrapper).text()).not.toContain('position=')
     expect(findCurlCode(wrapper).text()).not.toContain('badge_direction=')
   })
 

@@ -15,7 +15,7 @@ const defaultSettings: RenderSettings = {
   ratings_limit: 3,
   ratings_order: 'mal,imdb,lb,rt,rta,mc,tmdb,trakt',
   ratings_exclude: '',
-  poster_position: 'bc',
+  poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   logo_ratings_limit: 3,
   backdrop_ratings_limit: 3,
   poster_badge_style: 'h',
@@ -25,7 +25,6 @@ const defaultSettings: RenderSettings = {
   logo_label_style: 'i',
   backdrop_label_style: 'i',
   poster_badge_direction: 'd',
-  poster_badge_split: false,
   poster_fit: 'native',
   poster_text_size: 100,
   logo_text_size: 100,
@@ -36,9 +35,8 @@ const defaultSettings: RenderSettings = {
   poster_logo_size: 100,
   logo_logo_size: 100,
   backdrop_logo_size: 100,
-  logo_position: 'bc',
-  logo_badge_split: false,
-  backdrop_position: 'tr',
+  logo_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 5, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+  backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   backdrop_badge_direction: 'v',
   backdrop_edge_inset_x: 0,
   backdrop_edge_inset_y: 0,
@@ -48,7 +46,7 @@ const defaultSettings: RenderSettings = {
   episode_text_size: 100,
   episode_badge_size: 100,
   episode_logo_size: 100,
-  episode_position: 'tr',
+  episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   episode_badge_direction: 'v',
   episode_blur: false,
   poster_badge_shape: 'r',
@@ -105,7 +103,7 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'bc', 'h', 'i', 'd', 100, '', false, 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'h', 'i', 'd', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
   })
 
   it('calls fetchPreview with correct params for custom settings', async () => {
@@ -113,7 +111,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ ratings_limit: 5, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', false, 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
   })
 
   it('sets preview src from blob after fetch', async () => {
@@ -140,7 +138,7 @@ describe('RenderSettingsForm', () => {
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', false, 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
   })
 
   it('shows loading state while preview loads', async () => {
@@ -189,18 +187,18 @@ describe('RenderSettingsForm', () => {
     expect(wrapper.text()).toContain('Failed')
   })
 
-  it('renders poster position dropdown', () => {
+  it('renders poster layout editor', () => {
     const wrapper = mountForm()
-    const select = wrapper.find('[data-testid="poster-position-select"]')
-    expect(select.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="poster-layout-editor"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="poster-bottom-per-row"]').exists()).toBe(true)
   })
 
-  it('calls fetchPreview with posterPosition', async () => {
+  it('calls fetchPreview with poster layout', async () => {
     const fetchPreview = makeFetchPreview()
-    mountForm({ poster_position: 'l' }, fetchPreview)
+    mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'l', 'h', 'i', 'd', 100, '', false, 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"bottom"'), expect.any(String), expect.any(Number), expect.any(String), expect.any(Number), expect.any(Number), {})
   })
 
   it('hides fanart checkbox when fanart_available is false', () => {
@@ -304,7 +302,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_badge_direction: 'v' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'bc', 'h', 'i', 'v', 100, '', false, 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'h', 'i', 'v', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
   })
 
   // --- Episode preview ---
@@ -358,19 +356,19 @@ describe('RenderSettingsForm', () => {
       'v', // episode_badge_style
       'o', // episode_label_style
       100, // episode_text_size
-      'tr', // episode_position
       'v', // episode_badge_direction
       false, // episode_blur
+      expect.stringContaining('"right"'), // episode_layout
       '', // ratings_exclude
        'r', // episode_badge_shape
-      80, // episode_badge_alpha
-      100, // episode_badge_size
-      100, // episode_logo_size
-      {},
+       80, // episode_badge_alpha
+       100, // episode_badge_size
+       100, // episode_logo_size
+       {},
     )
   })
 
-  it('renders episode position and blur controls', () => {
+  it('renders episode layout editor and blur controls', () => {
     const fetchEpisodePreview = makeFetchPreview()
     const settings = { ...defaultSettings }
     const wrapper = mount(RenderSettingsForm, {
@@ -386,7 +384,7 @@ describe('RenderSettingsForm', () => {
         stubs: shadcnStubs,
       },
     })
-    expect(wrapper.find('[data-testid="episode-position-select"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="episode-layout-editor"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="episode-badge-style-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="episode-badge-direction-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="episode-blur-checkbox"]').exists()).toBe(true)
@@ -415,31 +413,15 @@ describe('RenderSettingsForm', () => {
     })
   }
 
-  it('shows both edge-inset inputs for a corner backdrop position', () => {
-    const wrapper = mountWithBackdrop({ backdrop_position: 'tr' })
+  it('shows both edge-inset inputs', () => {
+    const wrapper = mountWithBackdrop({})
     expect(wrapper.find('[data-testid="backdrop-edge-inset-x"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="backdrop-edge-inset-y"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Space from top')
-    expect(wrapper.text()).toContain('Space from right')
-  })
-
-  it('shows only the vertical edge-inset input for a top-center position', () => {
-    const wrapper = mountWithBackdrop({ backdrop_position: 'tc' })
-    expect(wrapper.find('[data-testid="backdrop-edge-inset-x"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="backdrop-edge-inset-y"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Space from top')
-  })
-
-  it('shows only the horizontal edge-inset input for a right position', () => {
-    const wrapper = mountWithBackdrop({ backdrop_position: 'r' })
-    expect(wrapper.find('[data-testid="backdrop-edge-inset-x"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="backdrop-edge-inset-y"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Space from right')
   })
 
   it('passes edge insets to fetchBackdropPreview', async () => {
     const fetchBackdropPreview = makeFetchPreview()
-    mountWithBackdrop({ backdrop_position: 'tr', backdrop_edge_inset_x: 12, backdrop_edge_inset_y: 7 }, fetchBackdropPreview)
+    mountWithBackdrop({ backdrop_edge_inset_x: 12, backdrop_edge_inset_y: 7 }, fetchBackdropPreview)
     await flushPromises()
 
     expect(fetchBackdropPreview).toHaveBeenCalledWith(
@@ -448,22 +430,22 @@ describe('RenderSettingsForm', () => {
       'v', // backdrop_badge_style
       'i', // backdrop_label_style
       100, // backdrop_text_size
-      'tr', // backdrop_position
       'v', // backdrop_badge_direction
       '', // ratings_exclude
        'r', // backdrop_badge_shape
-      80, // backdrop_badge_alpha
-      12, // backdrop_edge_inset_x
-      7, // backdrop_edge_inset_y
-      100, // backdrop_badge_size
-      100, // backdrop_logo_size
-      {},
+       80, // backdrop_badge_alpha
+       12, // backdrop_edge_inset_x
+       7, // backdrop_edge_inset_y
+       expect.stringContaining('"top"'), // backdrop_layout
+       100, // backdrop_badge_size
+       100, // backdrop_logo_size
+       {},
     )
   })
 
   it('editing a backdrop edge inset auto-saves the new value', async () => {
     const saveSettings = vi.fn().mockResolvedValue(null)
-    const wrapper = mountWithBackdrop({ backdrop_position: 'tr' }, makeFetchPreview(), saveSettings)
+    const wrapper = mountWithBackdrop({}, makeFetchPreview(), saveSettings)
 
     await wrapper.find('[data-testid="backdrop-edge-inset-y"]').setValue(15)
     await flushPromises()

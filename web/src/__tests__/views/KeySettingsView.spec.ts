@@ -65,7 +65,7 @@ const sampleSettings = {
   ratings_order: 'mal,imdb,lb,rt,rta,mc,tmdb,trakt',
   ratings_exclude: '',
   is_default: true,
-  poster_position: 'bc',
+  poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   logo_ratings_limit: 3,
   backdrop_ratings_limit: 3,
   poster_badge_style: 'h',
@@ -75,7 +75,7 @@ const sampleSettings = {
   logo_label_style: 't',
   backdrop_label_style: 't',
   poster_badge_direction: 'd',
-  poster_badge_split: false,
+  
 }
 
 describe('KeySettingsView', () => {
