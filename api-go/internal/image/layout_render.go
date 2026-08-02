@@ -5,6 +5,8 @@ import (
 	"math"
 
 	"openposterdb/internal/services"
+
+	"golang.org/x/image/draw"
 )
 
 // layoutBlock is a rendered grid of badges for one side.
@@ -103,13 +105,46 @@ func distributeLayout(badgeImages []*image.RGBA, layout *services.ImageLayout) m
 }
 
 // overlaySideBlock places a badge block on one side of a fixed canvas, hugging
-// that edge and anchored per the start position.
+// that edge and anchored per the start position. Blocks larger than the canvas
+// are scaled down (preserving aspect ratio) so badges are never clipped at the
+// image edge.
 func overlaySideBlock(canvas *image.RGBA, block *image.RGBA, side, start string, badgeScale float32, sideMarginBase uint32, extraX, extraY uint32) {
 	cw := canvas.Bounds().Dx()
 	ch := canvas.Bounds().Dy()
 	bw := block.Bounds().Dx()
 	bh := block.Bounds().Dy()
 	sm := uint32(math.Round(float64(sideMarginBase) * float64(badgeScale)))
+	availW := cw - 2*int(sm) - 2*int(extraX)
+	availH := ch - 2*int(sm) - 2*int(extraY)
+	if availW < 1 {
+		availW = 1
+	}
+	if availH < 1 {
+		availH = 1
+	}
+
+	scale := 1.0
+	if bw > availW && bh > availH {
+		scale = math.Min(float64(availW)/float64(bw), float64(availH)/float64(bh))
+	} else if bw > availW {
+		scale = float64(availW) / float64(bw)
+	} else if bh > availH {
+		scale = float64(availH) / float64(bh)
+	}
+	if scale < 1.0 {
+		sw := int(math.Round(float64(bw) * scale))
+		sh := int(math.Round(float64(bh) * scale))
+		if sw < 1 {
+			sw = 1
+		}
+		if sh < 1 {
+			sh = 1
+		}
+		scaled := image.NewRGBA(image.Rect(0, 0, sw, sh))
+		draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), block, block.Bounds(), draw.Src, nil)
+		block = scaled
+		bw, bh = sw, sh
+	}
 
 	var x, y int
 	switch side {

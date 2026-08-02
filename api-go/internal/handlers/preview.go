@@ -293,6 +293,9 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	layout := previewLayout(query, "poster")
+	if query.RatingsLimit == nil {
+		ratingsLimit = layout.Total()
+	}
 
 	rawBadgeStyle := services.BadgeStyleDefault
 	if query.BadgeStyle != nil {
@@ -490,6 +493,9 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	}
 
 	layout := previewLayout(query, "backdrop")
+	if query.RatingsLimit == nil {
+		ratingsLimit = layout.Total()
+	}
 
 	badgeDirection := services.BadgeDirectionDefault.ResolveDefault()
 	if query.BadgeDirection != nil {
@@ -595,6 +601,9 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	layout := previewLayout(query, "episode")
+	if query.RatingsLimit == nil {
+		ratingsLimit = layout.Total()
+	}
 
 	badgeDirection := services.BadgeDirectionVertical.ResolveDefault()
 	if query.BadgeDirection != nil {

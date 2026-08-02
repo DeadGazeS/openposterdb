@@ -426,15 +426,16 @@ func ServeImage(
 		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
 	}
 
-	// Fetch ratings.
-	limit := settings.RatingsLimit
+	// Fetch ratings. The number of ratings shown is the layout's total badge
+	// capacity, so that's the limit used to fetch badges.
+	limit := settings.PosterLayout.Total()
 	switch kind {
 	case "logo":
-		limit = settings.LogoRatingsLimit
+		limit = settings.LogoLayout.Total()
 	case "backdrop":
-		limit = settings.BackdropRatingsLimit
+		limit = settings.BackdropLayout.Total()
 	case "episode":
-		limit = settings.EpisodeRatingsLimit
+		limit = settings.EpisodeLayout.Total()
 	}
 
 	var rawBadges []services.RatingBadge
