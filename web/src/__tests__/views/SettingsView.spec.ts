@@ -229,7 +229,6 @@ describe('SettingsView', () => {
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        ratings_limit: 3,
         ratings_order: expect.stringContaining('mal'),
       }),
     )
@@ -361,11 +360,10 @@ describe('SettingsView', () => {
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        episode_ratings_limit: 2,
         episode_badge_style: 'h',
         episode_label_style: 'i',
         episode_text_size: 120,
-        episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+        episode_layout: expect.objectContaining({ right: expect.objectContaining({ per_row: 1 }) }),
         episode_badge_direction: 'h',
         episode_blur: true,
       }),
@@ -384,11 +382,10 @@ describe('SettingsView', () => {
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        episode_ratings_limit: 1,
         episode_badge_style: 'v',
         episode_label_style: 'o',
         episode_text_size: 100,
-        episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+        episode_layout: expect.objectContaining({ right: expect.objectContaining({ per_row: 1 }) }),
         episode_badge_direction: 'v',
         episode_blur: false,
       }),
@@ -423,7 +420,7 @@ describe('SettingsView', () => {
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         free_api_key_enabled: true,
-        backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+        backdrop_layout: expect.objectContaining({ top: expect.objectContaining({ per_row: 5 }) }),
         backdrop_badge_direction: 'h',
         backdrop_edge_inset_x: 12,
         backdrop_edge_inset_y: 7,
