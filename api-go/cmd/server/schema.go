@@ -46,7 +46,6 @@ var schemaSQL = []string{
 		textless               INTEGER NOT NULL DEFAULT 0,
 		ratings_limit          INTEGER NOT NULL DEFAULT 3,
 		ratings_order          TEXT NOT NULL DEFAULT 'mal,imdb,lb,rt,mc,rta,tmdb,trakt,mdblist,ebert',
-		poster_position        TEXT NOT NULL DEFAULT 'bc',
 		logo_ratings_limit     INTEGER NOT NULL DEFAULT 5,
 		backdrop_ratings_limit INTEGER NOT NULL DEFAULT 5,
 		poster_badge_style     TEXT NOT NULL DEFAULT 'h',
@@ -55,7 +54,11 @@ var schemaSQL = []string{
 		poster_label_style     TEXT NOT NULL DEFAULT 'i',
 		logo_label_style       TEXT NOT NULL DEFAULT 'i',
 		backdrop_label_style   TEXT NOT NULL DEFAULT 'i',
-		poster_badge_direction TEXT NOT NULL DEFAULT 'd'
+		poster_badge_direction TEXT NOT NULL DEFAULT 'd',
+		poster_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":3,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}',
+		logo_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":5,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}',
+		backdrop_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":5,"rows":1,"start":"r"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}',
+		episode_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'
 	)`,
 }
 
@@ -333,6 +336,62 @@ var migrations = []migration{
 	},
 	{
 		"ALTER TABLE api_key_settings DROP COLUMN episode_badge_size",
+		"no such column",
+	},
+	{
+		`ALTER TABLE api_key_settings ADD COLUMN poster_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":3,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		"duplicate column",
+	},
+	{
+		`ALTER TABLE api_key_settings ADD COLUMN logo_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":5,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		"duplicate column",
+	},
+	{
+		`ALTER TABLE api_key_settings ADD COLUMN backdrop_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":5,"rows":1,"start":"r"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		"duplicate column",
+	},
+	{
+		`ALTER TABLE api_key_settings ADD COLUMN episode_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN poster_position",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN logo_position",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN backdrop_position",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN episode_position",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_split",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN logo_badge_split",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN poster_badges_per_row",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN logo_badges_per_row",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN backdrop_badges_per_row",
+		"no such column",
+	},
+	{
+		"ALTER TABLE api_key_settings DROP COLUMN episode_badges_per_row",
 		"no such column",
 	},
 }

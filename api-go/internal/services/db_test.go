@@ -64,14 +64,11 @@ func TestBadgeDirectionParse(t *testing.T) {
 
 func TestBadgeDirectionResolve(t *testing.T) {
 	def := BadgeDirectionDefault
-	if d := def.Resolve(PositionBottomCenter); d != BadgeDirectionHorizontal {
-		t.Error("Default+Center → Horizontal")
+	if d := def.ResolveDefault(); d != BadgeDirectionHorizontal {
+		t.Error("Default → Horizontal (layout rows)")
 	}
-	if d := def.Resolve(PositionLeft); d != BadgeDirectionVertical {
-		t.Error("Default+Left → Vertical")
-	}
-	if d := def.Resolve(PositionTopRight); d != BadgeDirectionVertical {
-		t.Error("Default+TopRight → Vertical")
+	if d := BadgeDirectionVertical.ResolveDefault(); d != BadgeDirectionVertical {
+		t.Error("Vertical stays Vertical")
 	}
 }
 
@@ -129,8 +126,8 @@ func TestScalePercent(t *testing.T) {
 	if got := ClampScalePercent(30); got != 50 {
 		t.Errorf("clamp low: got %d, want 50", got)
 	}
-	if got := ClampScalePercent(250); got != 200 {
-		t.Errorf("clamp high: got %d, want 200", got)
+	if got := ClampScalePercent(500); got != 400 {
+		t.Errorf("clamp high: got %d, want 400", got)
 	}
 	if ScalePercent(150).Percent() != 1.5 {
 		t.Errorf("Percent: got %v, want 1.5", ScalePercent(150).Percent())
