@@ -106,8 +106,8 @@ describe('enum code → label maps', () => {
     }
   })
 
-  it('label style maps the t/i/o codes', () => {
-    expect(LABEL_STYLE_LABELS).toEqual({ t: 'Text', i: 'White', o: 'Official' })
+  it('label style maps the t/i/o/h codes', () => {
+    expect(LABEL_STYLE_LABELS).toEqual({ t: 'Text', i: 'White', o: 'Official', h: 'High Res' })
   })
 
   it('badge shape maps the r/p codes', () => {

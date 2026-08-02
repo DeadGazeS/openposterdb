@@ -118,7 +118,7 @@ export const RATING_COLOR_ROWS = [
 // at render time from the badge position/direction.
 export const BADGE_STYLE_LABELS: Record<string, string> = { h: 'Horizontal', v: 'Vertical', d: 'Auto' }
 export const BADGE_DIRECTION_LABELS: Record<string, string> = { h: 'Horizontal', v: 'Vertical', d: 'Auto' }
-export const LABEL_STYLE_LABELS: Record<string, string> = { t: 'Text', i: 'White', o: 'Official' }
+export const LABEL_STYLE_LABELS: Record<string, string> = { t: 'Text', i: 'White', o: 'Official', h: 'High Res' }
 export const BADGE_SHAPE_LABELS: Record<string, string> = { r: 'Rounded', p: 'Pill' }
 export const BADGE_BACKGROUND_LABELS: Record<string, string> = { d: 'Default', k: 'Dark', t: 'Transparent', n: 'None' }
 export const IMAGE_SOURCE_LABELS: Record<string, string> = { t: 'TMDB', f: 'Fanart.tv' }

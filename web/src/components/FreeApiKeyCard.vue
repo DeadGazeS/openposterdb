@@ -420,6 +420,7 @@ async function handleFetch() {
               <SelectItem value="t">Text</SelectItem>
               <SelectItem value="i">White</SelectItem>
               <SelectItem value="o">Official</SelectItem>
+              <SelectItem value="h">High Res</SelectItem>
             </SelectContent>
           </Select>
           <div class="flex items-center gap-2">
