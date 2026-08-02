@@ -108,10 +108,11 @@ describe('RenderSettingsForm', () => {
 
   it('calls fetchPreview with correct params for custom settings', async () => {
     const fetchPreview = makeFetchPreview()
-    mountForm({ ratings_limit: 5, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
+    const layout = JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 5, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] })
+    mountForm({ poster_layout: layout, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), 100, '', layout, 'r', 80, 'native', 100, 100, {})
   })
 
   it('sets preview src from blob after fetch', async () => {
@@ -124,21 +125,21 @@ describe('RenderSettingsForm', () => {
     expect(src).toContain('blob:')
   })
 
-  it('updates preview when ratings_limit changes', async () => {
+  it('updates preview when layout changes', async () => {
     const fetchPreview = makeFetchPreview()
     const wrapper = mountForm({}, fetchPreview)
     await flushPromises()
     fetchPreview.mockClear()
 
-    // Change the limit
-    const limitInput = wrapper.find('input[type="number"]')
-    await limitInput.setValue(5)
+    // Change the badges-per-row for the bottom side via the layout editor
+    const perRowInput = wrapper.find('[data-testid="poster-bottom-per-row"]')
+    await perRowInput.setValue(5)
 
     // Advance past preview debounce timer
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"per_row":5'), expect.any(String), expect.any(Number), expect.any(String), expect.any(Number), expect.any(Number), {})
   })
 
   it('shows loading state while preview loads', async () => {
@@ -425,7 +426,7 @@ describe('RenderSettingsForm', () => {
     await flushPromises()
 
     expect(fetchBackdropPreview).toHaveBeenCalledWith(
-      3, // backdrop_ratings_limit
+      5, // backdrop layout total (top 5x1)
       expect.any(String), // ratings_order
       'v', // backdrop_badge_style
       'i', // backdrop_label_style
