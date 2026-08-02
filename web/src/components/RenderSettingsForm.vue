@@ -93,14 +93,11 @@ const editFanart = ref(props.settings.image_source === 'f')
 const editLang = ref(props.settings.lang || 'en')
 const editTextless = ref(props.settings.textless)
 const editSource = computed(() => editFanart.value ? 'f' : 't')
-const editRatingsLimit = ref(props.settings.ratings_limit)
 const editRatingsOrder = ref<string[]>(parseRatingsOrder(props.settings.ratings_order))
 // Excluded sources are stored as only the explicitly-checked keys (unlike order,
 // which is normalised to include every source).
 const editRatingsExclude = ref<string[]>(parseRatingsExclude(props.settings.ratings_exclude))
 const editPosterLayout = ref<ImageLayout>(parseLayout(props.settings.poster_layout, 'poster'))
-const editLogoRatingsLimit = ref(props.settings.logo_ratings_limit ?? 3)
-const editBackdropRatingsLimit = ref(props.settings.backdrop_ratings_limit ?? 3)
 const editPosterBadgeStyle = ref(props.settings.poster_badge_style || 'd')
 const editLogoBadgeStyle = ref(props.settings.logo_badge_style || 'v')
 const editBackdropBadgeStyle = ref(props.settings.backdrop_badge_style || 'v')
@@ -123,7 +120,6 @@ const editBackdropLayout = ref<ImageLayout>(parseLayout(props.settings.backdrop_
 const editBackdropBadgeDirection = ref(props.settings.backdrop_badge_direction || 'd')
 const editBackdropEdgeInsetX = ref(props.settings.backdrop_edge_inset_x ?? 0)
 const editBackdropEdgeInsetY = ref(props.settings.backdrop_edge_inset_y ?? 0)
-const editEpisodeRatingsLimit = ref(props.settings.episode_ratings_limit ?? 1)
 const editEpisodeBadgeStyle = ref(props.settings.episode_badge_style || 'v')
 const editEpisodeLabelStyle = ref(props.settings.episode_label_style || 'o')
 const editEpisodeTextSize = ref(props.settings.episode_text_size ?? 100)
@@ -159,12 +155,9 @@ function applySettings(s: RenderSettings) {
   editFanart.value = s.image_source === 'f'
   editLang.value = s.lang || 'en'
   editTextless.value = s.textless
-  editRatingsLimit.value = s.ratings_limit
   editRatingsOrder.value = parseRatingsOrder(s.ratings_order)
   editRatingsExclude.value = parseRatingsExclude(s.ratings_exclude)
   editPosterLayout.value = parseLayout(s.poster_layout, 'poster')
-  editLogoRatingsLimit.value = s.logo_ratings_limit ?? 3
-  editBackdropRatingsLimit.value = s.backdrop_ratings_limit ?? 3
   editPosterBadgeStyle.value = s.poster_badge_style || 'd'
   editLogoBadgeStyle.value = s.logo_badge_style || 'v'
   editBackdropBadgeStyle.value = s.backdrop_badge_style || 'v'
@@ -185,7 +178,6 @@ function applySettings(s: RenderSettings) {
   editBackdropBadgeDirection.value = s.backdrop_badge_direction || 'd'
   editBackdropEdgeInsetX.value = s.backdrop_edge_inset_x ?? 0
   editBackdropEdgeInsetY.value = s.backdrop_edge_inset_y ?? 0
-  editEpisodeRatingsLimit.value = s.episode_ratings_limit ?? 1
   editEpisodeBadgeStyle.value = s.episode_badge_style || 'v'
   editEpisodeLabelStyle.value = s.episode_label_style || 'o'
   editEpisodeTextSize.value = s.episode_text_size ?? 100
@@ -234,12 +226,9 @@ function editsSnapshot() {
     source: editSource.value,
     lang: editLang.value,
     textless: editTextless.value,
-    ratings_limit: editRatingsLimit.value,
     ratings_order: editRatingsOrder.value.join(','),
     ratings_exclude: editRatingsExclude.value.join(','),
     poster_layout: layoutToJSON(editPosterLayout.value),
-    logo_ratings_limit: editLogoRatingsLimit.value,
-    backdrop_ratings_limit: editBackdropRatingsLimit.value,
     poster_badge_style: editPosterBadgeStyle.value,
     logo_badge_style: editLogoBadgeStyle.value,
     backdrop_badge_style: editBackdropBadgeStyle.value,
@@ -262,7 +251,6 @@ function editsSnapshot() {
     backdrop_badge_direction: editBackdropBadgeDirection.value,
     backdrop_edge_inset_x: editBackdropEdgeInsetX.value,
     backdrop_edge_inset_y: editBackdropEdgeInsetY.value,
-    episode_ratings_limit: editEpisodeRatingsLimit.value,
     episode_badge_style: editEpisodeBadgeStyle.value,
     episode_label_style: editEpisodeLabelStyle.value,
     episode_text_size: editEpisodeTextSize.value,
@@ -288,12 +276,9 @@ function settingsSnapshot(s: RenderSettings) {
     source: s.image_source,
     lang: s.lang || 'en',
     textless: s.textless,
-    ratings_limit: s.ratings_limit,
     ratings_order: parseRatingsOrder(s.ratings_order).join(','),
     ratings_exclude: parseRatingsExclude(s.ratings_exclude).join(','),
     poster_layout: layoutToJSON(parseLayout(s.poster_layout, 'poster')),
-    logo_ratings_limit: s.logo_ratings_limit ?? 3,
-    backdrop_ratings_limit: s.backdrop_ratings_limit ?? 3,
     poster_badge_style: s.poster_badge_style || 'd',
     logo_badge_style: s.logo_badge_style || 'v',
     backdrop_badge_style: s.backdrop_badge_style || 'v',
@@ -316,7 +301,6 @@ function settingsSnapshot(s: RenderSettings) {
     backdrop_badge_direction: s.backdrop_badge_direction || 'd',
     backdrop_edge_inset_x: s.backdrop_edge_inset_x ?? 0,
     backdrop_edge_inset_y: s.backdrop_edge_inset_y ?? 0,
-    episode_ratings_limit: s.episode_ratings_limit ?? 1,
     episode_badge_style: s.episode_badge_style || 'v',
     episode_label_style: s.episode_label_style || 'o',
     episode_text_size: s.episode_text_size ?? 100,
@@ -380,13 +364,10 @@ async function save() {
       image_source: editSource.value,
       lang: editLang.value,
       textless: editTextless.value,
-      ratings_limit: editRatingsLimit.value,
-      ratings_order: editRatingsOrder.value.join(','),
+        ratings_order: editRatingsOrder.value.join(','),
       ratings_exclude: editRatingsExclude.value.join(','),
-      poster_layout: layoutToJSON(editPosterLayout.value),
-      logo_ratings_limit: editLogoRatingsLimit.value,
-      backdrop_ratings_limit: editBackdropRatingsLimit.value,
-      poster_badge_style: editPosterBadgeStyle.value,
+      poster_layout: JSON.parse(JSON.stringify(editPosterLayout.value)),
+          poster_badge_style: editPosterBadgeStyle.value,
       logo_badge_style: editLogoBadgeStyle.value,
       backdrop_badge_style: editBackdropBadgeStyle.value,
       poster_label_style: editPosterLabelStyle.value,
@@ -403,18 +384,17 @@ async function save() {
       poster_logo_size: editPosterLogoSize.value,
       logo_logo_size: editLogoLogoSize.value,
       backdrop_logo_size: editBackdropLogoSize.value,
-      logo_layout: layoutToJSON(editLogoLayout.value),
-      backdrop_layout: layoutToJSON(editBackdropLayout.value),
+      logo_layout: JSON.parse(JSON.stringify(editLogoLayout.value)),
+      backdrop_layout: JSON.parse(JSON.stringify(editBackdropLayout.value)),
       backdrop_badge_direction: editBackdropBadgeDirection.value,
       backdrop_edge_inset_x: coerceInset(editBackdropEdgeInsetX.value),
       backdrop_edge_inset_y: coerceInset(editBackdropEdgeInsetY.value),
-      episode_ratings_limit: editEpisodeRatingsLimit.value,
-      episode_badge_style: editEpisodeBadgeStyle.value,
+        episode_badge_style: editEpisodeBadgeStyle.value,
       episode_label_style: editEpisodeLabelStyle.value,
       episode_text_size: editEpisodeTextSize.value,
       episode_badge_size: editEpisodeBadgeSize.value,
       episode_logo_size: editEpisodeLogoSize.value,
-      episode_layout: layoutToJSON(editEpisodeLayout.value),
+      episode_layout: JSON.parse(JSON.stringify(editEpisodeLayout.value)),
       episode_badge_direction: editEpisodeBadgeDirection.value,
       episode_blur: editEpisodeBlur.value,
       poster_badge_shape: editPosterBadgeShape.value,
@@ -514,7 +494,7 @@ async function fetchPreviewImage(
   const generation = ++state.generation
 
   try {
-    const res = await fetcher(editRatingsLimit.value, editRatingsOrder.value.join(','))
+    const res = await fetcher(0, editRatingsOrder.value.join(','))
     if (generation !== state.generation) return
     if (!res.ok) {
       state.error = true
@@ -539,24 +519,24 @@ let backdropPreviewTimer: ReturnType<typeof setTimeout> | null = null
 let episodePreviewTimer: ReturnType<typeof setTimeout> | null = null
 
 function updatePosterPreview() {
-  fetchPreviewImage(posterPreview.value, (_limit, order) => props.fetchPreview(editRatingsLimit.value, order, editPosterBadgeStyle.value, editPosterLabelStyle.value, editPosterBadgeDirection.value, editPosterTextSize.value, editRatingsExclude.value.join(','), layoutToJSON(editPosterLayout.value), editPosterBadgeShape.value, editPosterBadgeAlpha.value, editPosterFit.value, editPosterBadgeSize.value, editPosterLogoSize.value, editColors.value))
+  fetchPreviewImage(posterPreview.value, (_limit, order) => props.fetchPreview(posterTotal.value, order, editPosterBadgeStyle.value, editPosterLabelStyle.value, editPosterBadgeDirection.value, editPosterTextSize.value, editRatingsExclude.value.join(','), layoutToJSON(editPosterLayout.value), editPosterBadgeShape.value, editPosterBadgeAlpha.value, editPosterFit.value, editPosterBadgeSize.value, editPosterLogoSize.value, editColors.value))
 }
 
 function updateLogoPreview() {
   if (props.fetchLogoPreview) {
-    fetchPreviewImage(logoPreview.value, (_limit, order) => props.fetchLogoPreview!(editLogoRatingsLimit.value, order, editLogoBadgeStyle.value, editLogoLabelStyle.value, editLogoTextSize.value, editRatingsExclude.value.join(','), editLogoBadgeShape.value, editLogoBadgeAlpha.value, editLogoBadgeSize.value, editLogoLogoSize.value, layoutToJSON(editLogoLayout.value), editColors.value))
+    fetchPreviewImage(logoPreview.value, (_limit, order) => props.fetchLogoPreview!(logoTotal.value, order, editLogoBadgeStyle.value, editLogoLabelStyle.value, editLogoTextSize.value, editRatingsExclude.value.join(','), editLogoBadgeShape.value, editLogoBadgeAlpha.value, editLogoBadgeSize.value, editLogoLogoSize.value, layoutToJSON(editLogoLayout.value), editColors.value))
   }
 }
 
 function updateBackdropPreview() {
   if (props.fetchBackdropPreview) {
-    fetchPreviewImage(backdropPreview.value, (_limit, order) => props.fetchBackdropPreview!(editBackdropRatingsLimit.value, order, editBackdropBadgeStyle.value, editBackdropLabelStyle.value, editBackdropTextSize.value, editBackdropBadgeDirection.value, editRatingsExclude.value.join(','), editBackdropBadgeShape.value, editBackdropBadgeAlpha.value, editBackdropEdgeInsetX.value, editBackdropEdgeInsetY.value, layoutToJSON(editBackdropLayout.value), editBackdropBadgeSize.value, editBackdropLogoSize.value, editColors.value))
+    fetchPreviewImage(backdropPreview.value, (_limit, order) => props.fetchBackdropPreview!(backdropTotal.value, order, editBackdropBadgeStyle.value, editBackdropLabelStyle.value, editBackdropTextSize.value, editBackdropBadgeDirection.value, editRatingsExclude.value.join(','), editBackdropBadgeShape.value, editBackdropBadgeAlpha.value, editBackdropEdgeInsetX.value, editBackdropEdgeInsetY.value, layoutToJSON(editBackdropLayout.value), editBackdropBadgeSize.value, editBackdropLogoSize.value, editColors.value))
   }
 }
 
 function updateEpisodePreview() {
   if (props.fetchEpisodePreview) {
-    fetchPreviewImage(episodePreview.value, (_limit, order) => props.fetchEpisodePreview!(editEpisodeRatingsLimit.value, order, editEpisodeBadgeStyle.value, editEpisodeLabelStyle.value, editEpisodeTextSize.value, editEpisodeBadgeDirection.value, editEpisodeBlur.value, layoutToJSON(editEpisodeLayout.value), editRatingsExclude.value.join(','), editEpisodeBadgeShape.value, editEpisodeBadgeAlpha.value, editEpisodeBadgeSize.value, editEpisodeLogoSize.value, editColors.value))
+    fetchPreviewImage(episodePreview.value, (_limit, order) => props.fetchEpisodePreview!(episodeTotal.value, order, editEpisodeBadgeStyle.value, editEpisodeLabelStyle.value, editEpisodeTextSize.value, editEpisodeBadgeDirection.value, editEpisodeBlur.value, layoutToJSON(editEpisodeLayout.value), editRatingsExclude.value.join(','), editEpisodeBadgeShape.value, editEpisodeBadgeAlpha.value, editEpisodeBadgeSize.value, editEpisodeLogoSize.value, editColors.value))
   }
 }
 
@@ -581,28 +561,28 @@ watch([editRatingsOrder, editRatingsExclude, editColors], () => {
 }, { deep: true })
 
 // Poster-only settings
-watch([editRatingsLimit, editPosterLayout, editPosterBadgeStyle, editPosterLabelStyle, editPosterBadgeDirection, editPosterFit, editPosterTextSize, editPosterBadgeSize, editPosterLogoSize, editPosterBadgeShape, editPosterBadgeAlpha], () => {
+watch([editPosterLayout, editPosterBadgeStyle, editPosterLabelStyle, editPosterBadgeDirection, editPosterFit, editPosterTextSize, editPosterBadgeSize, editPosterLogoSize, editPosterBadgeShape, editPosterBadgeAlpha], () => {
   if (syncing) return
   if (posterPreviewTimer) clearTimeout(posterPreviewTimer)
   posterPreviewTimer = setTimeout(updatePosterPreview, 500)
 })
 
 // Logo-only settings
-watch([editLogoRatingsLimit, editLogoLayout, editLogoBadgeStyle, editLogoLabelStyle, editLogoTextSize, editLogoBadgeSize, editLogoLogoSize, editLogoBadgeShape, editLogoBadgeAlpha], () => {
+watch([editLogoLayout, editLogoBadgeStyle, editLogoLabelStyle, editLogoTextSize, editLogoBadgeSize, editLogoLogoSize, editLogoBadgeShape, editLogoBadgeAlpha], () => {
   if (syncing) return
   if (logoPreviewTimer) clearTimeout(logoPreviewTimer)
   logoPreviewTimer = setTimeout(updateLogoPreview, 500)
 })
 
 // Backdrop-only settings
-watch([editBackdropRatingsLimit, editBackdropLayout, editBackdropBadgeStyle, editBackdropLabelStyle, editBackdropTextSize, editBackdropBadgeSize, editBackdropLogoSize, editBackdropBadgeDirection, editBackdropEdgeInsetX, editBackdropEdgeInsetY, editBackdropBadgeShape, editBackdropBadgeAlpha], () => {
+watch([editBackdropLayout, editBackdropBadgeStyle, editBackdropLabelStyle, editBackdropTextSize, editBackdropBadgeSize, editBackdropLogoSize, editBackdropBadgeDirection, editBackdropEdgeInsetX, editBackdropEdgeInsetY, editBackdropBadgeShape, editBackdropBadgeAlpha], () => {
   if (syncing) return
   if (backdropPreviewTimer) clearTimeout(backdropPreviewTimer)
   backdropPreviewTimer = setTimeout(updateBackdropPreview, 500)
 })
 
 // Episode-only settings
-watch([editEpisodeRatingsLimit, editEpisodeLayout, editEpisodeBadgeStyle, editEpisodeLabelStyle, editEpisodeTextSize, editEpisodeBadgeSize, editEpisodeLogoSize, editEpisodeBadgeDirection, editEpisodeBlur, editEpisodeBadgeShape, editEpisodeBadgeAlpha], () => {
+watch([editEpisodeLayout, editEpisodeBadgeStyle, editEpisodeLabelStyle, editEpisodeTextSize, editEpisodeBadgeSize, editEpisodeLogoSize, editEpisodeBadgeDirection, editEpisodeBlur, editEpisodeBadgeShape, editEpisodeBadgeAlpha], () => {
   if (syncing) return
   if (episodePreviewTimer) clearTimeout(episodePreviewTimer)
   episodePreviewTimer = setTimeout(updateEpisodePreview, 500)
@@ -622,7 +602,7 @@ function buildGalleryParams(): string {
   const p = new URLSearchParams()
   p.set('ratings_order', editRatingsOrder.value.join(','))
   p.set('ratings_exclude', editRatingsExclude.value.join(','))
-  p.set('ratings_limit', String(editRatingsLimit.value))
+  p.set('ratings_limit', String(posterTotal.value))
   p.set('badge_alpha', String(editPosterBadgeAlpha.value))
   p.set('badge_shape', editPosterBadgeShape.value)
   p.set('label_style', editPosterLabelStyle.value)
@@ -636,7 +616,7 @@ function buildGalleryParams(): string {
 
 galleryParams.value = buildGalleryParams()
 
-watch([editRatingsOrder, editRatingsExclude, editRatingsLimit, editPosterBadgeAlpha, editPosterBadgeShape, editPosterLabelStyle, editColors], () => {
+watch([editRatingsOrder, editRatingsExclude, editPosterLayout, editPosterBadgeAlpha, editPosterBadgeShape, editPosterLabelStyle, editColors], () => {
   if (syncing) return
   if (galleryTimer) clearTimeout(galleryTimer)
   galleryTimer = setTimeout(() => {
@@ -828,7 +808,8 @@ function toggleExclude(key: string, checked: boolean) {
             Text colour — colour of the rating number
           </span>
         </div>
-        <div class="grid grid-cols-1 gap-x-4 gap-y-2 max-w-2xl">
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div class="grid grid-cols-1 gap-x-4 gap-y-2">
           <div
             v-for="source in RATING_COLOR_ROWS"
             :key="source.key"
@@ -879,15 +860,15 @@ function toggleExclude(key: string, checked: boolean) {
             <span class="text-[10px] text-muted-foreground whitespace-nowrap">logo bg · text bg · border · text</span>
           </div>
         </div>
-        <div class="pt-2 space-y-3">
+        <div class="space-y-3">
           <!-- Rating Source Badges -->
           <p class="text-sm font-semibold">Rating Source Badges</p>
         <p class="text-xs text-muted-foreground">
           A sample badge for each rating source, matching your current colour settings (updates live
-          with the controls above). Sources with multiple logos — Rotten Tomatoes switches logo based
+          with the controls beside it). Sources with multiple logos — Rotten Tomatoes switches logo based
           on the score — show every variant.
         </p>
-        <div class="space-y-3 max-w-2xl">
+        <div class="space-y-3">
           <div
             v-for="source in ALL_RATING_SOURCES"
             :key="source.key"
@@ -908,756 +889,701 @@ function toggleExclude(key: string, checked: boolean) {
           </div>
         </div>
         </div>
+        </div>
       </div>
     </template>
         </div>
       </TabsContent>
 
       <TabsContent value="poster" class="mt-3">
-    <!-- Section 2: Poster -->
-    <div class="rounded-md border p-4 space-y-3">
-      <p class="text-sm font-semibold">Poster</p>
-      <div class="relative w-[170px]" :style="posterPreview.size ? { aspectRatio: `${posterPreview.size.w} / ${posterPreview.size.h}` } : undefined">
-        <img
-          v-show="posterPreview.src && !posterPreview.error"
-          :src="posterPreview.src"
-          alt="Poster preview"
-          class="rounded border w-full"
-          @load="(e: Event) => onPreviewLoad(posterPreview, e)"
-          @error="posterPreview.loading = false; posterPreview.error = true"
-        />
-        <p v-if="posterPreview.error && !posterPreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
-        <div v-if="posterPreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
-          <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
-        </div>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-          <div class="space-y-2">
-            <Label :for="inputId('poster-badge-direction')">Badge direction</Label>
-            <Select
-              :model-value="editPosterBadgeDirection"
-              @update:model-value="editPosterBadgeDirection = $event as string"
-            >
-              <SelectTrigger :id="inputId('poster-badge-direction')" class="max-w-xs" data-testid="poster-badge-direction-select">
-                <SelectValue placeholder="Select direction" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="d">Default</SelectItem>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('poster-badge-style')">Badge style</Label>
-            <Select
-              :model-value="editPosterBadgeStyle"
-              :disabled="editPosterBadgeShape === 'p'"
-              @update:model-value="editPosterBadgeStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('poster-badge-style')" class="max-w-xs" data-testid="poster-badge-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="d">Default</SelectItem>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-            <p v-if="editPosterBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('poster-label-style')">Label style</Label>
-            <Select
-              :model-value="editPosterLabelStyle"
-              @update:model-value="editPosterLabelStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('poster-label-style')" class="max-w-xs" data-testid="poster-label-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">White</SelectItem>
-                <SelectItem value="o">Official</SelectItem>
-                <SelectItem value="h">High Res</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('poster-text-size')">Text size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterTextSize }}%</span>
-            </div>
-            <input
-              :id="inputId('poster-text-size')"
-              v-model.number="editPosterTextSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`poster-text-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('poster-badge-size')">Badge size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterBadgeSize }}%</span>
-            </div>
-            <input
-              :id="inputId('poster-badge-size')"
-              v-model.number="editPosterBadgeSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`poster-badge-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('poster-logo-size')">Logo size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterLogoSize }}%</span>
-            </div>
-            <input
-              :id="inputId('poster-logo-size')"
-              v-model.number="editPosterLogoSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`poster-logo-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('poster-badge-shape')">Badge shape</Label>
-            <Select
-              :model-value="editPosterBadgeShape"
-              @update:model-value="editPosterBadgeShape = $event as string"
-            >
-              <SelectTrigger :id="inputId('poster-badge-shape')" class="max-w-xs" data-testid="poster-badge-shape-select">
-                <SelectValue placeholder="Select shape" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="r">Rounded</SelectItem>
-                <SelectItem value="p">Pill</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                      <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('poster-badge-alpha')">Background opacity</Label>
-              <span class="text-xs text-muted-foreground w-8 text-right">{{ editPosterBadgeAlpha }}%</span>
-            </div>
-            <input
-              :id="inputId('poster-badge-alpha')"
-              v-model.number="editPosterBadgeAlpha"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              :data-testid="`poster-badge-alpha-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('poster-fit')">Aspect ratio</Label>
-            <Select
-              :model-value="editPosterFit"
-              @update:model-value="editPosterFit = $event as string"
-            >
-              <SelectTrigger :id="inputId('poster-fit')" class="max-w-xs" data-testid="poster-fit-select">
-                <SelectValue placeholder="Select fit" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="native">Native (source ratio)</SelectItem>
-                <SelectItem value="cover">Crop to 2:3</SelectItem>
-                <SelectItem value="blur">Blur fill to 2:3</SelectItem>
-                <SelectItem value="pad">Letterbox to 2:3</SelectItem>
-              </SelectContent>
-            </Select>
-            <p class="text-xs text-muted-foreground">
-              How non-2:3 posters are fit to the standard 2:3 frame so clients don't crop them.
-            </p>
-          </div>
-          <div class="space-y-1">
-            <div class="flex items-center gap-3">
-              <Label :for="inputId('ratings-limit')">Max ratings</Label>
-              <Input
-                :id="inputId('ratings-limit')"
-                v-model.number="editRatingsLimit"
-                type="number"
-                :min="0"
-                :max="10"
-                class="w-[80px]"
-                title="0 = no ratings"
+        <div class="rounded-md border p-4 space-y-3">
+          <p class="text-sm font-semibold">Poster</p>
+          <div class="flex flex-col md:flex-row gap-4 items-start">
+            <div class="relative w-[220px] shrink-0" :style="posterPreview.size ? { aspectRatio: `${posterPreview.size.w} / ${posterPreview.size.h}` } : undefined">
+              <img
+                v-show="posterPreview.src && !posterPreview.error"
+                :src="posterPreview.src"
+                alt="Poster preview"
+                class="rounded border w-full"
+                @load="(e: Event) => onPreviewLoad(posterPreview, e)"
+                @error="posterPreview.loading = false; posterPreview.error = true"
               />
+              <p v-if="posterPreview.error && !posterPreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
+              <div v-if="posterPreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
+                <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
+              </div>
             </div>
-            <p class="text-xs text-muted-foreground">0 = no ratings</p>
+            <LayoutEditor v-model="editPosterLayout" kind="poster" test-prefix="poster" class="flex-1 min-w-0" />
           </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <Checkbox
-          :id="inputId('textless')"
-          :model-value="editTextless"
-          data-testid="textless-checkbox"
-          @update:model-value="(v) => editTextless = !!v"
-        />
-        <Label :for="inputId('textless')">Prefer textless posters</Label>
-      </div>
-      <LayoutEditor v-model="editPosterLayout" kind="poster" test-prefix="poster" class="col-span-full" />
-    </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+            <div class="space-y-2">
+              <Label :for="inputId('poster-badge-style')">Badge style</Label>
+              <Select
+                :model-value="editPosterBadgeStyle"
+                :disabled="editPosterBadgeShape === 'p'"
+                @update:model-value="editPosterBadgeStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('poster-badge-style')" class="max-w-xs" data-testid="poster-badge-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="d">Default</SelectItem>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="editPosterBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('poster-label-style')">Label style</Label>
+              <Select
+                :model-value="editPosterLabelStyle"
+                @update:model-value="editPosterLabelStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('poster-label-style')" class="max-w-xs" data-testid="poster-label-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="t">Text</SelectItem>
+                  <SelectItem value="i">White</SelectItem>
+                  <SelectItem value="o">Official</SelectItem>
+                  <SelectItem value="h">High Res</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('poster-text-size')">Text size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterTextSize }}%</span>
+              </div>
+              <input
+                :id="inputId('poster-text-size')"
+                v-model.number="editPosterTextSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`poster-text-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('poster-badge-size')">Badge size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterBadgeSize }}%</span>
+              </div>
+              <input
+                :id="inputId('poster-badge-size')"
+                v-model.number="editPosterBadgeSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`poster-badge-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('poster-logo-size')">Logo size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editPosterLogoSize }}%</span>
+              </div>
+              <input
+                :id="inputId('poster-logo-size')"
+                v-model.number="editPosterLogoSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`poster-logo-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('poster-badge-shape')">Badge shape</Label>
+              <Select
+                :model-value="editPosterBadgeShape"
+                @update:model-value="editPosterBadgeShape = $event as string"
+              >
+                <SelectTrigger :id="inputId('poster-badge-shape')" class="max-w-xs" data-testid="poster-badge-shape-select">
+                  <SelectValue placeholder="Select shape" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="r">Rounded</SelectItem>
+                  <SelectItem value="p">Pill</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('poster-badge-alpha')">Background opacity</Label>
+                <span class="text-xs text-muted-foreground w-8 text-right">{{ editPosterBadgeAlpha }}%</span>
+              </div>
+              <input
+                :id="inputId('poster-badge-alpha')"
+                v-model.number="editPosterBadgeAlpha"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                :data-testid="`poster-badge-alpha-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('poster-badge-direction')">Badge direction</Label>
+              <Select
+                :model-value="editPosterBadgeDirection"
+                @update:model-value="editPosterBadgeDirection = $event as string"
+              >
+                <SelectTrigger :id="inputId('poster-badge-direction')" class="max-w-xs" data-testid="poster-badge-direction-select">
+                  <SelectValue placeholder="Select direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="d">Default</SelectItem>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('poster-fit')">Aspect ratio</Label>
+              <Select
+                :model-value="editPosterFit"
+                @update:model-value="editPosterFit = $event as string"
+              >
+                <SelectTrigger :id="inputId('poster-fit')" class="max-w-xs" data-testid="poster-fit-select">
+                  <SelectValue placeholder="Select fit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="native">Native (source ratio)</SelectItem>
+                  <SelectItem value="cover">Crop to 2:3</SelectItem>
+                  <SelectItem value="blur">Blur fill to 2:3</SelectItem>
+                  <SelectItem value="pad">Letterbox to 2:3</SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-xs text-muted-foreground">
+                How non-2:3 posters are fit to the standard 2:3 frame so clients don't crop them.
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <Checkbox
+                :id="inputId('textless')"
+                :model-value="editTextless"
+                data-testid="textless-checkbox"
+                @update:model-value="(v) => editTextless = !!v"
+              />
+              <Label :for="inputId('textless')">Prefer textless posters</Label>
+            </div>
+          </div>
+        </div>
       </TabsContent>
 
       <TabsContent value="logo" class="mt-3">
-    <!-- Section 3: Logo -->
-    <div v-if="fetchLogoPreview" class="rounded-md border p-4 space-y-3">
-      <p class="text-sm font-semibold">Logo</p>
-      <div class="relative w-[170px]" :style="logoPreview.size ? { aspectRatio: `${logoPreview.size.w} / ${logoPreview.size.h}` } : undefined">
-        <img
-          v-show="logoPreview.src && !logoPreview.error"
-          :src="logoPreview.src"
-          alt="Logo preview"
-          class="rounded border w-full bg-neutral-900"
-          @load="(e: Event) => onPreviewLoad(logoPreview, e)"
-          @error="logoPreview.loading = false; logoPreview.error = true"
-        />
-        <p v-if="logoPreview.error && !logoPreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
-        <div v-if="logoPreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
-          <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
-        </div>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-          <div class="space-y-2">
-            <Label :for="inputId('logo-badge-style')">Badge style</Label>
-            <Select
-              :model-value="editLogoBadgeStyle"
-              :disabled="editLogoBadgeShape === 'p'"
-              @update:model-value="editLogoBadgeStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('logo-badge-style')" class="max-w-xs" data-testid="logo-badge-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-            <p v-if="editLogoBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('logo-label-style')">Label style</Label>
-            <Select
-              :model-value="editLogoLabelStyle"
-              @update:model-value="editLogoLabelStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('logo-label-style')" class="max-w-xs" data-testid="logo-label-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">White</SelectItem>
-                <SelectItem value="o">Official</SelectItem>
-                <SelectItem value="h">High Res</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('logo-text-size')">Text size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoTextSize }}%</span>
-            </div>
-            <input
-              :id="inputId('logo-text-size')"
-              v-model.number="editLogoTextSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`logo-text-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('logo-badge-size')">Badge size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoBadgeSize }}%</span>
-            </div>
-            <input
-              :id="inputId('logo-badge-size')"
-              v-model.number="editLogoBadgeSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`logo-badge-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('logo-logo-size')">Logo size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoLogoSize }}%</span>
-            </div>
-            <input
-              :id="inputId('logo-logo-size')"
-              v-model.number="editLogoLogoSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`logo-logo-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('logo-badge-shape')">Badge shape</Label>
-            <Select
-              :model-value="editLogoBadgeShape"
-              @update:model-value="editLogoBadgeShape = $event as string"
-            >
-              <SelectTrigger :id="inputId('logo-badge-shape')" class="max-w-xs" data-testid="logo-badge-shape-select">
-                <SelectValue placeholder="Select shape" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="r">Rounded</SelectItem>
-                <SelectItem value="p">Pill</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                      <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('logo-badge-alpha')">Background opacity</Label>
-              <span class="text-xs text-muted-foreground w-8 text-right">{{ editLogoBadgeAlpha }}%</span>
-            </div>
-            <input
-              :id="inputId('logo-badge-alpha')"
-              v-model.number="editLogoBadgeAlpha"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              :data-testid="`logo-badge-alpha-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
-          </div>
-          <div class="space-y-1">
-            <div class="flex items-center gap-3">
-              <Label :for="inputId('logo-ratings-limit')">Max ratings</Label>
-              <Input
-                :id="inputId('logo-ratings-limit')"
-                v-model.number="editLogoRatingsLimit"
-                type="number"
-                :min="0"
-                :max="10"
-                class="w-[80px]"
-                title="0 = no ratings"
+        <div v-if="fetchLogoPreview" class="rounded-md border p-4 space-y-3">
+          <p class="text-sm font-semibold">Logo</p>
+          <div class="flex flex-col md:flex-row gap-4 items-start">
+            <div class="relative w-[240px] shrink-0" :style="logoPreview.size ? { aspectRatio: `${logoPreview.size.w} / ${logoPreview.size.h}` } : undefined">
+              <img
+                v-show="logoPreview.src && !logoPreview.error"
+                :src="logoPreview.src"
+                alt="Logo preview"
+                class="rounded border w-full bg-neutral-900"
+                @load="(e: Event) => onPreviewLoad(logoPreview, e)"
+                @error="logoPreview.loading = false; logoPreview.error = true"
               />
+              <p v-if="logoPreview.error && !logoPreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
+              <div v-if="logoPreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
+                <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
+              </div>
             </div>
-            <p class="text-xs text-muted-foreground">0 = no ratings</p>
+            <LayoutEditor v-model="editLogoLayout" kind="logo" test-prefix="logo" class="flex-1 min-w-0" />
           </div>
-          <LayoutEditor v-model="editLogoLayout" kind="logo" test-prefix="logo" class="col-span-full" />
-      </div>
-    </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+            <div class="space-y-2">
+              <Label :for="inputId('logo-badge-style')">Badge style</Label>
+              <Select
+                :model-value="editLogoBadgeStyle"
+                :disabled="editLogoBadgeShape === 'p'"
+                @update:model-value="editLogoBadgeStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('logo-badge-style')" class="max-w-xs" data-testid="logo-badge-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="editLogoBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('logo-label-style')">Label style</Label>
+              <Select
+                :model-value="editLogoLabelStyle"
+                @update:model-value="editLogoLabelStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('logo-label-style')" class="max-w-xs" data-testid="logo-label-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="t">Text</SelectItem>
+                  <SelectItem value="i">White</SelectItem>
+                  <SelectItem value="o">Official</SelectItem>
+                  <SelectItem value="h">High Res</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('logo-text-size')">Text size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoTextSize }}%</span>
+              </div>
+              <input
+                :id="inputId('logo-text-size')"
+                v-model.number="editLogoTextSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`logo-text-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('logo-badge-size')">Badge size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoBadgeSize }}%</span>
+              </div>
+              <input
+                :id="inputId('logo-badge-size')"
+                v-model.number="editLogoBadgeSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`logo-badge-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('logo-logo-size')">Logo size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editLogoLogoSize }}%</span>
+              </div>
+              <input
+                :id="inputId('logo-logo-size')"
+                v-model.number="editLogoLogoSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`logo-logo-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('logo-badge-shape')">Badge shape</Label>
+              <Select
+                :model-value="editLogoBadgeShape"
+                @update:model-value="editLogoBadgeShape = $event as string"
+              >
+                <SelectTrigger :id="inputId('logo-badge-shape')" class="max-w-xs" data-testid="logo-badge-shape-select">
+                  <SelectValue placeholder="Select shape" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="r">Rounded</SelectItem>
+                  <SelectItem value="p">Pill</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('logo-badge-alpha')">Background opacity</Label>
+                <span class="text-xs text-muted-foreground w-8 text-right">{{ editLogoBadgeAlpha }}%</span>
+              </div>
+              <input
+                :id="inputId('logo-badge-alpha')"
+                v-model.number="editLogoBadgeAlpha"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                :data-testid="`logo-badge-alpha-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
+            </div>
+          </div>
+        </div>
       </TabsContent>
 
       <TabsContent value="backdrop" class="mt-3">
-    <!-- Section 4: Backdrop -->
-    <div v-if="fetchBackdropPreview" class="rounded-md border p-4 space-y-3">
-      <p class="text-sm font-semibold">Backdrop (movie/series)</p>
-      <div class="relative w-[280px]" :style="backdropPreview.size ? { aspectRatio: `${backdropPreview.size.w} / ${backdropPreview.size.h}` } : undefined">
-        <img
-          v-show="backdropPreview.src && !backdropPreview.error"
-          :src="backdropPreview.src"
-          alt="Backdrop preview"
-          class="rounded border w-full"
-          @load="(e: Event) => onPreviewLoad(backdropPreview, e)"
-          @error="backdropPreview.loading = false; backdropPreview.error = true"
-        />
-        <p v-if="backdropPreview.error && !backdropPreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
-        <div v-if="backdropPreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
-          <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
-        </div>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-          <div class="space-y-2">
-            <Label :for="inputId('backdrop-badge-style')">Badge style</Label>
-            <Select
-              :model-value="editBackdropBadgeStyle"
-              :disabled="editBackdropBadgeShape === 'p'"
-              @update:model-value="editBackdropBadgeStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('backdrop-badge-style')" class="max-w-xs" data-testid="backdrop-badge-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-            <p v-if="editBackdropBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('backdrop-label-style')">Label style</Label>
-            <Select
-              :model-value="editBackdropLabelStyle"
-              @update:model-value="editBackdropLabelStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('backdrop-label-style')" class="max-w-xs" data-testid="backdrop-label-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">White</SelectItem>
-                <SelectItem value="o">Official</SelectItem>
-                <SelectItem value="h">High Res</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('backdrop-text-size')">Text size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropTextSize }}%</span>
-            </div>
-            <input
-              :id="inputId('backdrop-text-size')"
-              v-model.number="editBackdropTextSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`backdrop-text-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('backdrop-badge-size')">Badge size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropBadgeSize }}%</span>
-            </div>
-            <input
-              :id="inputId('backdrop-badge-size')"
-              v-model.number="editBackdropBadgeSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`backdrop-badge-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('backdrop-logo-size')">Logo size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropLogoSize }}%</span>
-            </div>
-            <input
-              :id="inputId('backdrop-logo-size')"
-              v-model.number="editBackdropLogoSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`backdrop-logo-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('backdrop-badge-shape')">Badge shape</Label>
-            <Select
-              :model-value="editBackdropBadgeShape"
-              @update:model-value="editBackdropBadgeShape = $event as string"
-            >
-              <SelectTrigger :id="inputId('backdrop-badge-shape')" class="max-w-xs" data-testid="backdrop-badge-shape-select">
-                <SelectValue placeholder="Select shape" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="r">Rounded</SelectItem>
-                <SelectItem value="p">Pill</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                      <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('backdrop-badge-alpha')">Background opacity</Label>
-              <span class="text-xs text-muted-foreground w-8 text-right">{{ editBackdropBadgeAlpha }}%</span>
-            </div>
-            <input
-              :id="inputId('backdrop-badge-alpha')"
-              v-model.number="editBackdropBadgeAlpha"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              :data-testid="`backdrop-badge-alpha-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
-          </div>
-          <div v-if="backdropShowVerticalInset || backdropShowHorizontalInset" class="space-y-1">
-            <Label>Distance from edge</Label>
-            <div class="flex flex-wrap gap-4">
-              <div v-if="backdropShowVerticalInset" class="space-y-1">
-                <Label :for="inputId('backdrop-edge-inset-y')" class="text-xs font-normal text-muted-foreground">{{ backdropVerticalInsetLabel }}</Label>
-                <div class="flex items-center gap-1">
-                  <Input
-                    :id="inputId('backdrop-edge-inset-y')"
-                    v-model.number="editBackdropEdgeInsetY"
-                    type="number"
-                    :min="0"
-                    :max="50"
-                    class="w-[80px]"
-                    data-testid="backdrop-edge-inset-y"
-                  />
-                  <span class="text-xs text-muted-foreground">%</span>
-                </div>
-              </div>
-              <div v-if="backdropShowHorizontalInset" class="space-y-1">
-                <Label :for="inputId('backdrop-edge-inset-x')" class="text-xs font-normal text-muted-foreground">{{ backdropHorizontalInsetLabel }}</Label>
-                <div class="flex items-center gap-1">
-                  <Input
-                    :id="inputId('backdrop-edge-inset-x')"
-                    v-model.number="editBackdropEdgeInsetX"
-                    type="number"
-                    :min="0"
-                    :max="50"
-                    class="w-[80px]"
-                    data-testid="backdrop-edge-inset-x"
-                  />
-                  <span class="text-xs text-muted-foreground">%</span>
-                </div>
-              </div>
-            </div>
-            <p class="text-xs text-muted-foreground">Inset ratings from the image edge (% of size) — useful when a player crops the backdrop.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('backdrop-badge-direction')">Badge direction</Label>
-            <Select
-              :model-value="editBackdropBadgeDirection"
-              @update:model-value="editBackdropBadgeDirection = $event as string"
-            >
-              <SelectTrigger :id="inputId('backdrop-badge-direction')" class="max-w-xs" data-testid="backdrop-badge-direction-select">
-                <SelectValue placeholder="Select direction" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="d">Default</SelectItem>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <LayoutEditor v-model="editBackdropLayout" kind="backdrop" test-prefix="backdrop" class="col-span-full" />
-          <div class="space-y-1">
-            <div class="flex items-center gap-3">
-              <Label :for="inputId('backdrop-ratings-limit')">Max ratings</Label>
-              <Input
-                :id="inputId('backdrop-ratings-limit')"
-                v-model.number="editBackdropRatingsLimit"
-                type="number"
-                :min="0"
-                :max="10"
-                class="w-[80px]"
-                title="0 = no ratings"
+        <div v-if="fetchBackdropPreview" class="rounded-md border p-4 space-y-3">
+          <p class="text-sm font-semibold">Backdrop (movie/series)</p>
+          <div class="flex flex-col md:flex-row gap-4 items-start">
+            <div class="relative w-[360px] shrink-0" :style="backdropPreview.size ? { aspectRatio: `${backdropPreview.size.w} / ${backdropPreview.size.h}` } : undefined">
+              <img
+                v-show="backdropPreview.src && !backdropPreview.error"
+                :src="backdropPreview.src"
+                alt="Backdrop preview"
+                class="rounded border w-full"
+                @load="(e: Event) => onPreviewLoad(backdropPreview, e)"
+                @error="backdropPreview.loading = false; backdropPreview.error = true"
               />
+              <p v-if="backdropPreview.error && !backdropPreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
+              <div v-if="backdropPreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
+                <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
+              </div>
             </div>
-            <p class="text-xs text-muted-foreground">0 = no ratings</p>
+            <LayoutEditor v-model="editBackdropLayout" kind="backdrop" test-prefix="backdrop" class="flex-1 min-w-0" />
           </div>
-      </div>
-    </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+            <div class="space-y-2">
+              <Label :for="inputId('backdrop-badge-style')">Badge style</Label>
+              <Select
+                :model-value="editBackdropBadgeStyle"
+                :disabled="editBackdropBadgeShape === 'p'"
+                @update:model-value="editBackdropBadgeStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('backdrop-badge-style')" class="max-w-xs" data-testid="backdrop-badge-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="editBackdropBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('backdrop-label-style')">Label style</Label>
+              <Select
+                :model-value="editBackdropLabelStyle"
+                @update:model-value="editBackdropLabelStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('backdrop-label-style')" class="max-w-xs" data-testid="backdrop-label-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="t">Text</SelectItem>
+                  <SelectItem value="i">White</SelectItem>
+                  <SelectItem value="o">Official</SelectItem>
+                  <SelectItem value="h">High Res</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('backdrop-text-size')">Text size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropTextSize }}%</span>
+              </div>
+              <input
+                :id="inputId('backdrop-text-size')"
+                v-model.number="editBackdropTextSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`backdrop-text-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('backdrop-badge-size')">Badge size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropBadgeSize }}%</span>
+              </div>
+              <input
+                :id="inputId('backdrop-badge-size')"
+                v-model.number="editBackdropBadgeSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`backdrop-badge-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('backdrop-logo-size')">Logo size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editBackdropLogoSize }}%</span>
+              </div>
+              <input
+                :id="inputId('backdrop-logo-size')"
+                v-model.number="editBackdropLogoSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`backdrop-logo-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('backdrop-badge-shape')">Badge shape</Label>
+              <Select
+                :model-value="editBackdropBadgeShape"
+                @update:model-value="editBackdropBadgeShape = $event as string"
+              >
+                <SelectTrigger :id="inputId('backdrop-badge-shape')" class="max-w-xs" data-testid="backdrop-badge-shape-select">
+                  <SelectValue placeholder="Select shape" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="r">Rounded</SelectItem>
+                  <SelectItem value="p">Pill</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('backdrop-badge-alpha')">Background opacity</Label>
+                <span class="text-xs text-muted-foreground w-8 text-right">{{ editBackdropBadgeAlpha }}%</span>
+              </div>
+              <input
+                :id="inputId('backdrop-badge-alpha')"
+                v-model.number="editBackdropBadgeAlpha"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                :data-testid="`backdrop-badge-alpha-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('backdrop-badge-direction')">Badge direction</Label>
+              <Select
+                :model-value="editBackdropBadgeDirection"
+                @update:model-value="editBackdropBadgeDirection = $event as string"
+              >
+                <SelectTrigger :id="inputId('backdrop-badge-direction')" class="max-w-xs" data-testid="backdrop-badge-direction-select">
+                  <SelectValue placeholder="Select direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="d">Default</SelectItem>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div v-if="backdropShowVerticalInset || backdropShowHorizontalInset" class="space-y-1">
+              <Label>Distance from edge</Label>
+              <div class="flex flex-wrap gap-4">
+                <div v-if="backdropShowVerticalInset" class="space-y-1">
+                  <Label :for="inputId('backdrop-edge-inset-y')" class="text-xs font-normal text-muted-foreground">{{ backdropVerticalInsetLabel }}</Label>
+                  <div class="flex items-center gap-1">
+                    <Input
+                      :id="inputId('backdrop-edge-inset-y')"
+                      v-model.number="editBackdropEdgeInsetY"
+                      type="number"
+                      :min="0"
+                      :max="50"
+                      class="w-[80px]"
+                      data-testid="backdrop-edge-inset-y"
+                    />
+                    <span class="text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <div v-if="backdropShowHorizontalInset" class="space-y-1">
+                  <Label :for="inputId('backdrop-edge-inset-x')" class="text-xs font-normal text-muted-foreground">{{ backdropHorizontalInsetLabel }}</Label>
+                  <div class="flex items-center gap-1">
+                    <Input
+                      :id="inputId('backdrop-edge-inset-x')"
+                      v-model.number="editBackdropEdgeInsetX"
+                      type="number"
+                      :min="0"
+                      :max="50"
+                      class="w-[80px]"
+                      data-testid="backdrop-edge-inset-x"
+                    />
+                    <span class="text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-muted-foreground">Inset ratings from the image edge (% of size) — useful when a player crops the backdrop.</p>
+            </div>
+          </div>
+        </div>
       </TabsContent>
 
       <TabsContent value="episode" class="mt-3">
-    <!-- Section 5: Episode -->
-    <div v-if="fetchEpisodePreview" class="rounded-md border p-4 space-y-3">
-      <p class="text-sm font-semibold">Episode</p>
-      <div class="relative w-[280px]" :style="episodePreview.size ? { aspectRatio: `${episodePreview.size.w} / ${episodePreview.size.h}` } : undefined">
-        <img
-          v-show="episodePreview.src && !episodePreview.error"
-          :src="episodePreview.src"
-          alt="Episode preview"
-          class="rounded border w-full"
-          @load="(e: Event) => onPreviewLoad(episodePreview, e)"
-          @error="episodePreview.loading = false; episodePreview.error = true"
-        />
-        <p v-if="episodePreview.error && !episodePreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
-        <div v-if="episodePreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
-          <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
-        </div>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-          <div class="space-y-2">
-            <Label :for="inputId('episode-badge-direction')">Direction</Label>
-            <Select
-              :model-value="editEpisodeBadgeDirection"
-              @update:model-value="editEpisodeBadgeDirection = $event as string"
-            >
-              <SelectTrigger :id="inputId('episode-badge-direction')" class="max-w-xs" data-testid="episode-badge-direction-select">
-                <SelectValue placeholder="Select direction" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="d">Auto</SelectItem>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('episode-badge-style')">Badge style</Label>
-            <Select
-              :model-value="editEpisodeBadgeStyle"
-              :disabled="editEpisodeBadgeShape === 'p'"
-              @update:model-value="editEpisodeBadgeStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('episode-badge-style')" class="max-w-xs" data-testid="episode-badge-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="h">Horizontal</SelectItem>
-                <SelectItem value="v">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-            <p v-if="editEpisodeBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('episode-label-style')">Label style</Label>
-            <Select
-              :model-value="editEpisodeLabelStyle"
-              @update:model-value="editEpisodeLabelStyle = $event as string"
-            >
-              <SelectTrigger :id="inputId('episode-label-style')" class="max-w-xs" data-testid="episode-label-style-select">
-                <SelectValue placeholder="Select style" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">White</SelectItem>
-                <SelectItem value="o">Official</SelectItem>
-                <SelectItem value="h">High Res</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('episode-text-size')">Text size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeTextSize }}%</span>
-            </div>
-            <input
-              :id="inputId('episode-text-size')"
-              v-model.number="editEpisodeTextSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`episode-text-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('episode-badge-size')">Badge size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeBadgeSize }}%</span>
-            </div>
-            <input
-              :id="inputId('episode-badge-size')"
-              v-model.number="editEpisodeBadgeSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`episode-badge-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('episode-logo-size')">Logo size</Label>
-              <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeLogoSize }}%</span>
-            </div>
-            <input
-              :id="inputId('episode-logo-size')"
-              v-model.number="editEpisodeLogoSize"
-              type="range"
-              min="50"
-              max="400"
-              step="1"
-              :data-testid="`episode-logo-size-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
-          </div>
-          <div class="space-y-2">
-            <Label :for="inputId('episode-badge-shape')">Badge shape</Label>
-            <Select
-              :model-value="editEpisodeBadgeShape"
-              @update:model-value="editEpisodeBadgeShape = $event as string"
-            >
-              <SelectTrigger :id="inputId('episode-badge-shape')" class="max-w-xs" data-testid="episode-badge-shape-select">
-                <SelectValue placeholder="Select shape" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="r">Rounded</SelectItem>
-                <SelectItem value="p">Pill</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                      <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <Label :for="inputId('episode-badge-alpha')">Background opacity</Label>
-              <span class="text-xs text-muted-foreground w-8 text-right">{{ editEpisodeBadgeAlpha }}%</span>
-            </div>
-            <input
-              :id="inputId('episode-badge-alpha')"
-              v-model.number="editEpisodeBadgeAlpha"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              :data-testid="`episode-badge-alpha-slider`"
-              class="w-full max-w-xs accent-primary"
-            />
-            <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
-          </div>
-          <div class="space-y-1">
-            <div class="flex items-center gap-3">
-              <Label :for="inputId('episode-ratings-limit')">Max ratings</Label>
-              <Input
-                :id="inputId('episode-ratings-limit')"
-                v-model.number="editEpisodeRatingsLimit"
-                type="number"
-                :min="0"
-                :max="10"
-                class="w-[80px]"
-                title="0 = no ratings"
+        <div v-if="fetchEpisodePreview" class="rounded-md border p-4 space-y-3">
+          <p class="text-sm font-semibold">Episode</p>
+          <div class="flex flex-col md:flex-row gap-4 items-start">
+            <div class="relative w-[360px] shrink-0" :style="episodePreview.size ? { aspectRatio: `${episodePreview.size.w} / ${episodePreview.size.h}` } : undefined">
+              <img
+                v-show="episodePreview.src && !episodePreview.error"
+                :src="episodePreview.src"
+                alt="Episode preview"
+                class="rounded border w-full"
+                @load="(e: Event) => onPreviewLoad(episodePreview, e)"
+                @error="episodePreview.loading = false; episodePreview.error = true"
               />
+              <p v-if="episodePreview.error && !episodePreview.loading" class="text-sm text-muted-foreground py-4">Failed</p>
+              <div v-if="episodePreview.loading" class="absolute inset-0 flex items-center justify-center rounded">
+                <Loader2 class="size-5 animate-spin text-white drop-shadow-md" />
+              </div>
             </div>
-            <p class="text-xs text-muted-foreground">0 = no ratings</p>
+            <LayoutEditor v-model="editEpisodeLayout" kind="episode" test-prefix="episode" class="flex-1 min-w-0" />
           </div>
-          <div class="flex items-center gap-2 col-span-full">
-            <Checkbox
-              :id="inputId('episode-blur')"
-              :model-value="editEpisodeBlur"
-              data-testid="episode-blur-checkbox"
-              @update:model-value="(v) => editEpisodeBlur = !!v"
-            />
-            <Label :for="inputId('episode-blur')">Blur (spoiler protection)</Label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+            <div class="space-y-2">
+              <Label :for="inputId('episode-badge-style')">Badge style</Label>
+              <Select
+                :model-value="editEpisodeBadgeStyle"
+                :disabled="editEpisodeBadgeShape === 'p'"
+                @update:model-value="editEpisodeBadgeStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('episode-badge-style')" class="max-w-xs" data-testid="episode-badge-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="editEpisodeBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('episode-label-style')">Label style</Label>
+              <Select
+                :model-value="editEpisodeLabelStyle"
+                @update:model-value="editEpisodeLabelStyle = $event as string"
+              >
+                <SelectTrigger :id="inputId('episode-label-style')" class="max-w-xs" data-testid="episode-label-style-select">
+                  <SelectValue placeholder="Select style" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="t">Text</SelectItem>
+                  <SelectItem value="i">White</SelectItem>
+                  <SelectItem value="o">Official</SelectItem>
+                  <SelectItem value="h">High Res</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('episode-text-size')">Text size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeTextSize }}%</span>
+              </div>
+              <input
+                :id="inputId('episode-text-size')"
+                v-model.number="editEpisodeTextSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`episode-text-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating text font size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('episode-badge-size')">Badge size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeBadgeSize }}%</span>
+              </div>
+              <input
+                :id="inputId('episode-badge-size')"
+                v-model.number="editEpisodeBadgeSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`episode-badge-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Overall badge size. 100% = default.</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('episode-logo-size')">Logo size</Label>
+                <span class="text-xs text-muted-foreground w-10 text-right">{{ editEpisodeLogoSize }}%</span>
+              </div>
+              <input
+                :id="inputId('episode-logo-size')"
+                v-model.number="editEpisodeLogoSize"
+                type="range"
+                min="50"
+                max="400"
+                step="1"
+                :data-testid="`episode-logo-size-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">Rating source logo size. The badge auto-sizes to fit, so nothing overflows.</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('episode-badge-shape')">Badge shape</Label>
+              <Select
+                :model-value="editEpisodeBadgeShape"
+                @update:model-value="editEpisodeBadgeShape = $event as string"
+              >
+                <SelectTrigger :id="inputId('episode-badge-shape')" class="max-w-xs" data-testid="episode-badge-shape-select">
+                  <SelectValue placeholder="Select shape" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="r">Rounded</SelectItem>
+                  <SelectItem value="p">Pill</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <Label :for="inputId('episode-badge-alpha')">Background opacity</Label>
+                <span class="text-xs text-muted-foreground w-8 text-right">{{ editEpisodeBadgeAlpha }}%</span>
+              </div>
+              <input
+                :id="inputId('episode-badge-alpha')"
+                v-model.number="editEpisodeBadgeAlpha"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                :data-testid="`episode-badge-alpha-slider`"
+                class="w-full max-w-xs accent-primary"
+              />
+              <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
+            </div>
+            <div class="space-y-2">
+              <Label :for="inputId('episode-badge-direction')">Direction</Label>
+              <Select
+                :model-value="editEpisodeBadgeDirection"
+                @update:model-value="editEpisodeBadgeDirection = $event as string"
+              >
+                <SelectTrigger :id="inputId('episode-badge-direction')" class="max-w-xs" data-testid="episode-badge-direction-select">
+                  <SelectValue placeholder="Select direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="d">Auto</SelectItem>
+                  <SelectItem value="h">Horizontal</SelectItem>
+                  <SelectItem value="v">Vertical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="flex items-center gap-2">
+              <Checkbox
+                :id="inputId('episode-blur')"
+                :model-value="editEpisodeBlur"
+                data-testid="episode-blur-checkbox"
+                @update:model-value="(v) => editEpisodeBlur = !!v"
+              />
+              <Label :for="inputId('episode-blur')">Blur (spoiler protection)</Label>
+            </div>
           </div>
-          <LayoutEditor v-model="editEpisodeLayout" kind="episode" test-prefix="episode" class="col-span-full" />
-      </div>
-    </div>
+        </div>
       </TabsContent>
     </Tabs>
   </div>

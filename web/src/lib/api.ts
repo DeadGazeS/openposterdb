@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/stores/auth'
+import type { ImageLayout } from '@/lib/layout'
 
 const BASE_URL = import.meta.env.VITE_API_URL || ''
 
@@ -81,7 +82,7 @@ export interface SaveSettingsPayload {
   ratings_limit: number
   ratings_order: string
   ratings_exclude: string
-  poster_layout: string
+  poster_layout: ImageLayout
   logo_ratings_limit: number
   backdrop_ratings_limit: number
   poster_badge_style: string
@@ -101,8 +102,8 @@ export interface SaveSettingsPayload {
   poster_logo_size: number
   logo_logo_size: number
   backdrop_logo_size: number
-  logo_layout: string
-  backdrop_layout: string
+  logo_layout: ImageLayout
+  backdrop_layout: ImageLayout
   backdrop_badge_direction: string
   backdrop_edge_inset_x: number
   backdrop_edge_inset_y: number
@@ -112,7 +113,7 @@ export interface SaveSettingsPayload {
   episode_text_size: number
   episode_badge_size: number
   episode_logo_size: number
-  episode_layout: string
+  episode_layout: ImageLayout
   episode_badge_direction: string
   episode_blur: boolean
   poster_badge_shape: string

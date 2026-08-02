@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { ImageLayout } from '@/lib/layout'
+import type { ImageLayout, SideSlot } from '@/lib/layout'
 import { layoutTotal } from '@/lib/layout'
 
 const props = withDefaults(defineProps<{
@@ -26,19 +26,19 @@ const emit = defineEmits<{
 
 const total = computed(() => layoutTotal(props.modelValue))
 
-function sideSlot(side: 'top' | 'right' | 'bottom' | 'left') {
-  return computed({
-    get: () => props.modelValue[side],
-    set: (v) => {
-      emit('update:modelValue', { ...props.modelValue, [side]: v })
-    },
-  })
+function setSlot(side: 'top' | 'right' | 'bottom' | 'left', slot: SideSlot) {
+  emit('update:modelValue', { ...props.modelValue, [side]: slot })
 }
 
-const top = sideSlot('top')
-const right = sideSlot('right')
-const bottom = sideSlot('bottom')
-const left = sideSlot('left')
+function setField(side: 'top' | 'right' | 'bottom' | 'left', field: 'per_row' | 'rows' | 'start', value: number | string) {
+  const cur = { ...props.modelValue[side] }
+  ;(cur as Record<string, unknown>)[field] = value
+  setSlot(side, cur)
+}
+
+function slotValue(side: 'top' | 'right' | 'bottom' | 'left'): SideSlot {
+  return props.modelValue[side]
+}
 
 // start anchor options depend on the side axis.
 const horizontalStartOptions = [
@@ -76,32 +76,34 @@ function sideLabel(side: string): string {
               <Label :for="`${side}-per-row`">Badges per row</Label>
               <Input
                 :id="`${side}-per-row`"
-                v-model.number="sideSlot(side).value.per_row"
+                :model-value="slotValue(side).per_row"
                 type="number"
                 min="0"
                 max="10"
                 class="w-full"
                 :data-testid="`${testPrefix}-${side}-per-row`"
+                @update:model-value="(v) => setField(side, 'per_row', v)"
               />
             </div>
             <div class="space-y-1">
               <Label :for="`${side}-rows`">Rows</Label>
               <Input
                 :id="`${side}-rows`"
-                v-model.number="sideSlot(side).value.rows"
+                :model-value="slotValue(side).rows"
                 type="number"
                 min="0"
                 max="10"
                 class="w-full"
                 :data-testid="`${testPrefix}-${side}-rows`"
+                @update:model-value="(v) => setField(side, 'rows', v)"
               />
             </div>
           </div>
           <div class="space-y-1">
             <Label :for="`${side}-start`">{{ startLabel(side) }}</Label>
             <Select
-              :model-value="sideSlot(side).value.start"
-              @update:model-value="(v: string) => sideSlot(side).value = { ...sideSlot(side).value, start: v }"
+              :model-value="slotValue(side).start"
+              @update:model-value="(v: string) => setField(side, 'start', v)"
             >
               <SelectTrigger :id="`${side}-start`" class="w-full max-w-xs" :data-testid="`${testPrefix}-${side}-start`">
                 <SelectValue />
