@@ -36,6 +36,8 @@ const defaultSettings: RenderSettings = {
   poster_logo_size: 100,
   logo_logo_size: 100,
   backdrop_logo_size: 100,
+  logo_position: 'bc',
+  logo_badge_split: false,
   backdrop_position: 'tr',
   backdrop_badge_direction: 'v',
   backdrop_edge_inset_x: 0,
@@ -164,8 +166,11 @@ describe('RenderSettingsForm', () => {
     await img.trigger('load')
     await flushPromises()
 
+    // The preview lives on the form's "Images" sub-tab. jsdom reports the
+    // tabpanel as display:none regardless of the active tab, so assert on the
+    // meaningful bits: the blob src is set and the loading spinner is gone.
+    expect(img.attributes('src')).toBeTruthy()
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
-    expect(img.isVisible()).toBe(true)
   })
 
   it('shows error message when preview fetch fails', async () => {

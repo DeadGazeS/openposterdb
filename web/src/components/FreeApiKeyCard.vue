@@ -418,7 +418,7 @@ async function handleFetch() {
             <SelectContent>
               <SelectItem value="default" :key="labelStyleDefaultLabel">{{ labelStyleDefaultLabel }}</SelectItem>
               <SelectItem value="t">Text</SelectItem>
-              <SelectItem value="i">Icon</SelectItem>
+              <SelectItem value="i">White</SelectItem>
               <SelectItem value="o">Official</SelectItem>
             </SelectContent>
           </Select>

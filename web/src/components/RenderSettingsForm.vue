@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import type { SaveSettingsPayload, SourceColors } from '@/lib/api'
 import { LANGUAGES, ALL_RATING_SOURCES, RATING_COLOR_ROWS, SOURCE_BADGE_SAMPLES, parseRatingsOrder, parseRatingsExclude } from '@/lib/constants'
@@ -46,6 +47,8 @@ export interface RenderSettings {
   poster_logo_size: number
   logo_logo_size: number
   backdrop_logo_size: number
+  logo_position: string
+  logo_badge_split: boolean
   backdrop_position: string
   backdrop_badge_direction: string
   backdrop_edge_inset_x: number
@@ -78,7 +81,7 @@ const props = withDefaults(defineProps<{
   saveSettings: (s: SaveSettingsPayload) => Promise<string | null>
   resetSettings?: () => Promise<boolean>
   fetchPreview: (ratingsLimit: number, ratingsOrder: string, posterPosition?: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, textSize?: number, ratingsExclude?: string, posterSplit?: boolean, badgeShape?: string, badgeAlpha?: number, posterFit?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
-  fetchLogoPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
+  fetchLogoPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, position?: string, split?: boolean, colors?: Record<string, SourceColors>) => Promise<Response>
   fetchBackdropPreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, position?: string, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
   fetchEpisodePreview?: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, position?: string, badgeDirection?: string, blur?: boolean, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>) => Promise<Response>
 }>(), {
@@ -115,6 +118,8 @@ const editBackdropBadgeSize = ref(props.settings.backdrop_badge_size ?? 100)
 const editPosterLogoSize = ref(props.settings.poster_logo_size ?? 100)
 const editLogoLogoSize = ref(props.settings.logo_logo_size ?? 100)
 const editBackdropLogoSize = ref(props.settings.backdrop_logo_size ?? 100)
+const editLogoPosition = ref(props.settings.logo_position || 'bc')
+const editLogoBadgeSplit = ref(props.settings.logo_badge_split ?? false)
 const editBackdropPosition = ref(props.settings.backdrop_position || 'tr')
 const editBackdropBadgeDirection = ref(props.settings.backdrop_badge_direction || 'd')
 const editBackdropEdgeInsetX = ref(props.settings.backdrop_edge_inset_x ?? 0)
@@ -178,6 +183,8 @@ function applySettings(s: RenderSettings) {
   editPosterLogoSize.value = s.poster_logo_size ?? 100
   editLogoLogoSize.value = s.logo_logo_size ?? 100
   editBackdropLogoSize.value = s.backdrop_logo_size ?? 100
+  editLogoPosition.value = s.logo_position || 'bc'
+  editLogoBadgeSplit.value = s.logo_badge_split ?? false
   editBackdropPosition.value = s.backdrop_position || 'tr'
   editBackdropBadgeDirection.value = s.backdrop_badge_direction || 'd'
   editBackdropEdgeInsetX.value = s.backdrop_edge_inset_x ?? 0
@@ -256,6 +263,8 @@ function editsSnapshot() {
     poster_logo_size: editPosterLogoSize.value,
     logo_logo_size: editLogoLogoSize.value,
     backdrop_logo_size: editBackdropLogoSize.value,
+    logo_position: editLogoPosition.value,
+    logo_badge_split: editLogoBadgeSplit.value,
     backdrop_position: editBackdropPosition.value,
     backdrop_badge_direction: editBackdropBadgeDirection.value,
     backdrop_edge_inset_x: editBackdropEdgeInsetX.value,
@@ -310,6 +319,8 @@ function settingsSnapshot(s: RenderSettings) {
     poster_logo_size: s.poster_logo_size ?? 100,
     logo_logo_size: s.logo_logo_size ?? 100,
     backdrop_logo_size: s.backdrop_logo_size ?? 100,
+    logo_position: s.logo_position || 'bc',
+    logo_badge_split: s.logo_badge_split ?? false,
     backdrop_position: s.backdrop_position || 'tr',
     backdrop_badge_direction: s.backdrop_badge_direction || 'd',
     backdrop_edge_inset_x: s.backdrop_edge_inset_x ?? 0,
@@ -402,6 +413,8 @@ async function save() {
       poster_logo_size: editPosterLogoSize.value,
       logo_logo_size: editLogoLogoSize.value,
       backdrop_logo_size: editBackdropLogoSize.value,
+      logo_position: editLogoPosition.value,
+      logo_badge_split: editLogoBadgeSplit.value,
       backdrop_position: editBackdropPosition.value,
       backdrop_badge_direction: editBackdropBadgeDirection.value,
       backdrop_edge_inset_x: coerceInset(editBackdropEdgeInsetX.value),
@@ -542,7 +555,7 @@ function updatePosterPreview() {
 
 function updateLogoPreview() {
   if (props.fetchLogoPreview) {
-    fetchPreviewImage(logoPreview.value, (_limit, order) => props.fetchLogoPreview!(editLogoRatingsLimit.value, order, editLogoBadgeStyle.value, editLogoLabelStyle.value, editLogoTextSize.value, editRatingsExclude.value.join(','), editLogoBadgeShape.value, editLogoBadgeAlpha.value, editLogoBadgeSize.value, editLogoLogoSize.value, editColors.value))
+    fetchPreviewImage(logoPreview.value, (_limit, order) => props.fetchLogoPreview!(editLogoRatingsLimit.value, order, editLogoBadgeStyle.value, editLogoLabelStyle.value, editLogoTextSize.value, editRatingsExclude.value.join(','), editLogoBadgeShape.value, editLogoBadgeAlpha.value, editLogoBadgeSize.value, editLogoLogoSize.value, editLogoPosition.value, editLogoBadgeSplit.value, editColors.value))
   }
 }
 
@@ -586,7 +599,7 @@ watch([editRatingsLimit, editPosterPosition, editPosterBadgeStyle, editPosterLab
 })
 
 // Logo-only settings
-watch([editLogoRatingsLimit, editLogoBadgeStyle, editLogoLabelStyle, editLogoTextSize, editLogoBadgeSize, editLogoLogoSize, editLogoBadgeShape, editLogoBadgeAlpha], () => {
+watch([editLogoRatingsLimit, editLogoBadgeStyle, editLogoLabelStyle, editLogoTextSize, editLogoBadgeSize, editLogoLogoSize, editLogoPosition, editLogoBadgeSplit, editLogoBadgeShape, editLogoBadgeAlpha], () => {
   if (syncing) return
   if (logoPreviewTimer) clearTimeout(logoPreviewTimer)
   logoPreviewTimer = setTimeout(updateLogoPreview, 500)
@@ -685,17 +698,6 @@ function toggleExclude(key: string, checked: boolean) {
 
 <template>
   <div class="space-y-4">
-    <div class="rounded-md border p-4 space-y-3">
-    <div class="flex items-center gap-2">
-      <p class="text-sm font-semibold">Image Settings</p>
-      <span
-        v-if="resetSettings && currentSettings.is_default"
-        class="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded"
-      >
-        Using defaults
-      </span>
-    </div>
-
     <div v-if="showActions !== false" class="flex flex-wrap items-center gap-3">
       <span v-if="showCheck" class="flex items-center gap-1.5 text-sm text-green-500">
         <Check class="size-4" />
@@ -719,6 +721,28 @@ function toggleExclude(key: string, checked: boolean) {
       </Button>
       <span v-if="error" class="text-sm text-destructive">{{ error }}</span>
     </div>
+
+    <Tabs default-value="image-settings" :unmount-on-hide="false">
+      <TabsList class="h-auto flex-wrap">
+        <TabsTrigger value="image-settings" data-testid="form-tab-image-settings">Image Settings</TabsTrigger>
+        <TabsTrigger value="ratings" data-testid="form-tab-ratings">Ratings</TabsTrigger>
+        <TabsTrigger value="poster" data-testid="form-tab-poster">Poster</TabsTrigger>
+        <TabsTrigger value="logo" data-testid="form-tab-logo">Logo</TabsTrigger>
+        <TabsTrigger value="backdrop" data-testid="form-tab-backdrop">Backdrop</TabsTrigger>
+        <TabsTrigger value="episode" data-testid="form-tab-episode">Episode</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="image-settings" class="mt-3">
+        <div class="rounded-md border p-4 space-y-3">
+          <div class="flex items-center gap-2">
+            <p class="text-sm font-semibold">Image Settings</p>
+            <span
+              v-if="resetSettings && currentSettings.is_default"
+              class="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded"
+            >
+              Using defaults
+            </span>
+          </div>
 
     <!-- Image Settings: Language (always visible) -->
     <div class="space-y-1">
@@ -753,10 +777,13 @@ function toggleExclude(key: string, checked: boolean) {
         <Label :for="inputId('fanart')">Prefer Fanart.tv as image source</Label>
       </div>
     </template>
-    </div>
+        </div>
+      </TabsContent>
 
-    <div class="rounded-md border p-4 space-y-3">
-      <p class="text-sm font-semibold">Rating Display</p>
+      <TabsContent value="ratings" class="mt-3">
+        <div class="space-y-4">
+          <div class="rounded-md border p-4 space-y-3">
+            <p class="text-sm font-semibold">Rating Display</p>
 
       <div class="space-y-2">
         <Label>Rating order</Label>
@@ -894,7 +921,10 @@ function toggleExclude(key: string, checked: boolean) {
         </div>
       </div>
     </template>
+        </div>
+      </TabsContent>
 
+      <TabsContent value="poster" class="mt-3">
     <!-- Section 2: Poster -->
     <div class="rounded-md border p-4 space-y-3">
       <p class="text-sm font-semibold">Poster</p>
@@ -979,7 +1009,7 @@ function toggleExclude(key: string, checked: boolean) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">Icon</SelectItem>
+                <SelectItem value="i">White</SelectItem>
                 <SelectItem value="o">Official</SelectItem>
               </SelectContent>
             </Select>
@@ -1127,7 +1157,9 @@ function toggleExclude(key: string, checked: boolean) {
         </p>
       </div>
     </div>
+      </TabsContent>
 
+      <TabsContent value="logo" class="mt-3">
     <!-- Section 3: Logo -->
     <div v-if="fetchLogoPreview" class="rounded-md border p-4 space-y-3">
       <p class="text-sm font-semibold">Logo</p>
@@ -1164,6 +1196,28 @@ function toggleExclude(key: string, checked: boolean) {
             <p v-if="editLogoBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
           </div>
           <div class="space-y-2">
+            <Label :for="inputId('logo-position')">Badge position</Label>
+            <Select
+              :model-value="editLogoPosition"
+              @update:model-value="editLogoPosition = $event as string"
+            >
+              <SelectTrigger :id="inputId('logo-position')" class="max-w-xs" data-testid="logo-position-select">
+                <SelectValue placeholder="Select position" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bc">Bottom Center</SelectItem>
+                <SelectItem value="tc">Top Center</SelectItem>
+                <SelectItem value="l">Left</SelectItem>
+                <SelectItem value="r">Right</SelectItem>
+                <SelectItem value="tl">Top Left</SelectItem>
+                <SelectItem value="tr">Top Right</SelectItem>
+                <SelectItem value="bl">Bottom Left</SelectItem>
+                <SelectItem value="br">Bottom Right</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">Where the badges sit around the logo (always outside it).</p>
+          </div>
+          <div class="space-y-2">
             <Label :for="inputId('logo-label-style')">Label style</Label>
             <Select
               :model-value="editLogoLabelStyle"
@@ -1174,7 +1228,7 @@ function toggleExclude(key: string, checked: boolean) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">Icon</SelectItem>
+                <SelectItem value="i">White</SelectItem>
                 <SelectItem value="o">Official</SelectItem>
               </SelectContent>
             </Select>
@@ -1277,9 +1331,20 @@ function toggleExclude(key: string, checked: boolean) {
             </div>
             <p class="text-xs text-muted-foreground">0 = no ratings</p>
           </div>
+          <div class="flex items-center gap-2 col-span-full">
+            <Checkbox
+              :id="inputId('logo-badge-split')"
+              :model-value="editLogoBadgeSplit"
+              data-testid="logo-badge-split-checkbox"
+              @update:model-value="(v) => editLogoBadgeSplit = !!v"
+            />
+            <Label :for="inputId('logo-badge-split')">Split badges onto opposite sides</Label>
+          </div>
       </div>
     </div>
+      </TabsContent>
 
+      <TabsContent value="backdrop" class="mt-3">
     <!-- Section 4: Backdrop -->
     <div v-if="fetchBackdropPreview" class="rounded-md border p-4 space-y-3">
       <p class="text-sm font-semibold">Backdrop (movie/series)</p>
@@ -1326,7 +1391,7 @@ function toggleExclude(key: string, checked: boolean) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">Icon</SelectItem>
+                <SelectItem value="i">White</SelectItem>
                 <SelectItem value="o">Official</SelectItem>
               </SelectContent>
             </Select>
@@ -1504,7 +1569,9 @@ function toggleExclude(key: string, checked: boolean) {
           </div>
       </div>
     </div>
+      </TabsContent>
 
+      <TabsContent value="episode" class="mt-3">
     <!-- Section 5: Episode -->
     <div v-if="fetchEpisodePreview" class="rounded-md border p-4 space-y-3">
       <p class="text-sm font-semibold">Episode</p>
@@ -1588,7 +1655,7 @@ function toggleExclude(key: string, checked: boolean) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="t">Text</SelectItem>
-                <SelectItem value="i">Icon</SelectItem>
+                <SelectItem value="i">White</SelectItem>
                 <SelectItem value="o">Official</SelectItem>
               </SelectContent>
             </Select>
@@ -1702,5 +1769,7 @@ function toggleExclude(key: string, checked: boolean) {
           </div>
       </div>
     </div>
+      </TabsContent>
+    </Tabs>
   </div>
 </template>

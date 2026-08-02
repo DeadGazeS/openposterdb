@@ -13,8 +13,18 @@ const mockAdminApi = vi.hoisted(() => ({
   previewBackdrop: vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) }),
 }))
 
+const mockKeysApi = vi.hoisted(() => ({
+  list: vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+  create: vi.fn(),
+  delete: vi.fn(),
+  getSettings: vi.fn(),
+  updateSettings: vi.fn(),
+  deleteSettings: vi.fn(),
+}))
+
 vi.mock('@/lib/api', () => ({
   adminApi: mockAdminApi,
+  keysApi: mockKeysApi,
 }))
 
 const defaultSettings = {

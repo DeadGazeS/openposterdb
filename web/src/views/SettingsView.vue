@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
+import { Check, Loader2, Download, Upload, SlidersHorizontal, Image as ImageIcon } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
 import { adminApi, type SaveSettingsPayload } from '@/lib/api'
 import { FREE_API_KEY } from '@/lib/constants'
 import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
+import ApiKeysView from '@/views/ApiKeysView.vue'
 import ClearCacheButton from '@/components/ClearCacheButton.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -107,12 +108,7 @@ async function saveSettings(s: SaveSettingsPayload): Promise<string | null> {
     ...s,
     free_api_key_enabled: freeApiKeyEnabled.value,
   })
-  if (res.ok) {
-    // Keep the react-query cache fresh so revisiting the page doesn't briefly
-    // mount the form with pre-save settings (which made previews look stale).
-    refetch()
-    return null
-  }
+  if (res.ok) return null
   const data = await res.json().catch(() => null)
   return data?.error || 'Failed to save settings'
 }
@@ -240,10 +236,14 @@ async function onImportFile(e: Event) {
             </div>
           </div>
           <TabsList class="flex h-fit w-full flex-wrap items-center justify-center gap-1 p-0 lg:h-auto lg:flex-col lg:items-stretch lg:space-y-1 lg:bg-transparent">
-            <TabsTrigger value="general" class="h-9 w-fit px-3 lg:w-full lg:justify-start">General</TabsTrigger>
-            <TabsTrigger value="image" class="h-9 w-fit px-3 lg:w-full lg:justify-start">Image</TabsTrigger>
-            <TabsTrigger value="cache" class="h-9 w-fit px-3 lg:w-full lg:justify-start">Cache</TabsTrigger>
-            <TabsTrigger value="backup" class="h-9 w-fit px-3 lg:w-full lg:justify-start">Backup</TabsTrigger>
+            <TabsTrigger value="general" class="h-10 w-fit gap-3 px-3 lg:w-full lg:justify-start">
+              <SlidersHorizontal class="size-4 shrink-0" />
+              <span>General</span>
+            </TabsTrigger>
+            <TabsTrigger value="image" class="h-10 w-fit gap-3 px-3 lg:w-full lg:justify-start">
+              <ImageIcon class="size-4 shrink-0" />
+              <span>Image</span>
+            </TabsTrigger>
           </TabsList>
         </div>
       </div>
@@ -251,7 +251,20 @@ async function onImportFile(e: Event) {
       <div class="relative space-y-4">
         <!-- General -->
         <TabsContent value="general">
-          <div class="space-y-4">
+          <Tabs default-value="api" :unmount-on-hide="false">
+            <TabsList class="h-auto flex-wrap">
+              <TabsTrigger value="api">API</TabsTrigger>
+              <TabsTrigger value="cache">Cache</TabsTrigger>
+              <TabsTrigger value="backup">Backup</TabsTrigger>
+            </TabsList>
+            <TabsContent value="api" class="mt-3">
+              <Tabs default-value="free-api-key" :unmount-on-hide="false">
+            <TabsList class="h-auto flex-wrap">
+              <TabsTrigger value="free-api-key">Free API Key</TabsTrigger>
+              <TabsTrigger value="api-keys">API Keys</TabsTrigger>
+              <TabsTrigger value="external-api-keys">External API Keys</TabsTrigger>
+            </TabsList>
+            <TabsContent value="free-api-key" class="mt-3">
             <div class="rounded-lg border p-6 space-y-4">
               <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
                 Free API Key
@@ -283,7 +296,13 @@ async function onImportFile(e: Event) {
                 Controlled by <code class="font-mono text-xs bg-muted px-1 py-0.5 rounded">FREE_KEY_ENABLED</code> environment variable.
               </p>
             </div>
+            </TabsContent>
 
+            <TabsContent value="api-keys" class="mt-3">
+              <ApiKeysView />
+            </TabsContent>
+
+            <TabsContent value="external-api-keys" class="mt-3">
             <div class="rounded-lg border p-6 space-y-4">
               <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
                 External API Keys
@@ -322,7 +341,111 @@ async function onImportFile(e: Event) {
                 </div>
               </div>
             </div>
-          </div>
+            </TabsContent>
+            </Tabs>
+            </TabsContent>
+
+            <TabsContent value="cache" class="mt-3">
+              <div class="rounded-lg border p-6 space-y-4">
+                <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                  Cache
+                </h3>
+                <p class="text-sm text-muted-foreground">
+                  Clear all cached images (posters, logos, backdrops, episodes). They are
+                  regenerated on the next request, so the first load of each title is slower.
+                </p>
+                <ClearCacheButton @cleared="(m: string) => (cacheMessage = m)" />
+                <p v-if="cacheMessage" class="text-sm text-muted-foreground">{{ cacheMessage }}</p>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="backup" class="mt-3">
+              <div class="rounded-lg border p-6 space-y-4">
+                <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                  Backup &amp; Restore
+                </h3>
+                <p class="text-sm text-muted-foreground">
+                  Export the current settings to a file, or restore them from a previous export.
+                  API keys can optionally be included.
+                </p>
+
+                <div class="flex flex-wrap items-center gap-3">
+                  <Dialog v-model:open="exportDialogOpen">
+                    <DialogTrigger as-child>
+                      <Button variant="outline" size="sm">
+                        <Download class="size-4 mr-1" />
+                        Export settings
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent class="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Export settings</DialogTitle>
+                        <DialogDescription>
+                          Choose what to include in the export file.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div class="space-y-3 py-2">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <Checkbox
+                            :model-value="exportServiceKeys"
+                            @update:model-value="(v: unknown) => (exportServiceKeys = !!v)"
+                          />
+                          <span class="text-sm">
+                            External API keys
+                            <span class="text-muted-foreground text-xs">(TMDB, MDBList, OMDb, Fanart.tv, Trakt)</span>
+                          </span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <Checkbox
+                            :model-value="exportAPIKeys"
+                            @update:model-value="(v: unknown) => (exportAPIKeys = !!v)"
+                          />
+                          <span class="text-sm">
+                            API keys
+                            <span class="text-muted-foreground text-xs">
+                              (poster-serving keys + their settings — existing key values can't be
+                              recovered, so missing keys are recreated on import)
+                            </span>
+                          </span>
+                        </label>
+                        <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
+                      </div>
+                      <DialogFooter>
+                        <DialogClose as-child>
+                          <Button variant="outline" size="sm">Cancel</Button>
+                        </DialogClose>
+                        <Button size="sm" :disabled="exportLoading" @click="runExport">
+                          <Loader2 v-if="exportLoading" class="size-4 animate-spin mr-1" />
+                          Export
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Button variant="outline" size="sm" :disabled="importBusy" @click="importFileInput?.click()">
+                    <Upload class="size-4 mr-1" />
+                    {{ importBusy ? 'Importing...' : 'Import settings' }}
+                  </Button>
+                  <input ref="importFileInput" type="file" accept="application/json,.json" class="hidden" @change="onImportFile" />
+                </div>
+
+                <p v-if="importError" class="text-sm text-destructive">{{ importError }}</p>
+                <div v-if="importResult" class="space-y-2 text-sm">
+                  <p class="text-muted-foreground">
+                    Import complete: {{ importResult.restored_settings ?? 0 }} settings and
+                    {{ importResult.restored_keys ?? 0 }} service keys restored.
+                  </p>
+                  <template v-if="importResult.regenerated_keys?.length">
+                    <p class="font-medium">Newly created API keys (values are shown once — save them now):</p>
+                    <div v-for="k in importResult.regenerated_keys" :key="k.name" class="rounded border bg-muted px-3 py-2 font-mono text-xs">
+                      <div class="font-semibold">{{ k.name }}</div>
+                      <div>{{ k.key }}</div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
         <!-- Image -->
@@ -348,109 +471,6 @@ async function onImportFile(e: Event) {
               :fetch-backdrop-preview="adminApi.previewBackdrop"
               :fetch-episode-preview="adminApi.previewEpisode"
             />
-          </div>
-        </TabsContent>
-
-        <!-- Cache -->
-        <TabsContent value="cache">
-          <div class="rounded-lg border p-6 space-y-4">
-            <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
-              Cache
-            </h3>
-            <p class="text-sm text-muted-foreground">
-              Clear all cached images (posters, logos, backdrops, episodes). They are
-              regenerated on the next request, so the first load of each title is slower.
-            </p>
-            <ClearCacheButton @cleared="(m: string) => (cacheMessage = m)" />
-            <p v-if="cacheMessage" class="text-sm text-muted-foreground">{{ cacheMessage }}</p>
-          </div>
-        </TabsContent>
-
-        <!-- Backup -->
-        <TabsContent value="backup">
-          <div class="rounded-lg border p-6 space-y-4">
-            <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
-              Backup &amp; Restore
-            </h3>
-            <p class="text-sm text-muted-foreground">
-              Export the current settings to a file, or restore them from a previous export.
-              API keys can optionally be included.
-            </p>
-
-            <div class="flex flex-wrap items-center gap-3">
-              <Dialog v-model:open="exportDialogOpen">
-                <DialogTrigger as-child>
-                  <Button variant="outline" size="sm">
-                    <Download class="size-4 mr-1" />
-                    Export settings
-                  </Button>
-                </DialogTrigger>
-                <DialogContent class="sm:max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Export settings</DialogTitle>
-                    <DialogDescription>
-                      Choose what to include in the export file.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div class="space-y-3 py-2">
-                    <label class="flex items-center gap-2 cursor-pointer">
-                      <Checkbox
-                        :model-value="exportServiceKeys"
-                        @update:model-value="(v: unknown) => (exportServiceKeys = !!v)"
-                      />
-                      <span class="text-sm">
-                        External API keys
-                        <span class="text-muted-foreground text-xs">(TMDB, MDBList, OMDb, Fanart.tv, Trakt)</span>
-                      </span>
-                    </label>
-                    <label class="flex items-center gap-2 cursor-pointer">
-                      <Checkbox
-                        :model-value="exportAPIKeys"
-                        @update:model-value="(v: unknown) => (exportAPIKeys = !!v)"
-                      />
-                      <span class="text-sm">
-                        API keys
-                        <span class="text-muted-foreground text-xs">
-                          (poster-serving keys + their settings — existing key values can't be
-                          recovered, so missing keys are recreated on import)
-                        </span>
-                      </span>
-                    </label>
-                    <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
-                  </div>
-                  <DialogFooter>
-                    <DialogClose as-child>
-                      <Button variant="outline" size="sm">Cancel</Button>
-                    </DialogClose>
-                    <Button size="sm" :disabled="exportLoading" @click="runExport">
-                      <Loader2 v-if="exportLoading" class="size-4 animate-spin mr-1" />
-                      Export
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-
-              <Button variant="outline" size="sm" :disabled="importBusy" @click="importFileInput?.click()">
-                <Upload class="size-4 mr-1" />
-                {{ importBusy ? 'Importing...' : 'Import settings' }}
-              </Button>
-              <input ref="importFileInput" type="file" accept="application/json,.json" class="hidden" @change="onImportFile" />
-            </div>
-
-            <p v-if="importError" class="text-sm text-destructive">{{ importError }}</p>
-            <div v-if="importResult" class="space-y-2 text-sm">
-              <p class="text-muted-foreground">
-                Import complete: {{ importResult.restored_settings ?? 0 }} settings and
-                {{ importResult.restored_keys ?? 0 }} service keys restored.
-              </p>
-              <template v-if="importResult.regenerated_keys?.length">
-                <p class="font-medium">Newly created API keys (values are shown once — save them now):</p>
-                <div v-for="k in importResult.regenerated_keys" :key="k.name" class="rounded border bg-muted px-3 py-2 font-mono text-xs">
-                  <div class="font-semibold">{{ k.name }}</div>
-                  <div>{{ k.key }}</div>
-                </div>
-              </template>
-            </div>
           </div>
         </TabsContent>
       </div>
