@@ -162,3 +162,15 @@ func TestComputeCDNMaxAge(t *testing.T) {
 		t.Errorf("old film should have 1-year max-age, got %d", ageOld)
 	}
 }
+
+func TestLayoutCacheSuffix(t *testing.T) {
+	def := DefaultLayout("poster")
+	if LayoutCacheSuffix(&def, "poster") != "" {
+		t.Error("default layout should add no cache suffix")
+	}
+	mod := def
+	mod.Top = SideSlot{PerRow: 2, Rows: 1, Start: "l"}
+	if LayoutCacheSuffix(&mod, "poster") == "" {
+		t.Error("non-default layout should add a suffix")
+	}
+}

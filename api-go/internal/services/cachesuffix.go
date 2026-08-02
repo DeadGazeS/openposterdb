@@ -8,10 +8,6 @@ import (
 
 // --- Cache key suffix construction ---
 
-func PositionCacheSuffix(position string) string {
-	return ".p" + position
-}
-
 func BadgeStyleCacheSuffix(style string) string {
 	return ".s" + style
 }
@@ -24,6 +20,54 @@ func BadgeDirectionCacheSuffix(dir string) string {
 	return ".d" + dir
 }
 
+// LayoutCacheSuffix returns a short stable token for an image layout. The
+// default layout for the kind adds no token so existing cache keys stay stable.
+func LayoutCacheSuffix(layout *ImageLayout, kind string) string {
+	def := DefaultLayout(kind)
+	if layout != nil && layoutEqual(layout, &def) {
+		return ""
+	}
+	return ".ly" + layoutToken(layout)
+}
+
+func layoutEqual(a, b *ImageLayout) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Top != b.Top || a.Right != b.Right || a.Bottom != b.Bottom || a.Left != b.Left {
+		return false
+	}
+	return sameStrings(a.Order, b.Order)
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func layoutToken(l *ImageLayout) string {
+	if l == nil {
+		return ""
+	}
+	h := sha256.New()
+	for _, side := range SideNames {
+		slot := l.SideSlot(side)
+		if slot == nil {
+			continue
+		}
+		fmt.Fprintf(h, "%s:%d:%d:%s;", side, slot.PerRow, slot.Rows, slot.Start)
+	}
+	fmt.Fprintf(h, "o:%s", l.FillOrder())
+	return fmt.Sprintf("%x", h.Sum(nil))[:8]
+}
+
 func BadgeShapeCacheSuffix(shape string) string {
 	return ".sh" + shape
 }
@@ -32,14 +76,14 @@ func BadgeAlphaCacheSuffix(alpha int32) string {
 	return fmt.Sprintf(".ba%d", alpha)
 }
 
-func EdgeInsetCacheSuffix(position BadgePosition, insetX, insetY int32) string {
+func EdgeInsetCacheSuffix(insetX, insetY int32) string {
 	insetX = ClampEdgeInset(insetX)
 	insetY = ClampEdgeInset(insetY)
 	var out string
-	if (position.IsLeft() || position.IsRight()) && insetX > 0 {
+	if insetX > 0 {
 		out += fmt.Sprintf(".eh%d", insetX)
 	}
-	if (position.IsTop() || position.IsBottom()) && insetY > 0 {
+	if insetY > 0 {
 		out += fmt.Sprintf(".ev%d", insetY)
 	}
 	return out
@@ -74,21 +118,17 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 	var result string
 	switch kind {
 	case "poster":
-		ps := PositionCacheSuffix(string(settings.PosterPosition))
 		bs := BadgeStyleCacheSuffix(string(settings.PosterBadgeStyle.ForShape(settings.PosterBadgeShape)))
 		ls := LabelStyleCacheSuffix(string(settings.PosterLabelStyle))
 		bd := BadgeDirectionCacheSuffix(string(settings.PosterBadgeDirection))
+		ly := LayoutCacheSuffix(&settings.PosterLayout, "poster")
 		ts := ScaleCacheSuffix("ts", settings.PosterTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.PosterBadgeSize)
 		lgs := ScaleCacheSuffix("ls", settings.PosterLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.PosterBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.PosterBadgeAlpha))
-		split := ""
-		if settings.PosterBadgeSplit {
-			split = ".x1"
-		}
 		fit := settings.PosterFit.CacheSuffix()
-		result = ratingsSuffix + ps + bs + ls + bd + ts + bsz + lgs + shp + bgd + split + fit + isSuffix
+		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + lgs + shp + bgd + fit + isSuffix
 
 	case "logo":
 		bs := BadgeStyleCacheSuffix(string(settings.LogoBadgeStyle.ForShape(settings.LogoBadgeShape)))
@@ -98,31 +138,27 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		lgs := ScaleCacheSuffix("ls", settings.LogoLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.LogoBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.LogoBadgeAlpha))
-		pos := PositionCacheSuffix(string(settings.LogoPosition))
-		split := ""
-		if settings.LogoBadgeSplit {
-			split = ".x1"
-		}
-		result = ratingsSuffix + bs + ls + ts + bsz + lgs + shp + bgd + pos + split + isSuffix
+		ly := LayoutCacheSuffix(&settings.LogoLayout, "logo")
+		result = ratingsSuffix + bs + ls + ly + ts + bsz + lgs + shp + bgd + isSuffix
 
 	case "backdrop":
-		ps := PositionCacheSuffix(string(settings.BackdropPosition))
 		bs := BadgeStyleCacheSuffix(string(settings.BackdropBadgeStyle.ForShape(settings.BackdropBadgeShape)))
 		ls := LabelStyleCacheSuffix(string(settings.BackdropLabelStyle))
 		bd := BadgeDirectionCacheSuffix(string(settings.BackdropBadgeDirection))
+		ly := LayoutCacheSuffix(&settings.BackdropLayout, "backdrop")
 		ts := ScaleCacheSuffix("ts", settings.BackdropTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.BackdropBadgeSize)
 		lgs := ScaleCacheSuffix("ls", settings.BackdropLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.BackdropBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.BackdropBadgeAlpha))
-		ei := EdgeInsetCacheSuffix(settings.BackdropPosition, settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
-		result = ratingsSuffix + ps + bs + ls + bd + ts + bsz + lgs + shp + bgd + ei + isSuffix
+		ei := EdgeInsetCacheSuffix(settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
+		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + lgs + shp + bgd + ei + isSuffix
 
 	case "episode":
-		ps := PositionCacheSuffix(string(settings.EpisodePosition))
 		bs := BadgeStyleCacheSuffix(string(settings.EpisodeBadgeStyle.ForShape(settings.EpisodeBadgeShape)))
 		ls := LabelStyleCacheSuffix(string(settings.EpisodeLabelStyle))
 		bd := BadgeDirectionCacheSuffix(string(settings.EpisodeBadgeDirection))
+		ly := LayoutCacheSuffix(&settings.EpisodeLayout, "episode")
 		ts := ScaleCacheSuffix("ts", settings.EpisodeTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.EpisodeBadgeSize)
 		lgs := ScaleCacheSuffix("ls", settings.EpisodeLogoSize)
@@ -132,7 +168,7 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		if settings.EpisodeBlur {
 			blur = ".blur"
 		}
-		result = ratingsSuffix + ps + bs + ls + bd + ts + bsz + lgs + shp + bgd + blur + isSuffix
+		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + lgs + shp + bgd + blur + isSuffix
 	}
 
 	// Recolored sources affect the rendered image, so fold them into the cache
