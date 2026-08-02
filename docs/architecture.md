@@ -35,12 +35,12 @@ Cache keys uniquely identify a rendered image. They are used as keys in the in-m
 
 **Poster:**
 ```
-{id_type}/{id_value}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{split_suffix}{fit_suffix}{size_suffix}
+{id_type}/{id_value}{ratings_suffix}{layout_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{fit_suffix}{size_suffix}
 ```
 
 **Fanart poster:**
 ```
-{id_type}/{id_value}{variant}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{split_suffix}{fit_suffix}{size_suffix}
+{id_type}/{id_value}{variant}{ratings_suffix}{layout_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{fit_suffix}{size_suffix}
 ```
 
 **Logo:**
@@ -50,7 +50,7 @@ Cache keys uniquely identify a rendered image. They are used as keys in the in-m
 
 **Backdrop:**
 ```
-{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{pos_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{edge_inset_suffix}{size_suffix}
+{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{layout_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{edge_inset_suffix}{size_suffix}
 ```
 
 ### Suffix reference
@@ -58,16 +58,15 @@ Cache keys uniquely identify a rendered image. They are used as keys in the in-m
 | Suffix | Format | Example | Description |
 |---|---|---|---|
 | Ratings | `@{chars}` | `@mil` | Single-char per source, no commas (`m`=MAL, `i`=IMDb, `l`=Letterboxd, `r`=RT, `a`=RT Audience, `c`=Metacritic, `t`=TMDB, `k`=Trakt, `d`=MDBList score, `e`=Roger Ebert) |
-| Position | `.p{pos}` | `.pbc`, `.pl` | Poster badge position (`bc`, `tc`, `l`, `r`, `tl`, `tr`, `bl`, `br`) |
+| Layout | `.ly{token}` | `.lya1b2c3` | 8-char hash of the per-side badge layout (per-row × rows × start per side + fill order); only present when non-default |
 | Badge style | `.s{style}` | `.sh`, `.sv` | `h` = horizontal, `v` = vertical |
 | Label style | `.l{style}` | `.lt`, `.li`, `.lo`, `.lh` | `t` = text labels, `i` = icon labels, `o` = official provider logos, `h` = high-resolution provider logos (rasterized from `highRes` SVGs) |
 | Badge direction | `.d{dir}` | `.dh`, `.dv` | `h` = horizontal, `v` = vertical (resolved from `d` = default) |
 | Badge size | `.b{size}` | `.bm`, `.bxl` | `xs` = extra-small, `s` = small, `m` = medium (default), `l` = large, `xl` = extra-large |
 | Badge shape | `.sh{shape}` | `.shr`, `.shp` | `r` = rounded (default), `p` = pill (the `sh` prefix distinguishes it from the `.s{style}` token above) |
 | Badge background | `.bg{bg}` | `.bgd`, `.bgn` | `d` = default, `k` = dark, `t` = transparent, `n` = none |
-| Split (poster) | `.x1` | `.x1` | Poster badges split onto opposite sides; only present when enabled |
 | Poster fit | `.f{fit}` | `.fc`, `.fp`, `.fb` | `c` = cover, `p` = pad, `b` = blur — `native` (default) emits no token |
-| Edge inset (backdrop) | `.eh{n}` / `.ev{n}` | `.eh8`, `.ev3` | Backdrop ratings inset from the edge by `n`% — `eh` horizontal, `ev` vertical; only the position-relevant axis, only when non-zero |
+| Edge inset (backdrop) | `.eh{n}` / `.ev{n}` | `.eh8`, `.ev3` | Backdrop ratings inset from the edge by `n`% — `eh` horizontal, `ev` vertical; only when non-zero |
 | Image size | `.z{size}` | `.zm`, `.zl` | `s` = small, `m` = medium (default), `l` = large, `vl` = very-large |
 
 ### Image kind prefixes
@@ -117,13 +116,14 @@ Settings are stored as short single-character or two-character codes:
 | `image_source` | `t`, `f` | TMDB, Fanart.tv |
 | `badge_style` | `h`, `v` | Horizontal, Vertical |
 | `label_style` | `t`, `i`, `o`, `h` | Text, Icon, Official, High Res |
-| `badge_direction` | `d`, `h`, `v` | Default (auto-resolved by position), Horizontal, Vertical |
-| `text_size` | `50`–`200` | Rating text font size as a percentage of the default (100 = default) |
-| `badge_size` | `50`–`200` | Overall badge size as a percentage of the default (100 = default) |
-| `logo_size` | `50`–`200` | Rating source logo size as a percentage of the default (100 = default) |
+| `badge_direction` | `d`, `h`, `v` | Default (horizontal rows), Horizontal, Vertical |
+| `layout` | JSON | Per-side badge layout (per kind: `poster_layout`, `logo_layout`, `backdrop_layout`, `episode_layout`). Each of the four sides holds `per_row` (badges per row), `rows` (row count), and `start` (anchor — `l`/`c`/`r` for top/bottom, `t`/`c`/`b` for left/right), plus an `order` array of side names (fill order). Badges are laid out in horizontal rows on every side. The total number of ratings shown is the sum of the four side capacities (`per_row × rows`). Defaults preserve old behaviour: poster bottom 3×1 centre, logo bottom 5×1 centre, backdrop top 5×1 right, episode right 1×1 top |
+| `text_size` | `50`–`400` | Rating text font size as a percentage of the default (100 = default) |
+| `badge_size` | `50`–`400` | Overall badge size as a percentage of the default (100 = default) |
+| `logo_size` | `50`–`400` | Rating source logo size as a percentage of the default (100 = default) |
 | `badge_shape` | `r`, `p` | Rounded (default), Pill |
 | `badge_background` | `d`, `k`, `t`, `n` | Default (coloured label + dark value), Dark, Transparent, None |
-| `position` | `bc`, `tc`, `l`, `r`, `tl`, `tr`, `bl`, `br` | Bottom-center, Top-center, Left, Right, corners |
+| `layout` | JSON | Per-side badge layout (see `layout` row above) |
 
 ### Example cache keys
 
@@ -143,10 +143,10 @@ imdb/tt0111161_l_t_en@mil.sh.lt.zm
 # Logo from Fanart.tv with English language
 imdb/tt0111161_l_f_en@mil.sh.lt.zm
 
-# Backdrop from TMDB with top-right position, vertical direction, vertical badges, official labels, 150% text size, large image
+# Backdrop from TMDB with default layout, vertical badges, official labels, 150% text size, large image
 imdb/tt0111161_b_t@mil.ptr.sv.lo.dv.ts150.zl
 
-# Episode with 1 rating, top-right position, vertical direction, vertical badges, official labels, default text size, blur enabled
+# Episode with 1 rating (right-side layout), vertical badges, official labels, default text size, blur enabled
 imdb/tt0959621_e@i.ptr.sv.lo.dv.blur.zm
 ```
 
@@ -172,7 +172,7 @@ When a stale entry is served, a background refresh is spawned to regenerate it w
 
 When `ENABLE_CDN_REDIRECTS=true`, authenticated poster requests (`/{api_key}/...`) return a **302 redirect** to a content-addressed URL (`/c/{settings_hash}/...`) instead of serving the image directly. This is designed for deployments behind Cloudflare or another CDN:
 
-1. The app computes a 32-character hex hash from the user's effective settings (ratings order, badge style, position, etc.)
+1. The app computes a 32-character hex hash from the user's effective settings (ratings order, badge style, layout, etc.)
 2. The original endpoint validates the API key, then redirects to `/c/{hash}/{id_type}/poster-default/{id_value}.jpg`
 3. The `/c/` endpoint serves the image with a dynamic `Cache-Control` TTL based on the film's age (see below)
 4. The CDN caches by the `/c/` URL — all users with identical settings share one cache entry
@@ -212,7 +212,7 @@ The admin panel can purge cached images without touching the database volume or 
 - **Clear everything** — the **Clear cache** button on the dashboard (and on the **Settings** page) wipes all rendered images, raw downloads, and settings-preview thumbnails on disk, every `image_meta` / `available_ratings` row, and every in-memory image cache (including the settings-preview cache and the upstream TMDB/Fanart.tv image-list and ratings caches). Images regenerate from scratch on the next request, so the first load of each title afterwards is slower. This is the path that guarantees a fully clean re-fetch. The on-disk wipe is **instant regardless of cache size** — the cache directories are atomically renamed aside and the (potentially slow) recursive delete runs in the background — so the request returns immediately even with hundreds of thousands of files, and an interrupted delete is swept on the next startup.
 - **Clear one image type** — the **Clear posters / logos / backdrops / episodes** button at the top of each list view removes all cached images of just that kind (its rendered directory + `image_meta` rows), leaving the other kinds and the shared `available_ratings` index untouched. Like clear-all, the on-disk wipe is staged aside and removed in the background.
 - **Purge one title, or one variant** — the trash button on a row in the poster/logo/backdrop/episode lists opens a dialog with two choices:
-  - **Entire title** removes *every* cached variant of that title for that image kind. One title maps to many cache entries (the key encodes ratings, position, style, size, language, …), so this prefix-matches the title id rather than deleting a single key.
+  - **Entire title** removes *every* cached variant of that title for that image kind. One title maps to many cache entries (the key encodes ratings, layout, style, size, language, …), so this prefix-matches the title id rather than deleting a single key.
   - **This variant** removes only the single rendered entry the row represents (one exact cache key), leaving the title's other variants and its shared `available_ratings` index untouched.
 
 Each purge clears the relevant layers consistently: the in-memory render caches, the rendered files on disk, and the SQLite metadata (`image_meta` plus the title's `available_ratings` index, so the next request re-resolves its sources).
