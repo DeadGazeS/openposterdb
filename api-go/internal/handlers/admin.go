@@ -59,7 +59,7 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"ratings_exclude":          s.RatingsExclude,
 			"free_api_key_enabled":     freeKeyEnabled,
 			"free_api_key_locked":      freeKeyLocked,
-			"poster_position":          string(s.PosterPosition),
+			"poster_layout":            marshalLayoutResponse(s.PosterLayout),
 			"logo_ratings_limit":       s.LogoRatingsLimit,
 			"backdrop_ratings_limit":   s.BackdropRatingsLimit,
 			"poster_badge_style":       string(s.PosterBadgeStyle),
@@ -69,7 +69,6 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"logo_label_style":         string(s.LogoLabelStyle),
 			"backdrop_label_style":     string(s.BackdropLabelStyle),
 			"poster_badge_direction":   string(s.PosterBadgeDirection),
-			"poster_badge_split":       s.PosterBadgeSplit,
 			"poster_fit":               string(s.PosterFit),
 			"poster_text_size":         int32(s.PosterTextSize),
 			"logo_text_size":           int32(s.LogoTextSize),
@@ -80,9 +79,8 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"poster_logo_size":         int32(s.PosterLogoSize),
 			"logo_logo_size":           int32(s.LogoLogoSize),
 			"backdrop_logo_size":       int32(s.BackdropLogoSize),
-			"logo_position":            string(s.LogoPosition),
-			"logo_badge_split":         s.LogoBadgeSplit,
-			"backdrop_position":        string(s.BackdropPosition),
+			"logo_layout":              marshalLayoutResponse(s.LogoLayout),
+			"backdrop_layout":          marshalLayoutResponse(s.BackdropLayout),
 			"backdrop_badge_direction": string(s.BackdropBadgeDirection),
 			"backdrop_edge_inset_x":    s.BackdropEdgeInsetX,
 			"backdrop_edge_inset_y":    s.BackdropEdgeInsetY,
@@ -92,7 +90,7 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"episode_text_size":        int32(s.EpisodeTextSize),
 			"episode_badge_size":       int32(s.EpisodeBadgeSize),
 			"episode_logo_size":        int32(s.EpisodeLogoSize),
-			"episode_position":         string(s.EpisodePosition),
+			"episode_layout":           marshalLayoutResponse(s.EpisodeLayout),
 			"episode_badge_direction":  string(s.EpisodeBadgeDirection),
 			"episode_blur":             s.EpisodeBlur,
 			"poster_badge_shape":       string(s.PosterBadgeShape),
@@ -116,7 +114,7 @@ type updateSettingsRequest struct {
 	RatingsOrder           *string                             `json:"ratings_order"`
 	RatingsExclude         *string                             `json:"ratings_exclude"`
 	FreeAPIKeyEnabled      *bool                               `json:"free_api_key_enabled"`
-	PosterPosition         *string                             `json:"poster_position"`
+	PosterLayout           *services.ImageLayout               `json:"poster_layout"`
 	LogoRatingsLimit       *int32                              `json:"logo_ratings_limit"`
 	BackdropRatingsLimit   *int32                              `json:"backdrop_ratings_limit"`
 	PosterBadgeStyle       *string                             `json:"poster_badge_style"`
@@ -126,7 +124,6 @@ type updateSettingsRequest struct {
 	LogoLabelStyle         *string                             `json:"logo_label_style"`
 	BackdropLabelStyle     *string                             `json:"backdrop_label_style"`
 	PosterBadgeDirection   *string                             `json:"poster_badge_direction"`
-	PosterBadgeSplit       *bool                               `json:"poster_badge_split"`
 	PosterFit              *string                             `json:"poster_fit"`
 	PosterTextSize         *int32                              `json:"poster_text_size"`
 	LogoTextSize           *int32                              `json:"logo_text_size"`
@@ -137,9 +134,8 @@ type updateSettingsRequest struct {
 	PosterLogoSize         *int32                              `json:"poster_logo_size"`
 	LogoLogoSize           *int32                              `json:"logo_logo_size"`
 	BackdropLogoSize       *int32                              `json:"backdrop_logo_size"`
-	LogoPosition           *string                             `json:"logo_position"`
-	LogoBadgeSplit         *bool                               `json:"logo_badge_split"`
-	BackdropPosition       *string                             `json:"backdrop_position"`
+	LogoLayout             *services.ImageLayout               `json:"logo_layout"`
+	BackdropLayout         *services.ImageLayout               `json:"backdrop_layout"`
 	BackdropBadgeDirection *string                             `json:"backdrop_badge_direction"`
 	BackdropEdgeInsetX     *int32                              `json:"backdrop_edge_inset_x"`
 	BackdropEdgeInsetY     *int32                              `json:"backdrop_edge_inset_y"`
@@ -149,7 +145,7 @@ type updateSettingsRequest struct {
 	EpisodeTextSize        *int32                              `json:"episode_text_size"`
 	EpisodeBadgeSize       *int32                              `json:"episode_badge_size"`
 	EpisodeLogoSize        *int32                              `json:"episode_logo_size"`
-	EpisodePosition        *string                             `json:"episode_position"`
+	EpisodeLayout          *services.ImageLayout               `json:"episode_layout"`
 	EpisodeBadgeDirection  *string                             `json:"episode_badge_direction"`
 	EpisodeBlur            *bool                               `json:"episode_blur"`
 	PosterBadgeShape       *string                             `json:"poster_badge_shape"`
@@ -201,8 +197,8 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.RatingsExclude != nil {
 			s.RatingsExclude = *req.RatingsExclude
 		}
-		if req.PosterPosition != nil {
-			s.PosterPosition = services.BadgePosition(*req.PosterPosition)
+		if req.PosterLayout != nil {
+			s.PosterLayout = *req.PosterLayout
 		}
 		if req.LogoRatingsLimit != nil {
 			s.LogoRatingsLimit = *req.LogoRatingsLimit
@@ -230,9 +226,6 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 		if req.PosterBadgeDirection != nil {
 			s.PosterBadgeDirection = services.BadgeDirection(*req.PosterBadgeDirection)
-		}
-		if req.PosterBadgeSplit != nil {
-			s.PosterBadgeSplit = *req.PosterBadgeSplit
 		}
 		if req.PosterFit != nil {
 			s.PosterFit = services.PosterFit(*req.PosterFit)
@@ -264,14 +257,11 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.BackdropLogoSize != nil {
 			s.BackdropLogoSize = services.ClampScalePercent(*req.BackdropLogoSize)
 		}
-		if req.LogoPosition != nil {
-			s.LogoPosition = services.BadgePosition(*req.LogoPosition)
+		if req.LogoLayout != nil {
+			s.LogoLayout = *req.LogoLayout
 		}
-		if req.LogoBadgeSplit != nil {
-			s.LogoBadgeSplit = *req.LogoBadgeSplit
-		}
-		if req.BackdropPosition != nil {
-			s.BackdropPosition = services.BadgePosition(*req.BackdropPosition)
+		if req.BackdropLayout != nil {
+			s.BackdropLayout = *req.BackdropLayout
 		}
 		if req.BackdropBadgeDirection != nil {
 			s.BackdropBadgeDirection = services.BadgeDirection(*req.BackdropBadgeDirection)
@@ -300,8 +290,8 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.EpisodeLogoSize != nil {
 			s.EpisodeLogoSize = services.ClampScalePercent(*req.EpisodeLogoSize)
 		}
-		if req.EpisodePosition != nil {
-			s.EpisodePosition = services.BadgePosition(*req.EpisodePosition)
+		if req.EpisodeLayout != nil {
+			s.EpisodeLayout = *req.EpisodeLayout
 		}
 		if req.EpisodeBadgeDirection != nil {
 			s.EpisodeBadgeDirection = services.BadgeDirection(*req.EpisodeBadgeDirection)

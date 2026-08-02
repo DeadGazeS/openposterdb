@@ -126,10 +126,11 @@ func TestApplyQueryOverridesPosterMapping(t *testing.T) {
 	limit := int32(3)
 	style := "h"
 	label := "i"
+	layout := `{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":2,"rows":2,"start":"l"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom"]}`
 	q.RatingsLimit = &limit
 	q.BadgeStyle = &style
 	q.LabelStyle = &label
-	q.Position = (*string)(&[]string{"tl"}[0])
+	q.Layout = &layout
 
 	result := applyQueryOverrides(&s, q, "poster")
 	if result.RatingsLimit != 3 {
@@ -141,17 +142,23 @@ func TestApplyQueryOverridesPosterMapping(t *testing.T) {
 	if result.PosterLabelStyle != services.LabelStyleIcon {
 		t.Error("should be Icon")
 	}
+	if result.PosterLayout.Bottom.PerRow != 2 || result.PosterLayout.Bottom.Rows != 2 || result.PosterLayout.Bottom.Start != "l" {
+		t.Error("layout override not applied")
+	}
 }
 
 func TestApplyQueryOverridesLogoIgnoresPosterOnly(t *testing.T) {
 	s := services.DefaultRenderSettings()
 	q := &ImageQuery{}
-	pos := "tl"
-	q.Position = &pos
+	layout := `{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["right"]}`
+	q.Layout = &layout
 
 	result := applyQueryOverrides(&s, q, "logo")
-	if result.PosterPosition != s.PosterPosition {
-		t.Error("position should be ignored for logo")
+	if result.LogoLayout.Right.PerRow != 1 || result.LogoLayout.Right.Start != "t" {
+		t.Error("layout should apply for logo")
+	}
+	if result.PosterLayout.Bottom.PerRow != s.PosterLayout.Bottom.PerRow {
+		t.Error("poster layout should be untouched for logo")
 	}
 }
 
