@@ -98,7 +98,12 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		lgs := ScaleCacheSuffix("ls", settings.LogoLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.LogoBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.LogoBadgeAlpha))
-		result = ratingsSuffix + bs + ls + ts + bsz + lgs + shp + bgd + isSuffix
+		pos := PositionCacheSuffix(string(settings.LogoPosition))
+		split := ""
+		if settings.LogoBadgeSplit {
+			split = ".x1"
+		}
+		result = ratingsSuffix + bs + ls + ts + bsz + lgs + shp + bgd + pos + split + isSuffix
 
 	case "backdrop":
 		ps := PositionCacheSuffix(string(settings.BackdropPosition))

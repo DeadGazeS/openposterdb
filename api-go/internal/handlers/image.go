@@ -228,6 +228,15 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 	}
 
+	if kind == "logo" {
+		if query.Position != nil {
+			s.LogoPosition = services.BadgePosition(*query.Position)
+		}
+		if query.Split != nil {
+			s.LogoBadgeSplit = *query.Split
+		}
+	}
+
 	if kind == "episode" {
 		if query.BadgeDirection != nil {
 			s.EpisodeBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
@@ -309,6 +318,8 @@ type FreeKeySettingsResponse struct {
 	PosterLogoSize         int32  `json:"poster_logo_size"`
 	LogoLogoSize           int32  `json:"logo_logo_size"`
 	BackdropLogoSize       int32  `json:"backdrop_logo_size"`
+	LogoPosition           string `json:"logo_position"`
+	LogoBadgeSplit         bool   `json:"logo_badge_split"`
 	PosterBadgeShape       string `json:"poster_badge_shape"`
 	LogoBadgeShape         string `json:"logo_badge_shape"`
 	BackdropBadgeShape     string `json:"backdrop_badge_shape"`
@@ -361,6 +372,8 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		PosterLogoSize:         int32(s.PosterLogoSize),
 		LogoLogoSize:           int32(s.LogoLogoSize),
 		BackdropLogoSize:       int32(s.BackdropLogoSize),
+		LogoPosition:           string(s.LogoPosition),
+		LogoBadgeSplit:         s.LogoBadgeSplit,
 		PosterBadgeShape:       string(s.PosterBadgeShape),
 		LogoBadgeShape:         string(s.LogoBadgeShape),
 		BackdropBadgeShape:     string(s.BackdropBadgeShape),

@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	poster_logo_size INTEGER NOT NULL DEFAULT 100,
 	logo_logo_size INTEGER NOT NULL DEFAULT 100,
 	backdrop_logo_size INTEGER NOT NULL DEFAULT 100,
+	logo_position TEXT NOT NULL DEFAULT 'bc',
+	logo_badge_split INTEGER NOT NULL DEFAULT 0,
 	backdrop_position TEXT NOT NULL DEFAULT 'tr',
 	backdrop_badge_direction TEXT NOT NULL DEFAULT 'd',
 	episode_ratings_limit INTEGER NOT NULL DEFAULT 1,

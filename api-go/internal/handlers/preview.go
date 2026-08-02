@@ -263,6 +263,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	badgeMultiplier := previewBadgeMultiplier("poster", badgeSize)
 	badgeScale := resolvedSize.BadgeScale("poster") * badgeMultiplier
 	logoScale := logoSize.Percent()
+	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewPosterRatingsLimit)
 	if query.RatingsLimit != nil {
@@ -345,7 +346,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	rendered, err := image.RenderPosterSync(posterBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeMultiplier, logoScale, split, posterFit, colors)
+		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, split, posterFit, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -376,6 +377,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	badgeMultiplier := previewBadgeMultiplier("logo", badgeSize)
 	badgeScale := resolvedSize.BadgeScale("logo") * badgeMultiplier
 	logoScale := logoSize.Percent()
+	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
 	if query.RatingsLimit != nil {
@@ -416,6 +418,15 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	}
 	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
+	position := services.PositionBottomCenter
+	if query.Position != nil {
+		position = services.BadgePosition(*query.Position)
+	}
+	split := false
+	if query.Split != nil {
+		split = *query.Split
+	}
+
 	badges := p.demoBadges("logo")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
@@ -433,7 +444,8 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rendered, err := image.RenderLogoSync(logoBytes, badges, valueFace, labelFace,
-		badgeStyle, labelStyle, appearance, targetWidth, badgeScale, badgeMultiplier, logoScale, colors)
+		badgeStyle, labelStyle, appearance, targetWidth, badgeScale, badgeMultiplier, textScale, logoScale,
+		position, split, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -464,6 +476,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	badgeMultiplier := previewBadgeMultiplier("backdrop", badgeSize)
 	badgeScale := resolvedSize.BadgeScale("backdrop") * badgeMultiplier
 	logoScale := logoSize.Percent()
+	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
 	if query.RatingsLimit != nil {
@@ -541,7 +554,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 
 	rendered, err := image.RenderBackdropSync(backdropBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeMultiplier, logoScale, edgeInsetX, edgeInsetY, colors)
+		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, edgeInsetX, edgeInsetY, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -572,6 +585,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	badgeMultiplier := previewBadgeMultiplier("episode", badgeSize)
 	badgeScale := resolvedSize.BadgeScale("episode") * badgeMultiplier
 	logoScale := logoSize.Percent()
+	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewPosterRatingsLimit)
 	if query.RatingsLimit != nil {
@@ -645,7 +659,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 
 	rendered, err := image.RenderEpisodeSync(episodeBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeMultiplier, logoScale, blur, colors)
+		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, blur, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

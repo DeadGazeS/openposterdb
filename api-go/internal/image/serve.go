@@ -182,28 +182,30 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	if valueFace == nil || labelFace == nil {
 		return nil, fmt.Errorf("font not loaded")
 	}
+	textScale := float32(textSizePct) / 100.0
 
 	switch kind {
 	case "poster":
 		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, badgeMultiplier, logoScale,
+			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
 			settings.PosterBadgeSplit, settings.PosterFit, settings.Colors)
 
 	case "logo":
 		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
-			badgeStyle, labelStyle, appearance, targetW, badgeScale, badgeMultiplier, logoScale, settings.Colors)
+			badgeStyle, labelStyle, appearance, targetW, badgeScale, badgeMultiplier, textScale, logoScale,
+			settings.LogoPosition, settings.LogoBadgeSplit, settings.Colors)
 
 	case "backdrop":
 		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, badgeMultiplier, logoScale,
+			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
 			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY, settings.Colors)
 
 	case "episode":
 		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
 			position, badgeStyle, labelStyle, appearance, badgeDirection,
-			targetW, badgeScale, badgeMultiplier, logoScale, settings.EpisodeBlur, settings.Colors)
+			targetW, badgeScale, badgeMultiplier, textScale, logoScale, settings.EpisodeBlur, settings.Colors)
 	}
 
 	return nil, fmt.Errorf("unknown image kind: %s", kind)

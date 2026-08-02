@@ -35,7 +35,7 @@ var officialIconKeys = []string{
 
 func iconKeyAllowed(kind, key string) bool {
 	switch kind {
-	case "default":
+	case "white", "default":
 		for _, k := range iconSourceKeys {
 			if k == key {
 				return true
@@ -51,16 +51,16 @@ func iconKeyAllowed(kind, key string) bool {
 	return false
 }
 
-// ServeIcon writes the bytes of a whitelisted icon to w. kind is "default"
-// (assets/icons) or "official" (assets/icons/official). It prefers the .png
-// file and falls back to .webp. Returns false when the icon is unknown.
+// ServeIcon writes the bytes of a whitelisted icon to w. kind is "white"
+// (assets/icons/white) or "official" (assets/icons/official). It prefers the
+// .png file and falls back to .webp. Returns false when the icon is unknown.
 func ServeIcon(w http.ResponseWriter, kind, key string) bool {
 	if !iconKeyAllowed(kind, key) {
 		return false
 	}
-	dir := "assets/icons"
+	dir := "assets/icons/white"
 	if kind == "official" {
-		dir += "/official"
+		dir = "assets/icons/official"
 	}
 	for _, ext := range []string{".png", ".webp"} {
 		path := dir + "/" + key + ext
@@ -158,7 +158,7 @@ func LoadIcons() {
 	}
 
 	for _, s := range sources {
-		path := "assets/icons/" + s.key + ".png"
+		path := "assets/icons/white/" + s.key + ".png"
 		if img, err := loadIcon(path); err == nil {
 			iconCache[s.source] = img
 		}
