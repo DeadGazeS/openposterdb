@@ -139,6 +139,7 @@ const (
 	LabelStyleIcon     LabelStyle = "i"
 	LabelStyleText     LabelStyle = "t"
 	LabelStyleOfficial LabelStyle = "o"
+	LabelStyleHighRes  LabelStyle = "h"
 )
 
 func ParseLabelStyle(s string) LabelStyle {
@@ -149,13 +150,15 @@ func ParseLabelStyle(s string) LabelStyle {
 		return LabelStyleIcon
 	case "o":
 		return LabelStyleOfficial
+	case "h":
+		return LabelStyleHighRes
 	default:
 		return LabelStyleOfficial
 	}
 }
 
 func (l LabelStyle) UsesIcon() bool {
-	return l == LabelStyleIcon || l == LabelStyleOfficial
+	return l == LabelStyleIcon || l == LabelStyleOfficial || l == LabelStyleHighRes
 }
 
 // --- BadgeShape ---

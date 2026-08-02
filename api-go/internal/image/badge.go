@@ -296,7 +296,7 @@ func iconFitInBox(icon *image.RGBA, boxSize uint32) (uint32, uint32) {
 
 // badgeIconAndSize selects the icon for a badge and computes its target size.
 func badgeIconAndSize(badge *services.RatingBadge, labelStyle services.LabelStyle, iconHeight uint32, icon *image.RGBA) (uint32, uint32) {
-	if labelStyle == services.LabelStyleOfficial {
+	if labelStyle == services.LabelStyleOfficial || labelStyle == services.LabelStyleHighRes {
 		return iconFitInBox(icon, iconHeight)
 	}
 	return iconScaledWidth(icon, iconHeight), iconHeight
@@ -328,6 +328,9 @@ func overlayIconShadowed(img, icon *image.RGBA, x, y int, shadow int) {
 }
 
 func iconForBadge(badge *services.RatingBadge, labelStyle services.LabelStyle) *image.RGBA {
+	if labelStyle == services.LabelStyleHighRes {
+		return HighResIconForBadge(badge)
+	}
 	if labelStyle == services.LabelStyleOfficial {
 		return OfficialIconForBadge(badge)
 	}
@@ -452,7 +455,7 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims, textScale float32, logoScale float32) int {
 	_ = logoScale
 	switch labelStyle {
-	case services.LabelStyleOfficial:
+	case services.LabelStyleOfficial, services.LabelStyleHighRes:
 		return int(dims.iconHeight)
 	case services.LabelStyleIcon:
 		if icon := IconForSource(badge.Source); icon != nil {

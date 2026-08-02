@@ -1,6 +1,7 @@
 package image
 
 import (
+	"os"
 	"bytes"
 	"image"
 	"image/color"
@@ -92,4 +93,87 @@ func TestSampleRenderHasBadges(t *testing.T) {
 		t.Fatal("rendered poster has no bright (badge) pixels")
 	}
 	t.Logf("bright pixels: %d", bright)
+}
+
+// TestHighResIconLoad ensures the highRes SVGs rasterize into usable icons and
+// that a badge using LabelStyleHighRes renders icon pixels.
+func TestHighResIconLoad(t *testing.T) {
+	loadTestFont(t)
+	// LoadIcons is a no-op after the first call, so build the cache directly.
+	// Assets live relative to the repo root; tests run from the package dir.
+	if _, err := os.Stat("../../assets/icons/highRes"); err == nil {
+		os.Chdir("../..")
+	}
+	iconCacheMu.Lock()
+	loadHighResIcons()
+	iconCacheMu.Unlock()
+
+	if len(highresCache) == 0 {
+		t.Fatal("highresCache is empty; highRes SVGs did not load")
+	}
+
+	// Every source that has a highRes SVG must resolve to a distinct icon.
+	sources := []*services.RatingBadge{
+		{Source: services.SourceImdb, Value: "8.5"},
+		{Source: services.SourceTmdb, Value: "77%"},
+		{Source: services.SourceMetacritic, Value: "80"},
+		{Source: services.SourceTrakt, Value: "90%"},
+		{Source: services.SourceLetterboxd, Value: "4.0"},
+		{Source: services.SourceMal, Value: "8.00"},
+		{Source: services.SourceMdblist, Value: "7.2"},
+		{Source: services.SourceEbert, Value: "4.0"},
+		{Source: services.SourceRt, Value: "90%"},
+		{Source: services.SourceRtAudience, Value: "40%"},
+	}
+	seen := make(map[uint32]bool)
+	for _, b := range sources {
+		icon := HighResIconForBadge(b)
+		if icon == nil {
+			t.Fatalf("no highRes icon for %s", b.Source.Label)
+		}
+		var sum uint32
+		bounds := icon.Bounds()
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				c := icon.RGBAAt(x, y)
+				if c.A > 128 {
+					sum += uint32(c.R) + uint32(c.G) + uint32(c.B)
+				}
+			}
+		}
+		if seen[sum] {
+			t.Fatalf("duplicate highRes icon content for %s (colsum %d)", b.Source.Label, sum)
+		}
+		seen[sum] = true
+	}
+
+	// LabelStyleHighRes must render icon pixels into the badge.
+	badges := []services.RatingBadge{
+		{Source: services.SourceImdb, Value: "8.5"},
+		{Source: services.SourceTmdb, Value: "77%"},
+	}
+	appearance := services.DefaultBadgeAppearance()
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	bis := RenderBadgesUniform(badges, vf, lf, services.LabelStyleHighRes, appearance, 1.0, 1.0, 1.0, nil)
+	if len(bis) != len(badges) {
+		t.Fatalf("expected %d badges, got %d", len(badges), len(bis))
+	}
+	for i, bi := range bis {
+		// The left (label) section holds the icon; require colored pixels there.
+		b := bi.Bounds()
+		iconPx := 0
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Min.X+b.Dx()/3; x++ {
+				c := bi.RGBAAt(x, y)
+				if c.A > 128 && (c.R != 0 || c.G != 0 || c.B != 0) {
+					iconPx++
+				}
+			}
+		}
+		if iconPx == 0 {
+			t.Fatalf("badge %d (%s) rendered no icon pixels with HighRes style", i, badges[i].Source.Label)
+		}
+		t.Logf("badge %s: %dx%d, %d icon px", badges[i].Source.Label, b.Dx(), b.Dy(), iconPx)
+	}
 }
