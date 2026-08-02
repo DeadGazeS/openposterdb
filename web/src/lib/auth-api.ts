@@ -12,7 +12,7 @@ export interface FreeKeyDefaults {
   ratings_limit: number
   ratings_order: string
   ratings_exclude: string
-  poster_position: string
+  poster_layout: string
   logo_ratings_limit: number
   backdrop_ratings_limit: number
   poster_badge_style: string
@@ -22,7 +22,6 @@ export interface FreeKeyDefaults {
   logo_label_style: string
   backdrop_label_style: string
   poster_badge_direction: string
-  poster_badge_split: boolean
   poster_fit: string
   poster_text_size: number
   logo_text_size: number
@@ -33,7 +32,8 @@ export interface FreeKeyDefaults {
   poster_logo_size: number
   logo_logo_size: number
   backdrop_logo_size: number
-  backdrop_position: string
+  logo_layout: string
+  backdrop_layout: string
   backdrop_badge_direction: string
   backdrop_edge_inset_x: number
   backdrop_edge_inset_y: number
@@ -43,7 +43,7 @@ export interface FreeKeyDefaults {
   episode_text_size: number
   episode_badge_size: number
   episode_logo_size: number
-  episode_position: string
+  episode_layout: string
   episode_badge_direction: string
   episode_blur: boolean
   poster_badge_shape: string
