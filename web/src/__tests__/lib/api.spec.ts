@@ -259,31 +259,31 @@ describe('api', () => {
     expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
   })
 
-  it('adminApi.previewPoster includes position when provided', async () => {
+  it('adminApi.previewPoster includes layout when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewPoster(3, 'imdb,rt', 'l')
+    await adminApi.previewPoster(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"bottom":{"per_row":2}}')
 
     const [url] = fetchMock.mock.calls[0]
-    expect(url).toContain('position=l')
+    expect(url).toContain('layout=%7B%22bottom%22%3A%7B%22per_row%22%3A2%7D%7D')
   })
 
-  it('adminApi.previewPoster omits position when not provided', async () => {
+  it('adminApi.previewPoster omits layout when not provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
     await adminApi.previewPoster(3, 'imdb,rt')
 
     const [url] = fetchMock.mock.calls[0]
-    expect(url).not.toContain('position')
+    expect(url).not.toContain('layout')
   })
 
   it('adminApi.previewPoster includes label_style when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewPoster(3, 'imdb,rt', 'bc', 'h', 'i')
+    await adminApi.previewPoster(3, 'imdb,rt', 'h', 'i')
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('label_style=i')
@@ -293,7 +293,7 @@ describe('api', () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewPoster(3, 'imdb,rt', 'bc', 'h', 'i', 'v')
+    await adminApi.previewPoster(3, 'imdb,rt', 'h', 'i', 'v')
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('badge_direction=v')
@@ -434,21 +434,21 @@ describe('api', () => {
     expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
   })
 
-  it('adminApi.previewEpisode includes position when provided', async () => {
+  it('adminApi.previewEpisode includes layout when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'tr')
+    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"right":{"per_row":1}}')
 
     const [url] = fetchMock.mock.calls[0]
-    expect(url).toContain('position=tr')
+    expect(url).toContain('layout=%7B%22right%22%3A%7B%22per_row%22%3A1%7D%7D')
   })
 
   it('adminApi.previewEpisode includes badge_direction when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'tr', 'h')
+    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'h')
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('badge_direction=h')
@@ -458,7 +458,7 @@ describe('api', () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, true)
+    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, true)
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('blur=true')
@@ -468,7 +468,7 @@ describe('api', () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, false)
+    await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, false)
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).not.toContain('blur')

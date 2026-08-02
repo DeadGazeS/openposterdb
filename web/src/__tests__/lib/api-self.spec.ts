@@ -63,7 +63,7 @@ describe('selfApi', () => {
       ratings_limit: 3,
       ratings_order: 'mal,imdb,trakt',
       ratings_exclude: 'rt',
-      poster_position: 'bc',
+      poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
       logo_ratings_limit: 3,
       backdrop_ratings_limit: 3,
       poster_badge_style: 'h',
@@ -73,7 +73,6 @@ describe('selfApi', () => {
       logo_label_style: 't',
       backdrop_label_style: 't',
       poster_badge_direction: 'd',
-      poster_badge_split: false,
       poster_text_size: 150,
       logo_text_size: 95,
       backdrop_text_size: 170,
@@ -90,7 +89,7 @@ describe('selfApi', () => {
       ratings_limit: 3,
       ratings_order: 'mal,imdb,trakt',
       ratings_exclude: 'rt',
-      poster_position: 'bc',
+      poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
       logo_ratings_limit: 3,
       backdrop_ratings_limit: 3,
       poster_badge_style: 'h',
@@ -100,7 +99,6 @@ describe('selfApi', () => {
       logo_label_style: 't',
       backdrop_label_style: 't',
       poster_badge_direction: 'd',
-      poster_badge_split: false,
       poster_text_size: 150,
       logo_text_size: 95,
       backdrop_text_size: 170,
@@ -140,21 +138,21 @@ describe('selfApi', () => {
     expect(options.credentials).toBeUndefined()
   })
 
-  it('previewPoster includes position when provided', async () => {
+  it('previewPoster includes layout when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewPoster(3, 'imdb,rt', 'r')
+    await selfApi.previewPoster(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"bottom":{"per_row":2}}')
 
     const [url] = fetchMock.mock.calls[0]
-    expect(url).toContain('position=r')
+    expect(url).toContain('layout=%7B%22bottom%22%3A%7B%22per_row%22%3A2%7D%7D')
   })
 
   it('previewPoster includes label_style when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewPoster(3, 'imdb,rt', 'bc', 'h', 'i')
+    await selfApi.previewPoster(3, 'imdb,rt', 'h', 'i')
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('label_style=i')
@@ -164,7 +162,7 @@ describe('selfApi', () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewPoster(3, 'imdb,rt', 'bc', 'h', 'i', 'v')
+    await selfApi.previewPoster(3, 'imdb,rt', 'h', 'i', 'v')
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('badge_direction=v')
@@ -202,21 +200,21 @@ describe('selfApi', () => {
     expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
   })
 
-  it('previewEpisode includes position when provided', async () => {
+  it('previewEpisode includes layout when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'tr')
+    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"right":{"per_row":1}}')
 
     const [url] = fetchMock.mock.calls[0]
-    expect(url).toContain('position=tr')
+    expect(url).toContain('layout=%7B%22right%22%3A%7B%22per_row%22%3A1%7D%7D')
   })
 
   it('previewEpisode includes badge_direction when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'tr', 'h')
+    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'h')
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('badge_direction=h')
@@ -226,7 +224,7 @@ describe('selfApi', () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, true)
+    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, true)
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toContain('blur=true')
@@ -236,7 +234,7 @@ describe('selfApi', () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, false)
+    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, false)
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).not.toContain('blur')
@@ -263,7 +261,7 @@ describe('selfApi', () => {
       ratings_limit: 3,
       ratings_order: 'imdb,rt,tmdb',
       ratings_exclude: '',
-      poster_position: 'bc',
+      poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
       logo_ratings_limit: 3,
       backdrop_ratings_limit: 3,
       poster_badge_style: 'h',
@@ -273,7 +271,6 @@ describe('selfApi', () => {
       logo_label_style: 't',
       backdrop_label_style: 't',
       poster_badge_direction: 'd',
-      poster_badge_split: false,
       poster_text_size: 150,
       logo_text_size: 95,
       backdrop_text_size: 170,
@@ -281,7 +278,7 @@ describe('selfApi', () => {
       episode_badge_style: 'v',
       episode_label_style: 'o',
       episode_text_size: 100,
-      episode_position: 'tr',
+      episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
       episode_badge_direction: 'v',
       episode_blur: false,
     })
@@ -292,7 +289,7 @@ describe('selfApi', () => {
     expect(body.episode_badge_style).toBe('v')
     expect(body.episode_label_style).toBe('o')
     expect(body.episode_text_size).toBe(100)
-    expect(body.episode_position).toBe('tr')
+    expect(body.episode_layout).toContain('"right"')
     expect(body.episode_badge_direction).toBe('v')
     expect(body.episode_blur).toBe(false)
   })

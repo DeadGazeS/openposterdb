@@ -19,18 +19,18 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
   return {
     image_source: 't', lang: 'en', textless: false, ratings_limit: 3,
     ratings_order: DEFAULT_RATINGS_ORDER, ratings_exclude: '',
-    poster_position: 'bc', logo_ratings_limit: 5, backdrop_ratings_limit: 5,
+    poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), logo_ratings_limit: 5, backdrop_ratings_limit: 5,
     poster_badge_style: 'v', logo_badge_style: 'v', backdrop_badge_style: 'h',
     poster_label_style: 'o', logo_label_style: 'o', backdrop_label_style: 'o',
-    poster_badge_direction: 'd', poster_badge_split: false,
+    poster_badge_direction: 'd', 
     poster_text_size: 100, logo_text_size: 100, backdrop_text_size: 100,
     poster_badge_size: 100, logo_badge_size: 100, backdrop_badge_size: 100,
     poster_logo_size: 100, logo_logo_size: 100, backdrop_logo_size: 100,
-    backdrop_position: 'tc', backdrop_badge_direction: 'd',
+    backdrop_layout: JSON.stringify({ top: { per_row: 5, rows: 1, start: 'r' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), backdrop_badge_direction: 'd',
     backdrop_edge_inset_x: 0, backdrop_edge_inset_y: 0,
     episode_ratings_limit: 3, episode_badge_style: 'v', episode_label_style: 'o',
     episode_text_size: 100, episode_badge_size: 100, episode_logo_size: 100,
-    episode_position: 'bc', episode_badge_direction: 'd',
+    episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), episode_badge_direction: 'd',
     episode_blur: false, poster_fit: 'native', ...overrides,
   }
 }
@@ -67,33 +67,6 @@ const triggerText = (wrapper: VueWrapper, id: string) => wrapper.find(`#${id}`).
 
 describe('FreeApiKeyCard trigger display across image-type switches', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
-
-  it('clears a chosen position override from the trigger when switching type', async () => {
-    const wrapper = mountReal()
-    await flushPromises()
-    expect(triggerText(wrapper, 'free-image-position')).toBe('Position: default (Bottom Center)')
-
-    await setSelect(wrapper, 'free-image-position', 'tr')
-    expect(triggerText(wrapper, 'free-image-position')).toBe('Top Right')
-
-    // Switching to backdrop must drop the poster override (no longer "Top Right").
-    await setSelect(wrapper, 'free-image-type', 'backdrop')
-    expect(triggerText(wrapper, 'free-image-position')).not.toContain('Top Right')
-  })
-
-  it('updates the resolved default annotation per type (poster<->backdrop, no unmount)', async () => {
-    // backdrop_position=tc, poster_position=bc; the position control stays mounted
-    // across this switch, so this guards the reka-ui stale-text path specifically.
-    const wrapper = mountReal()
-    await flushPromises()
-    expect(triggerText(wrapper, 'free-image-position')).toBe('Position: default (Bottom Center)')
-
-    await setSelect(wrapper, 'free-image-type', 'backdrop')
-    expect(triggerText(wrapper, 'free-image-position')).toBe('Position: default (Top Center)')
-
-    await setSelect(wrapper, 'free-image-type', 'poster')
-    expect(triggerText(wrapper, 'free-image-position')).toBe('Position: default (Bottom Center)')
-  })
 
   it('updates the badge-style default annotation per type', async () => {
     // poster_badge_style=v (Vertical), backdrop_badge_style=h (Horizontal)
