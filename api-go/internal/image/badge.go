@@ -351,7 +351,7 @@ func colorOverride(colors map[string]services.SourceColorSet, badge *services.Ra
 	return nil
 }
 
-func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.Face, maxLabelW, maxValueW int, labelStyle services.LabelStyle, appearance services.BadgeAppearance, dims scaledDims, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
+func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.Face, maxLabelW, maxValueW int, labelStyle services.LabelStyle, appearance services.BadgeAppearance, dims scaledDims, textScale float32, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
 	label := badge.Source.Label
 	value := badge.Value
 	useIcon := labelStyle.UsesIcon()
@@ -380,28 +380,12 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 		pillPadV = dims.pillPaddingV
 	}
 
-	// The badge box auto-sizes to fit its content so text/logos never overflow:
-	// the height grows from its base to accommodate the taller of the value text,
-	// the label text, or the rating logo.
-	iconH := uint32(0)
-	if useIcon {
-		iconH = uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
-	}
-	labelTextH := labelFontFace.Metrics().Height.Ceil()
-	valueTextH := fontFace.Metrics().Height.Ceil()
-
-	contentH := valueTextH
-	if useIcon {
-		if int(iconH) > contentH {
-			contentH = int(iconH)
-		}
-	} else if labelTextH > contentH {
-		contentH = labelTextH
-	}
+	// The badge box is sized purely by badge_size (via dims) and the default
+	// (100%) content layout — it does NOT grow with text_size/logo_size. Text or
+	// logos larger than the box are truncated (clipped) at the badge edges.
+	// `maxLabelW`/`maxValueW` are the base (100%) widths; actual faces/logos are
+	// scaled by textScale/logoScale when drawn.
 	badgeH := int(dims.badgeHeight + pillPadV)
-	if fitH := contentH + 2*int(dims.badgePaddingH) + int(pillPadV); fitH > badgeH {
-		badgeH = fitH
-	}
 
 	labelAreaW := int(pillPad) + int(maxLabelW) + int(labelPad)
 	valueX := labelAreaW + int(labelPad)
@@ -435,6 +419,7 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 
 	if useIcon {
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
 			iconW, iconH2 := badgeIconAndSize(badge, labelStyle, iconH, icon)
 			scaledIcon := scaleIcon(icon, iconW, iconH2)
 			ix := int(pillPad) + int(labelPad) + (maxLabelW-int(iconW))/2
@@ -461,29 +446,42 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	return img
 }
 
-func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims, logoScale float32) int {
-	iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
+// labelWidthForStyle returns the base (100%) label-section width, independent
+// of text_size/logo_size, so the badge box stays fixed. Text widths are scaled
+// back from the (text_size-scaled) face; icon widths use the base logo height.
+func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims, textScale float32, logoScale float32) int {
+	_ = logoScale
 	switch labelStyle {
 	case services.LabelStyleOfficial:
-		return int(iconH)
+		return int(dims.iconHeight)
 	case services.LabelStyleIcon:
 		if icon := IconForSource(badge.Source); icon != nil {
-			return int(iconScaledWidth(icon, iconH))
+			return int(iconScaledWidth(icon, dims.iconHeight))
 		}
-		return textWidth(badge.Source.Label, labelFontFace)
+		return baseTextWidth(badge.Source.Label, labelFontFace, textScale)
 	default:
-		return textWidth(badge.Source.Label, labelFontFace)
+		return baseTextWidth(badge.Source.Label, labelFontFace, textScale)
 	}
 }
 
-func RenderBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
-	dims := newScaledDims(badgeScale)
-	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, logoScale)
-	maxValueW := textWidth(badge.Value, fontFace)
-	return renderBadgeInner(badge, fontFace, labelFontFace, maxLabelW, maxValueW, labelStyle, appearance, dims, logoScale, colors)
+// baseTextWidth measures a string's width at the default (100%) font size by
+// scaling the measured width (taken from a text_size-scaled face) back by the
+// text scale factor. Glyph advances scale linearly with font size.
+func baseTextWidth(text string, face font.Face, textScale float32) int {
+	if textScale <= 0 {
+		textScale = 1
+	}
+	return int(math.Round(float64(textWidth(text, face)) / float64(textScale)))
 }
 
-func RenderBadgesUniform(badges []services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, logoScale float32, colors map[string]services.SourceColorSet) []*image.RGBA {
+func RenderBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, textScale float32, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
+	dims := newScaledDims(badgeScale)
+	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, logoScale)
+	maxValueW := baseTextWidth(badge.Value, fontFace, textScale)
+	return renderBadgeInner(badge, fontFace, labelFontFace, maxLabelW, maxValueW, labelStyle, appearance, dims, textScale, logoScale, colors)
+}
+
+func RenderBadgesUniform(badges []services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, textScale float32, logoScale float32, colors map[string]services.SourceColorSet) []*image.RGBA {
 	if len(badges) == 0 {
 		return nil
 	}
@@ -491,22 +489,22 @@ func RenderBadgesUniform(badges []services.RatingBadge, fontFace, labelFontFace 
 	dims := newScaledDims(badgeScale)
 	var maxLabelW, maxValueW int
 	for _, b := range badges {
-		if w := labelWidthForStyle(&b, labelStyle, labelFontFace, dims, logoScale); w > maxLabelW {
+		if w := labelWidthForStyle(&b, labelStyle, labelFontFace, dims, textScale, logoScale); w > maxLabelW {
 			maxLabelW = w
 		}
-		if w := textWidth(b.Value, fontFace); w > maxValueW {
+		if w := baseTextWidth(b.Value, fontFace, textScale); w > maxValueW {
 			maxValueW = w
 		}
 	}
 
 	result := make([]*image.RGBA, len(badges))
 	for i, b := range badges {
-		result[i] = renderBadgeInner(&b, fontFace, labelFontFace, maxLabelW, maxValueW, labelStyle, appearance, dims, logoScale, colors)
+		result[i] = renderBadgeInner(&b, fontFace, labelFontFace, maxLabelW, maxValueW, labelStyle, appearance, dims, textScale, logoScale, colors)
 	}
 	return result
 }
 
-func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
+func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, textScale float32, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
 	useIcon := labelStyle.UsesIcon()
 	override := colorOverride(colors, badge)
 	textCol := color.RGBA{255, 255, 255, 255}
@@ -528,16 +526,10 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	dims := newScaledDims(badgeScale)
 	vertPadV := uint32(math.Round(float64(baseVertBadgePaddingV)*float64(badgeScale))) + pillPad
 
-	// Auto-size the stacked label/value regions from the actual content so the
-	// badge grows to fit bigger text or logos (no overflow).
+	// The stacked label/value regions are fixed by badge_size (not text/logo
+	// size), so oversized text or logos truncate at the badge edges.
 	labelH := uint32(math.Round(float64(baseVertLabelFontSize) * float64(badgeScale)))
 	valueH := uint32(math.Round(float64(baseVertValueFontSize) * float64(badgeScale)))
-	if th := labelFontFace.Metrics().Height.Ceil(); uint32(th) > labelH {
-		labelH = uint32(th)
-	}
-	if th := fontFace.Metrics().Height.Ceil(); uint32(th) > valueH {
-		valueH = uint32(th)
-	}
 	iconHeight := uint32(math.Round(float64(baseIconHeight) * float64(badgeScale) * float64(logoScale)))
 	labelAreaH := labelH
 	if useIcon {

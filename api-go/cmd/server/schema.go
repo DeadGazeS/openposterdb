@@ -312,6 +312,14 @@ var migrations = []migration{
 		"duplicate column",
 	},
 	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_position TEXT NOT NULL DEFAULT 'bc'",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_split INTEGER NOT NULL DEFAULT 0",
+		"duplicate column",
+	},
+	{
 		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_size",
 		"no such column",
 	},

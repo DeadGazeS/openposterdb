@@ -70,7 +70,7 @@ func TestSampleRenderHasBadges(t *testing.T) {
 	labelFace := GetFontFace()
 	out, err := RenderPosterSync(SamplePosterPNG, badges, valueFace, labelFace, 85,
 		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		580, 1.2, 1.2, 1.0, false, services.PosterFitNative, nil)
+		580, 1.2, 1.2, 1.0, 1.0, false, services.PosterFitNative, nil)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}

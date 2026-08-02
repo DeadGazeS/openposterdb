@@ -80,6 +80,8 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"poster_logo_size":         int32(s.PosterLogoSize),
 			"logo_logo_size":           int32(s.LogoLogoSize),
 			"backdrop_logo_size":       int32(s.BackdropLogoSize),
+			"logo_position":            string(s.LogoPosition),
+			"logo_badge_split":         s.LogoBadgeSplit,
 			"backdrop_position":        string(s.BackdropPosition),
 			"backdrop_badge_direction": string(s.BackdropBadgeDirection),
 			"backdrop_edge_inset_x":    s.BackdropEdgeInsetX,
@@ -135,6 +137,8 @@ type updateSettingsRequest struct {
 	PosterLogoSize         *int32                              `json:"poster_logo_size"`
 	LogoLogoSize           *int32                              `json:"logo_logo_size"`
 	BackdropLogoSize       *int32                              `json:"backdrop_logo_size"`
+	LogoPosition           *string                             `json:"logo_position"`
+	LogoBadgeSplit         *bool                               `json:"logo_badge_split"`
 	BackdropPosition       *string                             `json:"backdrop_position"`
 	BackdropBadgeDirection *string                             `json:"backdrop_badge_direction"`
 	BackdropEdgeInsetX     *int32                              `json:"backdrop_edge_inset_x"`
@@ -259,6 +263,12 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 		if req.BackdropLogoSize != nil {
 			s.BackdropLogoSize = services.ClampScalePercent(*req.BackdropLogoSize)
+		}
+		if req.LogoPosition != nil {
+			s.LogoPosition = services.BadgePosition(*req.LogoPosition)
+		}
+		if req.LogoBadgeSplit != nil {
+			s.LogoBadgeSplit = *req.LogoBadgeSplit
 		}
 		if req.BackdropPosition != nil {
 			s.BackdropPosition = services.BadgePosition(*req.BackdropPosition)
