@@ -149,7 +149,7 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	var badgeStyle services.BadgeStyle
 	var badgeDirection services.BadgeDirection
 	var appearance services.BadgeAppearance
-	var position services.BadgePosition
+	var layout services.ImageLayout
 
 	switch kind {
 	case "poster":
@@ -157,25 +157,25 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		badgeStyle = settings.PosterBadgeStyle
 		badgeDirection = settings.PosterBadgeDirection
 		appearance = settings.PosterAppearance()
-		position = settings.PosterPosition
+		layout = settings.PosterLayout
 	case "logo":
 		labelStyle = settings.LogoLabelStyle
 		badgeStyle = settings.LogoBadgeStyle
 		badgeDirection = services.BadgeDirectionHorizontal
 		appearance = settings.LogoAppearance()
-		position = services.PositionBottomCenter
+		layout = settings.LogoLayout
 	case "backdrop":
 		labelStyle = settings.BackdropLabelStyle
 		badgeStyle = settings.BackdropBadgeStyle
 		badgeDirection = settings.BackdropBadgeDirection
 		appearance = settings.BackdropAppearance()
-		position = settings.BackdropPosition
+		layout = settings.BackdropLayout
 	case "episode":
 		labelStyle = settings.EpisodeLabelStyle
 		badgeStyle = settings.EpisodeBadgeStyle
 		badgeDirection = settings.EpisodeBadgeDirection
 		appearance = settings.EpisodeAppearance()
-		position = settings.EpisodePosition
+		layout = settings.EpisodeLayout
 	}
 
 	valueFace, labelFace := GetFontFacesAt(textSizePct)
@@ -187,24 +187,24 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	switch kind {
 	case "poster":
 		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
-			position, badgeStyle, labelStyle, appearance, badgeDirection,
+			layout, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
-			settings.PosterBadgeSplit, settings.PosterFit, settings.Colors)
+			settings.PosterFit, settings.Colors)
 
 	case "logo":
 		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
 			badgeStyle, labelStyle, appearance, targetW, badgeScale, badgeMultiplier, textScale, logoScale,
-			settings.LogoPosition, settings.LogoBadgeSplit, settings.Colors)
+			layout, settings.Colors)
 
 	case "backdrop":
 		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
-			position, badgeStyle, labelStyle, appearance, badgeDirection,
+			layout, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
 			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY, settings.Colors)
 
 	case "episode":
 		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
-			position, badgeStyle, labelStyle, appearance, badgeDirection,
+			layout, badgeStyle, labelStyle, appearance, badgeDirection,
 			targetW, badgeScale, badgeMultiplier, textScale, logoScale, settings.EpisodeBlur, settings.Colors)
 	}
 
@@ -395,13 +395,13 @@ func ServeImage(
 	// Resolve badge direction/style defaults before cache key construction.
 	switch kind {
 	case "poster":
-		settings.PosterBadgeDirection = settings.PosterBadgeDirection.Resolve(settings.PosterPosition)
+		settings.PosterBadgeDirection = settings.PosterBadgeDirection.ResolveDefault()
 		settings.PosterBadgeStyle = settings.PosterBadgeStyle.Resolve(settings.PosterBadgeDirection)
 	case "backdrop":
-		settings.BackdropBadgeDirection = settings.BackdropBadgeDirection.Resolve(settings.BackdropPosition)
+		settings.BackdropBadgeDirection = settings.BackdropBadgeDirection.ResolveDefault()
 		settings.BackdropBadgeStyle = settings.BackdropBadgeStyle.Resolve(settings.BackdropBadgeDirection)
 	case "episode":
-		settings.EpisodeBadgeDirection = settings.EpisodeBadgeDirection.Resolve(settings.EpisodePosition)
+		settings.EpisodeBadgeDirection = settings.EpisodeBadgeDirection.ResolveDefault()
 		settings.EpisodeBadgeStyle = settings.EpisodeBadgeStyle.Resolve(settings.EpisodeBadgeDirection)
 	}
 
