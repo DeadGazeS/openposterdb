@@ -60,7 +60,7 @@ Cache keys uniquely identify a rendered image. They are used as keys in the in-m
 | Ratings | `@{chars}` | `@mil` | Single-char per source, no commas (`m`=MAL, `i`=IMDb, `l`=Letterboxd, `r`=RT, `a`=RT Audience, `c`=Metacritic, `t`=TMDB, `k`=Trakt, `d`=MDBList score, `e`=Roger Ebert) |
 | Position | `.p{pos}` | `.pbc`, `.pl` | Poster badge position (`bc`, `tc`, `l`, `r`, `tl`, `tr`, `bl`, `br`) |
 | Badge style | `.s{style}` | `.sh`, `.sv` | `h` = horizontal, `v` = vertical |
-| Label style | `.l{style}` | `.lt`, `.li`, `.lo` | `t` = text labels, `i` = icon labels, `o` = official provider logos |
+| Label style | `.l{style}` | `.lt`, `.li`, `.lo`, `.lh` | `t` = text labels, `i` = icon labels, `o` = official provider logos, `h` = high-resolution provider logos (rasterized from `highRes` SVGs) |
 | Badge direction | `.d{dir}` | `.dh`, `.dv` | `h` = horizontal, `v` = vertical (resolved from `d` = default) |
 | Badge size | `.b{size}` | `.bm`, `.bxl` | `xs` = extra-small, `s` = small, `m` = medium (default), `l` = large, `xl` = extra-large |
 | Badge shape | `.sh{shape}` | `.shr`, `.shp` | `r` = rounded (default), `p` = pill (the `sh` prefix distinguishes it from the `.s{style}` token above) |
@@ -116,7 +116,7 @@ Settings are stored as short single-character or two-character codes:
 |---|---|---|
 | `image_source` | `t`, `f` | TMDB, Fanart.tv |
 | `badge_style` | `h`, `v` | Horizontal, Vertical |
-| `label_style` | `t`, `i`, `o` | Text, Icon, Official |
+| `label_style` | `t`, `i`, `o`, `h` | Text, Icon, Official, High Res |
 | `badge_direction` | `d`, `h`, `v` | Default (auto-resolved by position), Horizontal, Vertical |
 | `text_size` | `50`–`200` | Rating text font size as a percentage of the default (100 = default) |
 | `badge_size` | `50`–`200` | Overall badge size as a percentage of the default (100 = default) |
