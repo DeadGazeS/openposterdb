@@ -2,7 +2,7 @@
 import { version } from '../../package.json'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { LayoutDashboard, Image, Stamp, Wallpaper, Clapperboard, KeyRound, Settings, LogOut } from 'lucide-vue-next'
+import { LayoutDashboard, Image, Stamp, Wallpaper, Clapperboard, Settings, LogOut } from 'lucide-vue-next'
 import {
   Sidebar,
   SidebarContent,
@@ -28,7 +28,6 @@ const items = [
   { title: 'Logos', icon: Stamp, to: '/admin/logos' },
   { title: 'Backdrops', icon: Wallpaper, to: '/admin/backdrops' },
   { title: 'Episodes', icon: Clapperboard, to: '/admin/episodes' },
-  { title: 'API Keys', icon: KeyRound, to: '/admin/keys' },
   { title: 'Settings', icon: Settings, to: '/admin/settings' },
 ]
 
