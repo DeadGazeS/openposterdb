@@ -70,7 +70,7 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `?ratings_order={keys}`: comma-separated rating source keys controlling display order. Valid keys: `imdb`, `tmdb`, `rt` (RT Critics), `rta` (RT Audience), `mc` (Metacritic), `trakt`, `lb` (Letterboxd), `mal` (MyAnimeList), `mdblist` (MDBList score), `ebert` (Roger Ebert). Example: `?ratings_order=imdb,tmdb,rt`
 - `?ratings_exclude={keys}`: comma-separated rating source keys to hide entirely (same valid keys as `ratings_order`). Excluded sources are dropped *before* ordering and limiting, so an excluded source frees its badge slot for the next preferred source rather than leaving a gap. Example: `?ratings_exclude=rt` shows your ratings but never RT Critics
 - `?badge_style={h|v|d}`: badge layout — `h` (horizontal), `v` (vertical), `d` (default)
-- `?label_style={t|i|o}`: label rendering — `t` (text), `i` (white icons), `o` (official provider logos)
+- `?label_style={t|i|o|h}`: label rendering — `t` (text), `i` (white icons), `o` (official provider logos), `h` (high-resolution provider logos rasterized from the `highRes` SVGs)
 - `?text_size={50-200}`: rating text font size as a percentage of the default (100 = default)
 - `?badge_size={50-200}`: overall badge size as a percentage of the default (100 = default). Scales the badge frame (padding, spacing, borders); the badge always auto-sizes to fit its content so text/logos never overflow
 - `?logo_size={50-200}`: rating source logo size as a percentage of the default (100 = default)
