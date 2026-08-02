@@ -41,7 +41,7 @@ func previewRenderSettings(
 	textSize services.ScalePercent,
 	badgeSize services.ScalePercent,
 	logoSize services.ScalePercent,
-	position services.BadgePosition,
+	layout services.ImageLayout,
 	badgeDirection services.BadgeDirection,
 	appearance services.BadgeAppearance,
 	ratingsLimit int32,
@@ -60,7 +60,7 @@ func previewRenderSettings(
 		s.PosterTextSize = textSize
 		s.PosterBadgeSize = badgeSize
 		s.PosterLogoSize = logoSize
-		s.PosterPosition = position
+		s.PosterLayout = layout
 		s.PosterBadgeDirection = badgeDirection
 		s.PosterBadgeShape = appearance.Shape
 		s.PosterBadgeAlpha = appearance.Alpha
@@ -80,7 +80,7 @@ func previewRenderSettings(
 		s.BackdropTextSize = textSize
 		s.BackdropBadgeSize = badgeSize
 		s.BackdropLogoSize = logoSize
-		s.BackdropPosition = position
+		s.BackdropLayout = layout
 		s.BackdropBadgeDirection = badgeDirection
 		s.BackdropBadgeShape = appearance.Shape
 		s.BackdropBadgeAlpha = appearance.Alpha
@@ -91,12 +91,22 @@ func previewRenderSettings(
 		s.EpisodeTextSize = textSize
 		s.EpisodeBadgeSize = badgeSize
 		s.EpisodeLogoSize = logoSize
-		s.EpisodePosition = position
+		s.EpisodeLayout = layout
 		s.EpisodeBadgeDirection = badgeDirection
 		s.EpisodeBadgeShape = appearance.Shape
 		s.EpisodeBadgeAlpha = appearance.Alpha
 	}
 	return &s
+}
+
+// previewLayout returns the layout from the query, falling back to the kind
+// default.
+func previewLayout(query *ImageQuery, kind string) services.ImageLayout {
+	def := services.DefaultLayout(kind)
+	if query.Layout != nil && *query.Layout != "" {
+		return services.UnmarshalLayout(*query.Layout, &def)
+	}
+	return def
 }
 
 // previewScales returns the clamped text/badge/logo scale percentages from the
@@ -282,10 +292,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		ratingsExclude = *query.RatingsExclude
 	}
 
-	position := services.PositionBottomCenter
-	if query.Position != nil {
-		position = services.BadgePosition(*query.Position)
-	}
+	layout := previewLayout(query, "poster")
 
 	rawBadgeStyle := services.BadgeStyleDefault
 	if query.BadgeStyle != nil {
@@ -297,9 +304,9 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		labelStyle = services.LabelStyle(*query.LabelStyle)
 	}
 
-	badgeDirection := services.BadgeDirectionDefault.Resolve(position)
+	badgeDirection := services.BadgeDirectionDefault.ResolveDefault()
 	if query.BadgeDirection != nil {
-		badgeDirection = services.BadgeDirection(*query.BadgeDirection).Resolve(position)
+		badgeDirection = services.BadgeDirection(*query.BadgeDirection).ResolveDefault()
 	}
 
 	badgeStyle := rawBadgeStyle.Resolve(badgeDirection)
@@ -314,18 +321,12 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	}
 	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
-	split := false
-	if query.Split != nil {
-		split = *query.Split
-	}
-
 	posterFit := services.PosterFitNative
 	if query.Fit != nil {
 		posterFit = services.PosterFit(*query.Fit)
 	}
 
-	settings := previewRenderSettings("poster", badgeStyle, labelStyle, textSize, badgeSize, logoSize, position, badgeDirection, appearance, ratingsLimit, ratingsOrder, ratingsExclude)
-	settings.PosterBadgeSplit = split
+	settings := previewRenderSettings("poster", badgeStyle, labelStyle, textSize, badgeSize, logoSize, layout, badgeDirection, appearance, ratingsLimit, ratingsOrder, ratingsExclude)
 	settings.PosterFit = posterFit
 
 	badges := p.demoBadges("poster")
@@ -345,8 +346,8 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rendered, err := image.RenderPosterSync(posterBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, split, posterFit, colors)
+		layout, badgeStyle, labelStyle, appearance, badgeDirection,
+		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, posterFit, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -418,14 +419,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	}
 	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
 
-	position := services.PositionBottomCenter
-	if query.Position != nil {
-		position = services.BadgePosition(*query.Position)
-	}
-	split := false
-	if query.Split != nil {
-		split = *query.Split
-	}
+	layout := previewLayout(query, "logo")
 
 	badges := p.demoBadges("logo")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
@@ -445,7 +439,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 
 	rendered, err := image.RenderLogoSync(logoBytes, badges, valueFace, labelFace,
 		badgeStyle, labelStyle, appearance, targetWidth, badgeScale, badgeMultiplier, textScale, logoScale,
-		position, split, colors)
+		layout, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -495,14 +489,11 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 		ratingsExclude = *query.RatingsExclude
 	}
 
-	position := services.PositionTopRight
-	if query.Position != nil {
-		position = services.BadgePosition(*query.Position)
-	}
+	layout := previewLayout(query, "backdrop")
 
-	badgeDirection := services.BadgeDirectionDefault.Resolve(position)
+	badgeDirection := services.BadgeDirectionDefault.ResolveDefault()
 	if query.BadgeDirection != nil {
-		badgeDirection = services.BadgeDirection(*query.BadgeDirection).Resolve(position)
+		badgeDirection = services.BadgeDirection(*query.BadgeDirection).ResolveDefault()
 	}
 
 	rawBadgeStyle := services.BadgeStyleVertical
@@ -535,7 +526,6 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	if query.EdgeInsetY != nil {
 		edgeInsetY = *query.EdgeInsetY
 	}
-
 	badges := p.demoBadges("backdrop")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
@@ -553,7 +543,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rendered, err := image.RenderBackdropSync(backdropBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		position, badgeStyle, labelStyle, appearance, badgeDirection,
+		layout, badgeStyle, labelStyle, appearance, badgeDirection,
 		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, edgeInsetX, edgeInsetY, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -604,14 +594,11 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 		ratingsExclude = *query.RatingsExclude
 	}
 
-	position := services.PositionTopRight
-	if query.Position != nil {
-		position = services.BadgePosition(*query.Position)
-	}
+	layout := previewLayout(query, "episode")
 
-	badgeDirection := services.BadgeDirectionVertical.Resolve(position)
+	badgeDirection := services.BadgeDirectionVertical.ResolveDefault()
 	if query.BadgeDirection != nil {
-		badgeDirection = services.BadgeDirection(*query.BadgeDirection).Resolve(position)
+		badgeDirection = services.BadgeDirection(*query.BadgeDirection).ResolveDefault()
 	}
 
 	rawBadgeStyle := services.BadgeStyleVertical
@@ -640,7 +627,6 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	if query.Blur != nil {
 		blur = *query.Blur
 	}
-
 	badges := p.demoBadges("episode")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
@@ -658,7 +644,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rendered, err := image.RenderEpisodeSync(episodeBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		position, badgeStyle, labelStyle, appearance, badgeDirection,
+		layout, badgeStyle, labelStyle, appearance, badgeDirection,
 		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, blur, colors)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})

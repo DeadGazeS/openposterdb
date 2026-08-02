@@ -14,6 +14,14 @@ import (
 
 const freeAPIKey = "t0-free-rpdb"
 
+func marshalLayoutResponse(l services.ImageLayout) string {
+	s, err := services.MarshalLayout(&l)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
 // ImageServeConfig carries the server-level settings needed by the image
 // generation pipeline. Built from config.Config by the router.
 type ImageServeConfig struct {
@@ -41,11 +49,10 @@ type ImageQuery struct {
 	BadgeDirection *string `json:"badge_direction"`
 	BadgeShape     *string `json:"badge_shape"`
 	BadgeAlpha     *int32  `json:"badge_alpha"`
-	Position       *string `json:"position"`
+	Layout         *string `json:"layout"`
 	ImageSource    *string `json:"image_source"`
 	Textless       *bool   `json:"textless"`
 	Blur           *bool   `json:"blur"`
-	Split          *bool   `json:"split"`
 	Fit            *string `json:"fit"`
 	EdgeInsetX     *int32  `json:"edge_inset_x"`
 	EdgeInsetY     *int32  `json:"edge_inset_y"`
@@ -56,8 +63,8 @@ func (q *ImageQuery) HasOverrides() bool {
 		q.BadgeStyle != nil || q.LabelStyle != nil || q.TextSize != nil ||
 		q.BadgeSize != nil || q.LogoSize != nil ||
 		q.BadgeDirection != nil || q.BadgeShape != nil || q.BadgeAlpha != nil ||
-		q.Position != nil || q.ImageSource != nil || q.Textless != nil ||
-		q.Blur != nil || q.Split != nil || q.Fit != nil ||
+		q.Layout != nil || q.ImageSource != nil || q.Textless != nil ||
+		q.Blur != nil || q.Fit != nil ||
 		q.EdgeInsetX != nil || q.EdgeInsetY != nil
 }
 
@@ -195,15 +202,24 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 	}
 
+	if query.Layout != nil {
+		def := services.DefaultLayout(kind)
+		l := services.UnmarshalLayout(*query.Layout, &def)
+		switch kind {
+		case "poster":
+			s.PosterLayout = l
+		case "logo":
+			s.LogoLayout = l
+		case "backdrop":
+			s.BackdropLayout = l
+		case "episode":
+			s.EpisodeLayout = l
+		}
+	}
+
 	if kind == "poster" {
 		if query.BadgeDirection != nil {
 			s.PosterBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
-		}
-		if query.Position != nil {
-			s.PosterPosition = services.BadgePosition(*query.Position)
-		}
-		if query.Split != nil {
-			s.PosterBadgeSplit = *query.Split
 		}
 		if query.Fit != nil {
 			s.PosterFit = services.PosterFit(*query.Fit)
@@ -217,9 +233,6 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		if query.BadgeDirection != nil {
 			s.BackdropBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
 		}
-		if query.Position != nil {
-			s.BackdropPosition = services.BadgePosition(*query.Position)
-		}
 		if query.EdgeInsetX != nil {
 			s.BackdropEdgeInsetX = services.ClampEdgeInset(*query.EdgeInsetX)
 		}
@@ -229,20 +242,12 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 	}
 
 	if kind == "logo" {
-		if query.Position != nil {
-			s.LogoPosition = services.BadgePosition(*query.Position)
-		}
-		if query.Split != nil {
-			s.LogoBadgeSplit = *query.Split
-		}
+		// no per-kind logo query params beyond the shared layout
 	}
 
 	if kind == "episode" {
 		if query.BadgeDirection != nil {
 			s.EpisodeBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
-		}
-		if query.Position != nil {
-			s.EpisodePosition = services.BadgePosition(*query.Position)
 		}
 		if query.Blur != nil {
 			s.EpisodeBlur = *query.Blur
@@ -297,7 +302,7 @@ type FreeKeySettingsResponse struct {
 	RatingsLimit           int32  `json:"ratings_limit"`
 	RatingsOrder           string `json:"ratings_order"`
 	RatingsExclude         string `json:"ratings_exclude"`
-	PosterPosition         string `json:"poster_position"`
+	PosterLayout           string `json:"poster_layout"`
 	LogoRatingsLimit       int32  `json:"logo_ratings_limit"`
 	BackdropRatingsLimit   int32  `json:"backdrop_ratings_limit"`
 	PosterBadgeStyle       string `json:"poster_badge_style"`
@@ -307,7 +312,6 @@ type FreeKeySettingsResponse struct {
 	LogoLabelStyle         string `json:"logo_label_style"`
 	BackdropLabelStyle     string `json:"backdrop_label_style"`
 	PosterBadgeDirection   string `json:"poster_badge_direction"`
-	PosterBadgeSplit       bool   `json:"poster_badge_split"`
 	PosterFit              string `json:"poster_fit"`
 	PosterTextSize         int32  `json:"poster_text_size"`
 	LogoTextSize           int32  `json:"logo_text_size"`
@@ -318,15 +322,14 @@ type FreeKeySettingsResponse struct {
 	PosterLogoSize         int32  `json:"poster_logo_size"`
 	LogoLogoSize           int32  `json:"logo_logo_size"`
 	BackdropLogoSize       int32  `json:"backdrop_logo_size"`
-	LogoPosition           string `json:"logo_position"`
-	LogoBadgeSplit         bool   `json:"logo_badge_split"`
+	LogoLayout             string `json:"logo_layout"`
 	PosterBadgeShape       string `json:"poster_badge_shape"`
 	LogoBadgeShape         string `json:"logo_badge_shape"`
 	BackdropBadgeShape     string `json:"backdrop_badge_shape"`
 	PosterBadgeAlpha       int32  `json:"poster_badge_alpha"`
 	LogoBadgeAlpha         int32  `json:"logo_badge_alpha"`
 	BackdropBadgeAlpha     int32  `json:"backdrop_badge_alpha"`
-	BackdropPosition       string `json:"backdrop_position"`
+	BackdropLayout         string `json:"backdrop_layout"`
 	BackdropBadgeDirection string `json:"backdrop_badge_direction"`
 	BackdropEdgeInsetX     int32  `json:"backdrop_edge_inset_x"`
 	BackdropEdgeInsetY     int32  `json:"backdrop_edge_inset_y"`
@@ -336,7 +339,7 @@ type FreeKeySettingsResponse struct {
 	EpisodeTextSize        int32  `json:"episode_text_size"`
 	EpisodeBadgeSize       int32  `json:"episode_badge_size"`
 	EpisodeLogoSize        int32  `json:"episode_logo_size"`
-	EpisodePosition        string `json:"episode_position"`
+	EpisodeLayout          string `json:"episode_layout"`
 	EpisodeBadgeDirection  string `json:"episode_badge_direction"`
 	EpisodeBlur            bool   `json:"episode_blur"`
 	EpisodeBadgeShape      string `json:"episode_badge_shape"`
@@ -351,7 +354,7 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		RatingsLimit:           s.RatingsLimit,
 		RatingsOrder:           s.RatingsOrder,
 		RatingsExclude:         s.RatingsExclude,
-		PosterPosition:         string(s.PosterPosition),
+		PosterLayout:           marshalLayoutResponse(s.PosterLayout),
 		LogoRatingsLimit:       s.LogoRatingsLimit,
 		BackdropRatingsLimit:   s.BackdropRatingsLimit,
 		PosterBadgeStyle:       string(s.PosterBadgeStyle),
@@ -361,7 +364,6 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		LogoLabelStyle:         string(s.LogoLabelStyle),
 		BackdropLabelStyle:     string(s.BackdropLabelStyle),
 		PosterBadgeDirection:   string(s.PosterBadgeDirection),
-		PosterBadgeSplit:       s.PosterBadgeSplit,
 		PosterFit:              string(s.PosterFit),
 		PosterTextSize:         int32(s.PosterTextSize),
 		LogoTextSize:           int32(s.LogoTextSize),
@@ -372,15 +374,14 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		PosterLogoSize:         int32(s.PosterLogoSize),
 		LogoLogoSize:           int32(s.LogoLogoSize),
 		BackdropLogoSize:       int32(s.BackdropLogoSize),
-		LogoPosition:           string(s.LogoPosition),
-		LogoBadgeSplit:         s.LogoBadgeSplit,
+		LogoLayout:             marshalLayoutResponse(s.LogoLayout),
 		PosterBadgeShape:       string(s.PosterBadgeShape),
 		LogoBadgeShape:         string(s.LogoBadgeShape),
 		BackdropBadgeShape:     string(s.BackdropBadgeShape),
 		PosterBadgeAlpha:       int32(s.PosterBadgeAlpha),
 		LogoBadgeAlpha:         int32(s.LogoBadgeAlpha),
 		BackdropBadgeAlpha:     int32(s.BackdropBadgeAlpha),
-		BackdropPosition:       string(s.BackdropPosition),
+		BackdropLayout:         marshalLayoutResponse(s.BackdropLayout),
 		BackdropBadgeDirection: string(s.BackdropBadgeDirection),
 		BackdropEdgeInsetX:     s.BackdropEdgeInsetX,
 		BackdropEdgeInsetY:     s.BackdropEdgeInsetY,
@@ -390,7 +391,7 @@ func freeKeySettingsFromRender(s *services.RenderSettings) FreeKeySettingsRespon
 		EpisodeTextSize:        int32(s.EpisodeTextSize),
 		EpisodeBadgeSize:       int32(s.EpisodeBadgeSize),
 		EpisodeLogoSize:        int32(s.EpisodeLogoSize),
-		EpisodePosition:        string(s.EpisodePosition),
+		EpisodeLayout:          marshalLayoutResponse(s.EpisodeLayout),
 		EpisodeBadgeDirection:  string(s.EpisodeBadgeDirection),
 		EpisodeBlur:            s.EpisodeBlur,
 		EpisodeBadgeShape:      string(s.EpisodeBadgeShape),
@@ -634,7 +635,7 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 		}
 	}
 	if v := q.Get("position"); v != "" {
-		query.Position = &v
+		_ = v
 	}
 	if v := q.Get("image_source"); v != "" {
 		query.ImageSource = &v
@@ -654,9 +655,8 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 		b := v == "true"
 		query.Blur = &b
 	}
-	if v := q.Get("split"); v != "" {
-		b := v == "true"
-		query.Split = &b
+	if v := q.Get("layout"); v != "" {
+		query.Layout = &v
 	}
 	if v := q.Get("fit"); v != "" {
 		query.Fit = &v
