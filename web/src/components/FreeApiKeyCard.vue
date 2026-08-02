@@ -14,7 +14,6 @@ import {
   BADGE_SHAPE_LABELS,
   BADGE_BACKGROUND_LABELS,
   IMAGE_SOURCE_LABELS,
-  POSITION_LABELS,
   POSTER_FIT_LABELS,
 } from '@/lib/constants'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
@@ -60,10 +59,8 @@ const badgeShape = ref('default')
 const badgeBackground = ref('default')
 const ratingsLimit = ref('default')
 const badgeDirection = ref('default')
-const imagePosition = ref('default')
 const imageSource = ref('default')
 const textless = ref('default')
-const posterSplit = ref('default')
 const posterFit = ref('default')
 // Backdrop-only edge insets (percent of dimension). Empty = use the server
 // default; any entered value (including 0) is sent as an explicit override.
@@ -142,13 +139,13 @@ const typeDefaults = computed(() => {
   if (!d) return null
   switch (imageType.value) {
     case 'logo':
-      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, position: null as string | null, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_background: d.logo_badge_background }
+      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_background: d.logo_badge_background }
     case 'backdrop':
-      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, position: d.backdrop_position, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_background: d.backdrop_badge_background }
+      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_background: d.backdrop_badge_background }
     case 'episode':
-      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, position: d.episode_position, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_background: d.episode_badge_background }
+      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_background: d.episode_badge_background }
     default: // poster
-      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, position: d.poster_position, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_background: d.poster_badge_background }
+      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_background: d.poster_badge_background }
   }
 })
 
@@ -187,13 +184,9 @@ const badgeShapeIsPill = computed(() =>
 )
 const badgeBackgroundDefaultLabel = computed(() => annotate('Background', typeDefaults.value?.badge_background, BADGE_BACKGROUND_LABELS))
 const imageSourceDefaultLabel = computed(() => annotate('Source', defaults.value?.image_source, IMAGE_SOURCE_LABELS))
-const positionDefaultLabel = computed(() => annotate('Position', typeDefaults.value?.position, POSITION_LABELS))
 const badgeDirectionDefaultLabel = computed(() => annotate('Direction', typeDefaults.value?.badge_direction, BADGE_DIRECTION_LABELS))
 const textlessDefaultLabel = computed(() =>
   defaults.value ? `Textless: default (${defaults.value.textless ? 'Yes' : 'No'})` : 'Textless: default',
-)
-const splitDefaultLabel = computed(() =>
-  defaults.value ? `Split badges: default (${defaults.value.poster_badge_split ? 'Yes' : 'No'})` : 'Split badges: default',
 )
 const fitDefaultLabel = computed(() => annotate('Fit', defaults.value?.poster_fit, POSTER_FIT_LABELS))
 const blurDefaultLabel = computed(() =>
@@ -218,11 +211,9 @@ watch(imageType, (newType) => {
   logoSizePct.value = ''
   ratingsLimit.value = 'default'
   badgeDirection.value = 'default'
-  imagePosition.value = 'default'
   // Controls that only exist for one type; clearing them keeps the query string
   // free of params the new type would ignore.
   textless.value = 'default'
-  posterSplit.value = 'default'
   posterFit.value = 'default'
   edgeInsetX.value = ''
   edgeInsetY.value = ''
@@ -271,26 +262,24 @@ const queryString = computed(() => {
   const textSizeVal = String(textSize.value).trim()
   if (textSizeVal !== '') {
     const n = Math.round(Number(textSizeVal))
-    if (Number.isFinite(n)) params.set('text_size', String(Math.min(200, Math.max(50, n))))
+    if (Number.isFinite(n)) params.set('text_size', String(Math.min(400, Math.max(50, n))))
   }
   const badgeSizeVal = String(badgeSizePct.value).trim()
   if (badgeSizeVal !== '') {
     const n = Math.round(Number(badgeSizeVal))
-    if (Number.isFinite(n)) params.set('badge_size', String(Math.min(200, Math.max(50, n))))
+    if (Number.isFinite(n)) params.set('badge_size', String(Math.min(400, Math.max(50, n))))
   }
   const logoSizeVal = String(logoSizePct.value).trim()
   if (logoSizeVal !== '') {
     const n = Math.round(Number(logoSizeVal))
-    if (Number.isFinite(n)) params.set('logo_size', String(Math.min(200, Math.max(50, n))))
+    if (Number.isFinite(n)) params.set('logo_size', String(Math.min(400, Math.max(50, n))))
   }
   if (badgeShape.value !== 'default') params.set('badge_shape', badgeShape.value)
   if (badgeBackground.value !== 'default') params.set('badge_background', badgeBackground.value)
   if (ratingsLimit.value !== 'default') params.set('ratings_limit', ratingsLimit.value)
   if (imageType.value !== 'logo' && badgeDirection.value !== 'default') params.set('badge_direction', badgeDirection.value)
-  if (imageType.value !== 'logo' && imagePosition.value !== 'default') params.set('position', imagePosition.value)
   if (imageType.value !== 'episode' && imageSource.value !== 'default') params.set('image_source', imageSource.value)
   if (imageType.value === 'poster' && textless.value !== 'default') params.set('textless', textless.value)
-  if (imageType.value === 'poster' && posterSplit.value !== 'default') params.set('split', posterSplit.value)
   if (imageType.value === 'poster' && posterFit.value !== 'default') params.set('fit', posterFit.value)
   if (imageType.value === 'backdrop') {
     const ex = insetParam(edgeInsetX.value)
@@ -430,9 +419,9 @@ async function handleFetch() {
               v-model="textSize"
               type="number"
               min="50"
-              max="200"
+              max="400"
               :placeholder="textSizeDefaultLabel"
-              aria-label="Badge text size (percent, 50-200)"
+              aria-label="Badge text size (percent, 50-400)"
               class="bg-background min-w-0"
             />
           </div>
@@ -443,9 +432,9 @@ async function handleFetch() {
               v-model="badgeSizePct"
               type="number"
               min="50"
-              max="200"
+              max="400"
               :placeholder="badgeSizeDefaultLabel"
-              aria-label="Badge size (percent, 50-200)"
+              aria-label="Badge size (percent, 50-400)"
               class="bg-background min-w-0"
             />
           </div>
@@ -456,9 +445,9 @@ async function handleFetch() {
               v-model="logoSizePct"
               type="number"
               min="50"
-              max="200"
+              max="400"
               :placeholder="logoSizeDefaultLabel"
-              aria-label="Rating logo size (percent, 50-200)"
+              aria-label="Rating logo size (percent, 50-400)"
               class="bg-background min-w-0"
             />
           </div>
@@ -505,16 +494,6 @@ async function handleFetch() {
                 <SelectItem value="false">No</SelectItem>
               </SelectContent>
             </Select>
-            <Select v-model="posterSplit">
-              <SelectTrigger id="free-split" aria-label="Split badges" class="bg-background">
-                <SelectValue placeholder="Split badges: default" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default" :key="splitDefaultLabel">{{ splitDefaultLabel }}</SelectItem>
-                <SelectItem value="true">Yes</SelectItem>
-                <SelectItem value="false">No</SelectItem>
-              </SelectContent>
-            </Select>
             <Select v-model="posterFit">
               <SelectTrigger id="free-fit" aria-label="Aspect ratio fit" class="bg-background">
                 <SelectValue placeholder="Fit: default" />
@@ -529,22 +508,6 @@ async function handleFetch() {
             </Select>
           </template>
           <template v-if="imageType !== 'logo'">
-            <Select v-model="imagePosition">
-              <SelectTrigger id="free-image-position" aria-label="Position" class="bg-background">
-                <SelectValue placeholder="Position: default" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default" :key="positionDefaultLabel">{{ positionDefaultLabel }}</SelectItem>
-                <SelectItem value="bc">Bottom Center</SelectItem>
-                <SelectItem value="tc">Top Center</SelectItem>
-                <SelectItem value="l">Left</SelectItem>
-                <SelectItem value="r">Right</SelectItem>
-                <SelectItem value="tl">Top Left</SelectItem>
-                <SelectItem value="tr">Top Right</SelectItem>
-                <SelectItem value="bl">Bottom Left</SelectItem>
-                <SelectItem value="br">Bottom Right</SelectItem>
-              </SelectContent>
-            </Select>
             <Select v-model="badgeDirection">
               <SelectTrigger id="free-badge-direction" aria-label="Badge direction" class="bg-background">
                 <SelectValue placeholder="Direction: default" />
