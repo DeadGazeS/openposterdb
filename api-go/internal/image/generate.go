@@ -85,7 +85,7 @@ func posterTargetHeight(targetWidth uint32) uint32 {
 	return uint32(math.Round(float64(targetWidth) * 1.5))
 }
 
-func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, posterBadgeSplit bool, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -97,7 +97,7 @@ func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFac
 
 	canvas := fitPoster(base, targetWidth, posterFit)
 
-	if len(badges) > 0 {
+	if len(badges) > 0 && !layout.IsEmpty() {
 		var badgeImages []*image.RGBA
 		if badgeStyle.IsVertical() {
 			for _, b := range badges {
@@ -106,28 +106,7 @@ func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFac
 		} else {
 			badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors)
 		}
-
-		maxPR := maxBadgesPerRow
-		if badgeMultiplier >= 1.45 {
-			if badgeStyle == services.BadgeStyleHorizontal {
-				maxPR = 2
-			} else {
-				maxPR = 4
-			}
-		}
-		if badgeStyle.IsVertical() {
-			maxPR = maxVertBadgesPerRow
-		}
-
-		if posterBadgeSplit && len(badgeImages) >= 2 {
-			splitTopBottom := !badgeDirection.IsVertical()
-			primary, opposite := position.SplitAnchors(splitTopBottom)
-			mid := (len(badgeImages) + 1) / 2
-			overlayPosterGroup(canvas, badgeImages[:mid], primary, badgeDirection, maxPR, badgeScale)
-			overlayPosterGroup(canvas, badgeImages[mid:], opposite, badgeDirection, maxPR, badgeScale)
-		} else {
-			overlayPosterGroup(canvas, badgeImages, position, badgeDirection, maxPR, badgeScale)
-		}
+		overlayLayoutOnCanvas(canvas, badgeImages, &layout, badgeScale, badgeSideMargin, 0, 0)
 	}
 
 	var buf bytes.Buffer
@@ -137,11 +116,23 @@ func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFac
 	return buf.Bytes(), nil
 }
 
-func overlayPosterGroup(canvas *image.RGBA, badgeImages []*image.RGBA, position services.BadgePosition, badgeDirection services.BadgeDirection, maxPerRow int, badgeScale float32) {
-	if badgeDirection.IsVertical() {
-		overlayVerticalStack(canvas, badgeImages, position, badgeScale, badgeSideMargin, 0, 0)
-	} else {
-		overlayHorizontalRows(canvas, badgeImages, position, maxPerRow, badgeScale, badgeSideMargin, 0, 0)
+// overlayLayoutOnCanvas distributes badges across the layout sides and overlays
+// each side's block onto the canvas.
+func overlayLayoutOnCanvas(canvas *image.RGBA, badgeImages []*image.RGBA, layout *services.ImageLayout, badgeScale float32, sideMarginBase uint32, extraX, extraY uint32) {
+	sp := uint32(math.Round(float64(badgeSpacing) * float64(badgeScale)))
+	rs := uint32(math.Round(float64(badgeRowSpacing) * float64(badgeScale)))
+	bySide := distributeLayout(badgeImages, layout)
+	for _, side := range layout.OrderOrDefault() {
+		slot := layout.SideSlot(side)
+		if slot == nil {
+			continue
+		}
+		group := bySide[side]
+		if len(group) == 0 {
+			continue
+		}
+		block := renderSideBlock(group, int(slot.PerRow), int(slot.Rows), sp, rs)
+		overlaySideBlock(canvas, block, side, slot.Start, badgeScale, sideMarginBase, extraX, extraY)
 	}
 }
 
@@ -233,7 +224,7 @@ func resizeExact(img image.Image, targetW, targetH int) *image.RGBA {
 
 // --- Logo rendering ---
 
-func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, position services.BadgePosition, logoBadgeSplit bool, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, layout services.ImageLayout, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -255,7 +246,7 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 		draw.Draw(logoImg, bounds, base, bounds.Min, draw.Src)
 	}
 
-	if len(badges) == 0 {
+	if len(badges) == 0 || layout.IsEmpty() {
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, logoImg); err != nil {
 			return nil, err
@@ -276,38 +267,22 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 	logoBadgeRowSpacing := uint32(math.Round(float64(badgeRowSpacing) * float64(badgeScale)))
 	gap := uint32(math.Round(15.0 * float64(badgeScale)))
 
-	// The badges stay OUTSIDE the logo. Position selects which side the badge
-	// block sits on (default bottom-center = below the logo); Split splits the
-	// badges across two opposite sides of the logo, mirroring the poster.
-	var blockGroups [][]*image.RGBA
-	var anchors []services.BadgePosition
-	if logoBadgeSplit && len(badgeImages) >= 2 {
-		mid := (len(badgeImages) + 1) / 2
-		splitTopBottom := !badgeStyle.IsVertical()
-		primary, opposite := position.SplitAnchors(splitTopBottom)
-		blockGroups = [][]*image.RGBA{badgeImages[:mid], badgeImages[mid:]}
-		anchors = []services.BadgePosition{primary, opposite}
-	} else {
-		blockGroups = [][]*image.RGBA{badgeImages}
-		anchors = []services.BadgePosition{position}
+	bySide := distributeLayout(badgeImages, &layout)
+	blocks := make(map[string]*layoutBlock)
+	for _, side := range layout.OrderOrDefault() {
+		slot := layout.SideSlot(side)
+		if slot == nil {
+			continue
+		}
+		group := bySide[side]
+		if len(group) == 0 {
+			continue
+		}
+		b := renderSideBlock(group, int(slot.PerRow), int(slot.Rows), logoBadgeSpacing, logoBadgeRowSpacing)
+		blocks[side] = &layoutBlock{img: b, w: b.Bounds().Dx(), h: b.Bounds().Dy()}
 	}
 
-	blocks := make([]badgeBlock, len(blockGroups))
-	for i, group := range blockGroups {
-		blocks[i] = buildBadgeBlock(group, badgeStyle.IsVertical(), badgeScale, logoBadgeSpacing, logoBadgeRowSpacing)
-	}
-
-	// Axis: split chooses top/bottom or left/right via the anchors; a single
-	// left/right position lays the block beside the logo, everything else stacks
-	// it above or below.
-	vertical := true
-	if len(blocks) == 2 {
-		vertical = anchors[0].IsTop() || anchors[0].IsBottom()
-	} else if position.IsLeft() || position.IsRight() {
-		vertical = false
-	}
-
-	canvas := composeLogoBadges(logoImg, blocks, anchors, vertical, int(gap))
+	canvas := composeLogoLayout(logoImg, blocks, &layout, int(gap))
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, canvas); err != nil {
@@ -316,174 +291,90 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 	return buf.Bytes(), nil
 }
 
-// badgeBlock is a rendered block of badge rows (centred within its own width).
-type badgeBlock struct {
-	img *image.RGBA
-	w   int
-	h   int
-}
-
-// buildBadgeBlock lays badge images out into centered rows and returns the
-// block image plus its size.
-func buildBadgeBlock(badgeImages []*image.RGBA, verticalStyle bool, badgeScale float32, spacing, rowSpacing uint32) badgeBlock {
-	chunkLen := maxBadgesPerRow
-	if verticalStyle {
-		chunkLen = maxVertBadgesPerRow
-	}
-	var rows [][]*image.RGBA
-	for i := 0; i < len(badgeImages); i += chunkLen {
-		end := i + chunkLen
-		if end > len(badgeImages) {
-			end = len(badgeImages)
-		}
-		rows = append(rows, badgeImages[i:end])
-	}
-
-	var badgeH uint32
-	for _, bi := range badgeImages {
-		if h := uint32(bi.Bounds().Dy()); h > badgeH {
-			badgeH = h
-		}
-	}
-
-	var maxRowW uint32
-	for _, row := range rows {
-		var rw uint32
-		for _, bi := range row {
-			rw += uint32(bi.Bounds().Dx())
-		}
-		rw += spacing * (uint32(len(row)) - 1)
-		if rw > maxRowW {
-			maxRowW = rw
-		}
-	}
-	totalH := badgeH*uint32(len(rows)) + rowSpacing*(uint32(len(rows))-1)
-
-	img := image.NewRGBA(image.Rect(0, 0, int(maxRowW), int(totalH)))
-	y := 0
-	for _, row := range rows {
-		var rw uint32
-		for _, bi := range row {
-			rw += uint32(bi.Bounds().Dx())
-		}
-		rw += spacing * (uint32(len(row)) - 1)
-		x := (int(maxRowW) - int(rw)) / 2
-		for _, bi := range row {
-			bh := uint32(bi.Bounds().Dy())
-			by := y + (int(badgeH)-int(bh))/2
-			overlay(img, bi, x, by)
-			x += bi.Bounds().Dx() + int(spacing)
-		}
-		y += int(badgeH) + int(rowSpacing)
-	}
-	return badgeBlock{img: img, w: int(maxRowW), h: int(totalH)}
-}
-
-// composeLogoBadges places the logo and one or two badge blocks around it,
-// keeping the badges strictly outside the logo. `vertical` stacks blocks above
-// and/or below the logo; otherwise blocks sit to the left and/or right.
-func composeLogoBadges(logoImg *image.RGBA, blocks []badgeBlock, anchors []services.BadgePosition, vertical bool, gap int) *image.RGBA {
+// composeLogoLayout grows the canvas to fit the logo plus badge blocks on any
+// of the four sides. Blocks sit strictly outside the logo, hugging their edge
+// and anchored per the side's start position.
+func composeLogoLayout(logoImg *image.RGBA, blocks map[string]*layoutBlock, layout *services.ImageLayout, gap int) *image.RGBA {
 	lw := logoImg.Bounds().Dx()
 	lh := logoImg.Bounds().Dy()
 
-	if !vertical {
-		var leftW, rightW int
-		for i, b := range blocks {
-			if anchors[i].IsLeft() {
-				leftW += b.w + gap
-			} else {
-				rightW += b.w + gap
-			}
-		}
-		cw := lw + leftW + rightW
-		if leftW > 0 && rightW > 0 {
-			cw -= gap
-		}
-		ch := lh
-		for _, b := range blocks {
-			if b.h > ch {
-				ch = b.h
-			}
-		}
-		canvas := image.NewRGBA(image.Rect(0, 0, cw, ch))
-		x := 0
-		for i, b := range blocks {
-			if anchors[i].IsLeft() {
-				overlayCenteredV(canvas, b.img, x, ch)
-				x += b.w + gap
-			}
-		}
-		logoX := x
-		overlayCenteredV(canvas, logoImg, logoX, ch)
-		x = logoX + lw + gap
-		for i, b := range blocks {
-			if anchors[i].IsRight() {
-				overlayCenteredV(canvas, b.img, x, ch)
-				x += b.w + gap
-			}
-		}
-		return canvas
+	leftW, rightW := 0, 0
+	if b, ok := blocks["left"]; ok {
+		leftW = b.w
+	}
+	if b, ok := blocks["right"]; ok {
+		rightW = b.w
+	}
+	topH, bottomH := 0, 0
+	if b, ok := blocks["top"]; ok {
+		topH = b.h
+	}
+	if b, ok := blocks["bottom"]; ok {
+		bottomH = b.h
 	}
 
-	var topH, bottomH int
-	for i, b := range blocks {
-		if anchors[i].IsTop() {
-			topH += b.h
-		} else {
-			bottomH += b.h
-		}
+	cw := lw + leftW + rightW
+	if leftW > 0 && rightW > 0 {
+		cw += gap
+	} else if leftW > 0 || rightW > 0 {
+		cw += gap
 	}
-	cw := lw
-	for _, b := range blocks {
-		if b.w > cw {
-			cw = b.w
-		}
-	}
-	ch := lh
+	ch := lh + topH + bottomH
 	if topH > 0 {
-		ch += topH + gap
+		ch += gap
 	}
 	if bottomH > 0 {
-		ch += bottomH + gap
+		ch += gap
 	}
+
 	canvas := image.NewRGBA(image.Rect(0, 0, cw, ch))
-	y := 0
-	for i, b := range blocks {
-		if anchors[i].IsTop() {
-			overlayBlockH(canvas, b, anchors[i], cw, y)
-			y += b.h + gap
-		}
+
+	// Top / bottom blocks are placed full-width of the logo zone, anchored
+	// horizontally by their start position.
+	if b, ok := blocks["top"]; ok {
+		slot := layout.Top
+		x := anchorX(slot.Start, cw, b.w, 0)
+		overlay(canvas, b.img, x, 0)
 	}
-	overlay(canvas, logoImg, (cw-lw)/2, y)
-	y += lh + gap
-	for i, b := range blocks {
-		if anchors[i].IsBottom() {
-			overlayBlockH(canvas, b, anchors[i], cw, y)
-			y += b.h + gap
-		}
+	if b, ok := blocks["bottom"]; ok {
+		slot := layout.Bottom
+		x := anchorX(slot.Start, cw, b.w, 0)
+		overlay(canvas, b.img, x, ch-b.h)
 	}
+
+	// Left / right blocks are placed at the sides, anchored vertically.
+	if b, ok := blocks["left"]; ok {
+		slot := layout.Left
+		y := anchorY(slot.Start, ch, b.h, 0)
+		overlay(canvas, b.img, 0, y)
+	}
+
+	// The logo sits in the middle zone (below top block, above bottom block,
+	// between left and right blocks), centred.
+	logoX := leftW
+	if leftW == 0 {
+		logoX = 0
+	} else {
+		logoX = leftW + gap
+	}
+	logoY := topH
+	if topH > 0 {
+		logoY = topH + gap
+	}
+	overlay(canvas, logoImg, logoX, logoY)
+
+	if b, ok := blocks["right"]; ok {
+		slot := layout.Right
+		y := anchorY(slot.Start, ch, b.h, 0)
+		overlay(canvas, b.img, cw-b.w, y)
+	}
+
 	return canvas
-}
-
-func overlayBlockH(canvas *image.RGBA, b badgeBlock, anchor services.BadgePosition, cw, y int) {
-	x := (cw - b.w) / 2
-	if anchor.IsLeft() {
-		x = 0
-	}
-	if anchor.IsRight() {
-		x = cw - b.w
-	}
-	overlay(canvas, b.img, x, y)
-}
-
-func overlayCenteredV(canvas, img *image.RGBA, x, ch int) {
-	y := (ch - img.Bounds().Dy()) / 2
-	overlay(canvas, img, x, y)
 }
 
 // --- Backdrop rendering ---
 
-func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -527,10 +418,8 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 	extraX := uint32(math.Round(float64(canvas.Bounds().Dx()) * float64(ix) / 100.0))
 	extraY := uint32(math.Round(float64(canvas.Bounds().Dy()) * float64(iy) / 100.0))
 
-	if badgeDirection.IsVertical() {
-		overlayVerticalStack(canvas, badgeImages, position, badgeScale, backdropSideMargin, extraX, extraY)
-	} else {
-		overlayHorizontalRows(canvas, badgeImages, position, len(badgeImages), badgeScale, backdropSideMargin, extraX, extraY)
+	if len(badges) > 0 && !layout.IsEmpty() {
+		overlayLayoutOnCanvas(canvas, badgeImages, &layout, badgeScale, backdropSideMargin, extraX, extraY)
 	}
 
 	var buf bytes.Buffer
@@ -542,7 +431,7 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 
 // --- Episode rendering ---
 
-func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, position services.BadgePosition, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
@@ -590,21 +479,8 @@ func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFac
 		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors)
 	}
 
-	if badgeDirection.IsVertical() {
-		overlayVerticalStack(canvas, badgeImages, position, badgeScale, badgeSideMargin, 0, 0)
-	} else {
-		maxPR := maxBadgesPerRow
-		if badgeMultiplier >= 1.45 {
-			if badgeStyle == services.BadgeStyleHorizontal {
-				maxPR = 2
-			} else {
-				maxPR = 4
-			}
-		}
-		if badgeStyle.IsVertical() {
-			maxPR = maxVertBadgesPerRow
-		}
-		overlayHorizontalRows(canvas, badgeImages, position, maxPR, badgeScale, badgeSideMargin, 0, 0)
+	if len(badges) > 0 && !layout.IsEmpty() {
+		overlayLayoutOnCanvas(canvas, badgeImages, &layout, badgeScale, badgeSideMargin, 0, 0)
 	}
 
 	var output bytes.Buffer

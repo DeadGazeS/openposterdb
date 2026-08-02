@@ -62,7 +62,7 @@ func TestSampleRenderHasBadges(t *testing.T) {
 		{Source: services.SourceRt, Value: "100%"},
 	}
 	badges = services.ApplyRatingPreferences(badges, "imdb,tmdb,rt", "", 3)
-	position := services.PositionBottomCenter
+	layout := services.DefaultLayout("poster")
 	badgeDirection := services.BadgeDirectionHorizontal
 	badgeStyle := services.BadgeStyleHorizontal.Resolve(badgeDirection)
 	labelStyle := services.LabelStyleText
@@ -70,8 +70,8 @@ func TestSampleRenderHasBadges(t *testing.T) {
 	valueFace := GetValueFontFace()
 	labelFace := GetFontFace()
 	out, err := RenderPosterSync(SamplePosterPNG, badges, valueFace, labelFace, 85,
-		position, badgeStyle, labelStyle, appearance, badgeDirection,
-		580, 1.2, 1.2, 1.0, 1.0, false, services.PosterFitNative, nil)
+		layout, badgeStyle, labelStyle, appearance, badgeDirection,
+		580, 1.2, 1.2, 1.0, 1.0, services.PosterFitNative, nil)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}

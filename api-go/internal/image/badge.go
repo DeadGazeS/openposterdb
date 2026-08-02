@@ -99,8 +99,6 @@ const (
 	badgeRowSpacing     = 7
 	badgeVertSpacing    = 7
 	backdropSideMargin  = 20
-	maxBadgesPerRow     = 3
-	maxVertBadgesPerRow = 5
 )
 
 type scaledDims struct {
@@ -386,8 +384,8 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	// The badge box is sized purely by badge_size (via dims) and the default
 	// (100%) content layout — it does NOT grow with text_size/logo_size. Text or
 	// logos larger than the box are truncated (clipped) at the badge edges.
-	// `maxLabelW`/`maxValueW` are the base (100%) widths; actual faces/logos are
-	// scaled by textScale/logoScale when drawn.
+	// The badge is split at valueX into a left (logo/label) section and a right
+	// (value) section; each piece is centred within its own section.
 	badgeH := int(dims.badgeHeight + pillPadV)
 
 	labelAreaW := int(pillPad) + int(maxLabelW) + int(labelPad)
@@ -419,30 +417,30 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 
 	ascentVal := fontFace.Metrics().Ascent.Ceil()
 	labelAscent := labelFontFace.Metrics().Ascent.Ceil()
+	iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
 
 	if useIcon {
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
-			iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
 			iconW, iconH2 := badgeIconAndSize(badge, labelStyle, iconH, icon)
 			scaledIcon := scaleIcon(icon, iconW, iconH2)
-			ix := int(pillPad) + int(labelPad) + (maxLabelW-int(iconW))/2
+			ix := int(pillPad) + (valueX - int(pillPad) - int(iconW)) / 2
 			iy := (badgeH - int(iconH2)) / 2
 			overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
 		} else {
 			actualLabelW := textWidth(label, labelFontFace)
-			labelX := int(pillPad) + int(labelPad) + (maxLabelW-actualLabelW)/2 + 2
+			labelX := int(pillPad) + (valueX-int(pillPad)-actualLabelW)/2
 			labelY := badgeH/2 + labelAscent/2 - 2
 			drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
 		}
 	} else {
 		actualLabelW := textWidth(label, labelFontFace)
-		labelX := int(pillPad) + int(labelPad) + (maxLabelW-actualLabelW)/2 + 2
+		labelX := int(pillPad) + (valueX-int(pillPad)-actualLabelW)/2
 		labelY := badgeH/2 + labelAscent/2 - 2
 		drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
 	}
 
 	actualValueW := textWidth(value, fontFace)
-	valueTextX := valueX + int(dims.badgeValuePad) + (maxValueW-actualValueW)/2
+	valueTextX := valueX + (totalW - int(pillPad) - valueX - actualValueW) / 2
 	valueY := badgeH/2 + ascentVal/2 - 2
 	drawTextShadowed(img, textCol, valueTextX, valueY, fontFace, value, shadowPx)
 
@@ -450,8 +448,8 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 }
 
 // labelWidthForStyle returns the base (100%) label-section width, independent
-// of text_size/logo_size, so the badge box stays fixed. Text widths are scaled
-// back from the (text_size-scaled) face; icon widths use the base logo height.
+// of text_size/logo_size, so the badge box stays fixed. Oversized content is
+// clipped at the badge edges.
 func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims, textScale float32, logoScale float32) int {
 	_ = logoScale
 	switch labelStyle {
@@ -596,132 +594,4 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	drawTextShadowed(img, textCol, valueX, valueTextY, fontFace, value, shadowPx)
 
 	return img
-}
-
-func overlayVerticalStack(canvas *image.RGBA, badgeImages []*image.RGBA, position services.BadgePosition, badgeScale float32, sideMarginBase uint32, extraX, extraY uint32) {
-	vs := uint32(math.Round(float64(badgeVertSpacing) * float64(badgeScale)))
-	tm := uint32(math.Round(float64(badgeTopMargin) * float64(badgeScale)))
-	bm := uint32(math.Round(float64(badgeBottomMargin) * float64(badgeScale)))
-	sm := uint32(math.Round(float64(sideMarginBase) * float64(badgeScale)))
-
-	var totalH uint32
-	for _, bi := range badgeImages {
-		totalH += uint32(bi.Bounds().Dy())
-	}
-	totalH += vs * (uint32(len(badgeImages)) - 1)
-
-	var maxW uint32
-	for _, bi := range badgeImages {
-		if w := uint32(bi.Bounds().Dx()); w > maxW {
-			maxW = w
-		}
-	}
-
-	cw, ch := int(canvas.Bounds().Dx()), int(canvas.Bounds().Dy())
-	ciw := int(cw)
-
-	var startY int
-	if position.IsTop() {
-		startY = int(tm + extraY)
-	} else if position.IsBottom() {
-		startY = ch - int(totalH) - int(bm) - int(extraY)
-	} else {
-		startY = (ch - int(totalH)) / 2
-	}
-	if startY < 0 {
-		startY = 0
-	}
-
-	var baseX int
-	if position.IsLeft() {
-		baseX = int(sm + extraX)
-	} else if position.IsRight() {
-		baseX = ciw - int(maxW) - int(sm) - int(extraX)
-	} else {
-		baseX = (ciw - int(maxW)) / 2
-	}
-	if baseX < 0 {
-		baseX = 0
-	}
-
-	y := startY
-	for _, bi := range badgeImages {
-		bw, bh := bi.Bounds().Dx(), bi.Bounds().Dy()
-		var bx int
-		if position.IsLeft() {
-			bx = baseX
-		} else if position.IsRight() {
-			bx = baseX + int(maxW) - bw
-		} else {
-			bx = baseX + (int(maxW)-bw)/2
-		}
-		overlay(canvas, bi, bx, y)
-		y += bh + int(vs)
-	}
-}
-
-func overlayHorizontalRows(canvas *image.RGBA, badgeImages []*image.RGBA, position services.BadgePosition, maxPerRow int, badgeScale float32, sideMarginBase uint32, extraX, extraY uint32) {
-	sp := uint32(math.Round(float64(badgeSpacing) * float64(badgeScale)))
-	rs := uint32(math.Round(float64(badgeRowSpacing) * float64(badgeScale)))
-	tm := uint32(math.Round(float64(badgeTopMargin) * float64(badgeScale)))
-	bm := uint32(math.Round(float64(badgeBottomMargin) * float64(badgeScale)))
-	sm := uint32(math.Round(float64(sideMarginBase) * float64(badgeScale)))
-
-	cw, ch := int(canvas.Bounds().Dx()), int(canvas.Bounds().Dy())
-	var rows [][]*image.RGBA
-	for i := 0; i < len(badgeImages); i += maxPerRow {
-		end := i + maxPerRow
-		if end > len(badgeImages) {
-			end = len(badgeImages)
-		}
-		rows = append(rows, badgeImages[i:end])
-	}
-
-	var badgeH int
-	for _, bi := range badgeImages {
-		if h := bi.Bounds().Dy(); h > badgeH {
-			badgeH = h
-		}
-	}
-	totalH := badgeH*len(rows) + int(rs)*(len(rows)-1)
-
-	var baseY int
-	if position.IsTop() {
-		baseY = int(tm) + int(extraY)
-	} else if position.IsBottom() {
-		baseY = ch - totalH - int(bm) - int(extraY)
-	} else {
-		baseY = (ch - totalH) / 2
-	}
-	if baseY < 0 {
-		baseY = 0
-	}
-
-	for rowIdx, row := range rows {
-		rowW := 0
-		for _, bi := range row {
-			rowW += bi.Bounds().Dx()
-		}
-		rowW += int(sp) * (len(row) - 1)
-		y := baseY + rowIdx*(badgeH+int(rs))
-
-		var startX int
-		if position.IsLeft() {
-			startX = int(sm) + int(extraX)
-		} else if position.IsRight() {
-			startX = cw - rowW - int(sm) - int(extraX)
-		} else {
-			startX = (cw - rowW) / 2
-		}
-		if startX < 0 {
-			startX = 0
-		}
-
-		x := startX
-		for _, bi := range row {
-			bh := bi.Bounds().Dy()
-			overlay(canvas, bi, x, y+(badgeH-bh)/2)
-			x += bi.Bounds().Dx() + int(sp)
-		}
-	}
 }
