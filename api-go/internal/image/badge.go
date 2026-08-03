@@ -358,6 +358,10 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	useIcon := labelStyle.UsesIcon()
 	override := colorOverride(colors, badge)
 
+	// The badge style controls the orientation: mirrored styles (rl/bt) put the
+	// value on the left / top and the logo on the right / bottom.
+	mirrored := appearance.Style.IsMirrored()
+
 	textCol := color.RGBA{255, 255, 255, 255}
 	var borderCol *color.RGBA
 	if override != nil {
@@ -385,12 +389,41 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	// (100%) content layout — it does NOT grow with text_size/logo_size. Text or
 	// logos larger than the box are truncated (clipped) at the badge edges.
 	// The badge is split at valueX into a left (logo/label) section and a right
-	// (value) section; each piece is centred within its own section.
+	// (value) section. The icon sits inset by an equal padding on the left, top
+	// and bottom; the value text is centred in the right section.
 	badgeH := int(dims.badgeHeight + pillPadV)
 
-	labelAreaW := int(pillPad) + int(maxLabelW) + int(labelPad)
-	valueX := labelAreaW + int(labelPad)
-	totalW := valueX + int(maxValueW) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2 + int(pillPad)
+	iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
+	var iconW, iconH2 uint32
+	var scaledIcon *image.RGBA
+	if useIcon {
+		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			iconW, iconH2 = badgeIconAndSize(badge, labelStyle, iconH, icon)
+			scaledIcon = scaleIcon(icon, iconW, iconH2)
+		}
+	}
+
+	// Equal inset around the icon on the left, top and bottom. The icon's x and
+	// y both use the same vertical centring inset so the logo has identical
+	// outer padding on three sides.
+	iconPad := (badgeH - int(iconH2)) / 2
+	if iconPad < 0 {
+		iconPad = 0
+	}
+
+	labelSectionW := int(pillPad) + int(maxLabelW) + 2*int(labelPad)
+	valueSectionW := int(maxValueW) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
+	totalW := labelSectionW + valueSectionW + int(pillPad)
+
+	// Sections split the badge: label/logo occupies labelSectionW, value text
+	// occupies valueSectionW. For mirrored styles the value section is on the
+	// left and the logo/label on the right.
+	valueSectionX := labelSectionW
+	labelSectionX := 0
+	if mirrored {
+		labelSectionX = valueSectionW
+		valueSectionX = 0
+	}
 
 	img := image.NewRGBA(image.Rect(0, 0, totalW, badgeH))
 
@@ -399,9 +432,18 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 		radius := float32(cornerRadius(appearance.Shape, uint32(badgeH), dims.badgeRadius))
 		// Draw the two sections as non-overlapping tiles so neither gets
 		// composited twice (that made the value section look more opaque than
-		// the label section). The border ring is then stroked on top.
-		fillRoundedRect(img, 0, 0, valueX, badgeH, radius, cornerTL|cornerBL, labelBG)
-		fillRoundedRect(img, valueX, 0, totalW, badgeH, radius, cornerTR|cornerBR, valueBG)
+		// the label section). The border ring is then stroked on top. In
+		// mirrored styles (rl) the value section sits on the LEFT and the
+		// label/logo on the RIGHT, so the outer left corners belong to the
+		// value section and the outer right corners to the label section.
+		labelCorners := cornerTL | cornerBL
+		valueCorners := cornerTR | cornerBR
+		if mirrored {
+			labelCorners = cornerTR | cornerBR
+			valueCorners = cornerTL | cornerBL
+		}
+		fillRoundedRect(img, labelSectionX, 0, labelSectionX+labelSectionW, badgeH, radius, labelCorners, labelBG)
+		fillRoundedRect(img, valueSectionX, 0, valueSectionX+valueSectionW, badgeH, radius, valueCorners, valueBG)
 		if dims.badgeBorder > 0 && borderCol != nil {
 			inset := int(dims.badgeBorder)
 			innerR := radius - float32(inset)
@@ -417,30 +459,22 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 
 	ascentVal := fontFace.Metrics().Ascent.Ceil()
 	labelAscent := labelFontFace.Metrics().Ascent.Ceil()
-	iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
 
-	if useIcon {
-		if icon := iconForBadge(badge, labelStyle); icon != nil {
-			iconW, iconH2 := badgeIconAndSize(badge, labelStyle, iconH, icon)
-			scaledIcon := scaleIcon(icon, iconW, iconH2)
-			ix := int(pillPad) + (valueX - int(pillPad) - int(iconW)) / 2
-			iy := (badgeH - int(iconH2)) / 2
-			overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
-		} else {
-			actualLabelW := textWidth(label, labelFontFace)
-			labelX := int(pillPad) + (valueX-int(pillPad)-actualLabelW)/2
-			labelY := badgeH/2 + labelAscent/2 - 2
-			drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
-		}
+	// Logo / label, centred in its section (inset equally on left/top/bottom).
+	if useIcon && scaledIcon != nil {
+		ix := labelSectionX + (labelSectionW-int(iconW))/2
+		iy := iconPad
+		overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
 	} else {
 		actualLabelW := textWidth(label, labelFontFace)
-		labelX := int(pillPad) + (valueX-int(pillPad)-actualLabelW)/2
+		labelX := labelSectionX + (labelSectionW-actualLabelW)/2
 		labelY := badgeH/2 + labelAscent/2 - 2
 		drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
 	}
 
+	// Value text, centred in its section.
 	actualValueW := textWidth(value, fontFace)
-	valueTextX := valueX + (totalW - int(pillPad) - valueX - actualValueW) / 2
+	valueTextX := valueSectionX + (valueSectionW-actualValueW)/2
 	valueY := badgeH/2 + ascentVal/2 - 2
 	drawTextShadowed(img, textCol, valueTextX, valueY, fontFace, value, shadowPx)
 
@@ -540,16 +574,38 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	totalH := int(vertPadV + labelAreaH + gap + valueH + vertPadV)
 
 	img := image.NewRGBA(image.Rect(0, 0, vertBadgeW, totalH))
+	// For the mirrored vertical style (bt) the value sits on top and the
+	// logo/label on the bottom.
+	labelTop := !appearance.Style.IsMirrored()
+	labelAreaY := 0
 	valueAreaY := int(vertPadV + labelAreaH + gap/2)
+	if !labelTop {
+		labelAreaY = int(vertPadV + valueH + gap/2)
+		valueAreaY = int(vertPadV)
+	}
 
 	labelBG, valueBG, hasBG := sectionColors(appearance.Alpha, badge.Source, override)
 	if hasBG {
 		radius := float32(cornerRadius(appearance.Shape, uint32(vertBadgeW), uint32(math.Round(float64(baseBadgeRadius)*float64(badgeScale)))))
-		// Draw the two sections as non-overlapping tiles so neither gets
+		// Fill the full badge height contiguously so the padding and gap
+		// regions above/between/below the sections are not left transparent
+		// (that let the artwork show through the middle and bottom of the
+		// badge). The top tile covers [0, bottomSectionY] and owns the rounded
+		// top corners; the bottom tile covers [bottomSectionY, totalH] and owns
+		// the rounded bottom corners; the seam at bottomSectionY is a straight
+		// line inside the badge. The tiles never overlap, so neither section is
 		// composited twice (that made the value section look more opaque than
 		// the label section). The border ring is then stroked on top.
-		fillRoundedRect(img, 0, 0, vertBadgeW, valueAreaY, radius, cornerTL|cornerTR, labelBG)
-		fillRoundedRect(img, 0, valueAreaY, vertBadgeW, totalH, radius, cornerBL|cornerBR, valueBG)
+		topBG := labelBG
+		bottomBG := valueBG
+		bottomSectionY := valueAreaY // tb: label on top, value below
+		if !labelTop {
+			topBG = valueBG
+			bottomBG = labelBG
+			bottomSectionY = labelAreaY // bt: value on top, label below
+		}
+		fillRoundedRect(img, 0, 0, vertBadgeW, bottomSectionY, radius, cornerTL|cornerTR, topBG)
+		fillRoundedRect(img, 0, bottomSectionY, vertBadgeW, totalH, radius, cornerBL|cornerBR, bottomBG)
 		if dims.badgeBorder > 0 && borderCol != nil {
 			inset := int(dims.badgeBorder)
 			innerR := radius - float32(inset)
@@ -573,18 +629,18 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 			iconW, iconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
 			scaledIcon := scaleIcon(icon, iconW, iconH)
 			ix := (vertBadgeW - int(iconW)) / 2
-			iy := (valueAreaY - int(iconH)) / 2
+			iy := labelAreaY + (int(labelAreaH)-int(iconH))/2
 			overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
 		} else {
 			labelW := textWidth(label, labelFontFace)
 			labelX := (vertBadgeW - labelW) / 2
-			labelY := int(vertPadV) + int(labelH)/2 + labelAscent/2
+			labelY := labelAreaY + int(labelH)/2 + labelAscent/2
 			drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
 		}
 	} else {
 		labelW := textWidth(label, labelFontFace)
 		labelX := (vertBadgeW - labelW) / 2
-		labelY := int(vertPadV) + int(labelH)/2 + labelAscent/2
+		labelY := labelAreaY + int(labelH)/2 + labelAscent/2
 		drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
 	}
 

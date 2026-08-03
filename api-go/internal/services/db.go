@@ -55,17 +55,28 @@ func (s ImageSource) IsFanart() bool {
 type BadgeStyle string
 
 const (
-	BadgeStyleHorizontal BadgeStyle = "h"
-	BadgeStyleVertical   BadgeStyle = "v"
-	BadgeStyleDefault    BadgeStyle = "d"
+	// BadgeStyleLogoLeftValueRight: logo on the left, value on the right.
+	BadgeStyleLogoLeftValueRight BadgeStyle = "lr"
+	// BadgeStyleValueLeftLogoRight: value on the left, logo on the right.
+	BadgeStyleValueLeftLogoRight BadgeStyle = "rl"
+	// BadgeStyleLogoTB: logo on top, value on the bottom.
+	BadgeStyleLogoTB BadgeStyle = "tb"
+	// BadgeStyleValueTB: value on the top, logo on the bottom.
+	BadgeStyleValueTB BadgeStyle = "bt"
+	// BadgeStyleDefault resolves to the historical default (logo left, value right).
+	BadgeStyleDefault BadgeStyle = "d"
 )
 
 func ParseBadgeStyle(s string) BadgeStyle {
 	switch s {
-	case "h":
-		return BadgeStyleHorizontal
-	case "v":
-		return BadgeStyleVertical
+	case "lr", "h":
+		return BadgeStyleLogoLeftValueRight
+	case "rl":
+		return BadgeStyleValueLeftLogoRight
+	case "tb", "v":
+		return BadgeStyleLogoTB
+	case "bt":
+		return BadgeStyleValueTB
 	case "d":
 		return BadgeStyleDefault
 	default:
@@ -73,23 +84,39 @@ func ParseBadgeStyle(s string) BadgeStyle {
 	}
 }
 
+// IsVertical reports whether the badge stacks logo and value vertically.
 func (s BadgeStyle) IsVertical() bool {
-	return s == BadgeStyleVertical
+	return s == BadgeStyleLogoTB || s == BadgeStyleValueTB
 }
 
+// IsMirrored reports whether the value sits on the "secondary" side (right for
+// vertical pairs, left for horizontal pairs).
+func (s BadgeStyle) IsMirrored() bool {
+	return s == BadgeStyleValueLeftLogoRight || s == BadgeStyleValueTB
+}
+
+// Resolve resolves a default badge style via the badge direction: "d" becomes
+// the horizontal logo-left/value-right style for horizontal directions and the
+// logo-top/value-bottom style for vertical directions. Explicit styles are
+// returned as-is; legacy "h"/"v" values are normalised to lr/tb.
 func (s BadgeStyle) Resolve(direction BadgeDirection) BadgeStyle {
-	if s != BadgeStyleDefault {
-		return s
+	if s == BadgeStyleDefault {
+		if direction.IsVertical() {
+			return BadgeStyleLogoTB
+		}
+		return BadgeStyleLogoLeftValueRight
 	}
-	if direction.IsVertical() {
-		return BadgeStyleVertical
-	}
-	return BadgeStyleHorizontal
+	return ParseBadgeStyle(string(s))
+}
+
+// ResolveDefault resolves a default badge style (logo left, value right).
+func (s BadgeStyle) ResolveDefault() BadgeStyle {
+	return s.Resolve(BadgeDirectionDefault)
 }
 
 func (s BadgeStyle) ForShape(shape BadgeShape) BadgeStyle {
 	if shape == BadgeShapePill {
-		return BadgeStyleHorizontal
+		return BadgeStyleLogoLeftValueRight
 	}
 	return s
 }
@@ -201,10 +228,11 @@ func ClampBadgeAlpha(v int32) BadgeAlpha {
 type BadgeAppearance struct {
 	Shape BadgeShape
 	Alpha BadgeAlpha
+	Style BadgeStyle
 }
 
 func DefaultBadgeAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: BadgeShapeRounded, Alpha: DefaultBadgeAlpha()}
+	return BadgeAppearance{Shape: BadgeShapeRounded, Alpha: DefaultBadgeAlpha(), Style: BadgeStyleLogoLeftValueRight}
 }
 
 // --- BadgePosition ---
@@ -505,15 +533,15 @@ func DefaultRatingsOrder() string                   { return "mal,imdb,lb,rt,mc,
 func DefaultRatingsExclude() string                 { return "" }
 func DefaultPosterPosition() BadgePosition          { return PositionBottomCenter }
 func DefaultPosterBadgeStyle() BadgeStyle           { return BadgeStyleDefault }
-func DefaultLogoBadgeStyle() BadgeStyle             { return BadgeStyleVertical }
-func DefaultBackdropBadgeStyle() BadgeStyle         { return BadgeStyleVertical }
+func DefaultLogoBadgeStyle() BadgeStyle             { return BadgeStyleLogoTB }
+func DefaultBackdropBadgeStyle() BadgeStyle         { return BadgeStyleLogoTB }
+func DefaultPosterBadgeDirection() BadgeDirection   { return BadgeDirectionDefault }
 func DefaultLabelStyle() LabelStyle                 { return LabelStyleOfficial }
 func DefaultBadgeShape() BadgeShape                 { return BadgeShapeRounded }
-func DefaultPosterBadgeDirection() BadgeDirection   { return BadgeDirectionDefault }
 func DefaultBackdropPosition() BadgePosition        { return PositionTopRight }
 func DefaultBackdropBadgeDirection() BadgeDirection { return BadgeDirectionDefault }
 func DefaultEpisodePosition() BadgePosition         { return PositionTopRight }
-func DefaultEpisodeBadgeStyle() BadgeStyle          { return BadgeStyleVertical }
+func DefaultEpisodeBadgeStyle() BadgeStyle          { return BadgeStyleLogoTB }
 func DefaultEpisodeBadgeDirection() BadgeDirection  { return BadgeDirectionVertical }
 func DefaultPosterFit() PosterFit                   { return PosterFitNative }
 func DefaultBackdropEdgeInset() int32               { return 0 }
@@ -660,8 +688,8 @@ func DefaultRenderSettings() RenderSettings {
 		LogoRatingsLimit:       5,
 		BackdropRatingsLimit:   5,
 		PosterBadgeStyle:       BadgeStyleDefault,
-		LogoBadgeStyle:         BadgeStyleVertical,
-		BackdropBadgeStyle:     BadgeStyleVertical,
+		LogoBadgeStyle:         BadgeStyleLogoTB,
+		BackdropBadgeStyle:     BadgeStyleLogoTB,
 		PosterLabelStyle:       LabelStyleOfficial,
 		LogoLabelStyle:         LabelStyleOfficial,
 		BackdropLabelStyle:     LabelStyleOfficial,
@@ -682,7 +710,7 @@ func DefaultRenderSettings() RenderSettings {
 		BackdropEdgeInsetX:     0,
 		BackdropEdgeInsetY:     0,
 		EpisodeRatingsLimit:    1,
-		EpisodeBadgeStyle:      BadgeStyleVertical,
+		EpisodeBadgeStyle:      BadgeStyleLogoTB,
 		EpisodeLabelStyle:      LabelStyleOfficial,
 		EpisodeTextSize:        DefaultScalePercent(),
 		EpisodeBadgeSize:       DefaultScalePercent(),
@@ -734,9 +762,9 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		PosterLayout:           UnmarshalLayout(stringOr(globals, "poster_layout", ""), &defaults.PosterLayout),
 		LogoRatingsLimit:       int32Or(globals, "logo_ratings_limit", defaults.LogoRatingsLimit),
 		BackdropRatingsLimit:   int32Or(globals, "backdrop_ratings_limit", defaults.BackdropRatingsLimit),
-		PosterBadgeStyle:       BadgeStyle(stringOr(globals, "poster_badge_style", string(defaults.PosterBadgeStyle))),
-		LogoBadgeStyle:         BadgeStyle(stringOr(globals, "logo_badge_style", string(defaults.LogoBadgeStyle))),
-		BackdropBadgeStyle:     BadgeStyle(stringOr(globals, "backdrop_badge_style", string(defaults.BackdropBadgeStyle))),
+		PosterBadgeStyle:       ParseBadgeStyle(stringOr(globals, "poster_badge_style", string(defaults.PosterBadgeStyle))),
+		LogoBadgeStyle:         ParseBadgeStyle(stringOr(globals, "logo_badge_style", string(defaults.LogoBadgeStyle))),
+		BackdropBadgeStyle:     ParseBadgeStyle(stringOr(globals, "backdrop_badge_style", string(defaults.BackdropBadgeStyle))),
 		PosterLabelStyle:       LabelStyle(stringOr(globals, "poster_label_style", string(defaults.PosterLabelStyle))),
 		LogoLabelStyle:         LabelStyle(stringOr(globals, "logo_label_style", string(defaults.LogoLabelStyle))),
 		BackdropLabelStyle:     LabelStyle(stringOr(globals, "backdrop_label_style", string(defaults.BackdropLabelStyle))),
@@ -757,7 +785,7 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		BackdropEdgeInsetX:     int32ClampOr(int32Or(globals, "backdrop_edge_inset_x", defaults.BackdropEdgeInsetX)),
 		BackdropEdgeInsetY:     int32ClampOr(int32Or(globals, "backdrop_edge_inset_y", defaults.BackdropEdgeInsetY)),
 		EpisodeRatingsLimit:    int32Or(globals, "episode_ratings_limit", defaults.EpisodeRatingsLimit),
-		EpisodeBadgeStyle:      BadgeStyle(stringOr(globals, "episode_badge_style", string(defaults.EpisodeBadgeStyle))),
+		EpisodeBadgeStyle:      ParseBadgeStyle(stringOr(globals, "episode_badge_style", string(defaults.EpisodeBadgeStyle))),
 		EpisodeLabelStyle:      LabelStyle(stringOr(globals, "episode_label_style", string(defaults.EpisodeLabelStyle))),
 		EpisodeTextSize:        ClampScalePercent(int32Or(globals, "episode_text_size", int32(defaults.EpisodeTextSize))),
 		EpisodeBadgeSize:       ClampScalePercent(int32Or(globals, "episode_badge_size", int32(defaults.EpisodeBadgeSize))),
@@ -1395,6 +1423,74 @@ type APIKeySettings struct {
 	BackdropEdgeInsetY     int32  `json:"backdrop_edge_inset_y"`
 }
 
+// apiKeySettingsAlias strips the custom UnmarshalJSON from APIKeySettings so
+// the plain string layout fields can be decoded without recursion.
+type apiKeySettingsAlias APIKeySettings
+
+// layoutJSONField normalises one layout JSON field (poster_layout etc.) from
+// either form the client may send: a legacy JSON string holding the layout's
+// JSON text, or the layout itself as a JSON object. The object form is
+// validated by decoding it as ImageLayout and stored as its compact JSON
+// string, because the api_key_settings.poster_layout/logo_layout/backdrop_layout/
+// episode_layout DB columns are TEXT and are scanned/bound as strings. Empty
+// and "null" values map to "" (the caller's upsert writes what is present and
+// reads back full rows).
+func layoutJSONField(raw json.RawMessage) (string, error) {
+	raw = []byte(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return "", err
+		}
+		return s, nil
+	}
+	var l ImageLayout
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// UnmarshalJSON accepts the four layout fields in either form: a legacy JSON
+// string ({"top": ...} as text) or a JSON object. The explicit outer
+// json.RawMessage fields shadow the embedded alias fields with the same json
+// tags during decode, so each layout is captured raw and normalised via
+// layoutJSONField while all other fields decode straight into the embedded
+// alias (which points at the receiver).
+func (s *APIKeySettings) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		*apiKeySettingsAlias
+		PosterLayout   json.RawMessage `json:"poster_layout"`
+		LogoLayout     json.RawMessage `json:"logo_layout"`
+		BackdropLayout json.RawMessage `json:"backdrop_layout"`
+		EpisodeLayout  json.RawMessage `json:"episode_layout"`
+	}
+	raw.apiKeySettingsAlias = (*apiKeySettingsAlias)(s)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	fields := []struct {
+		raw json.RawMessage
+		dst *string
+	}{
+		{raw.PosterLayout, &s.PosterLayout},
+		{raw.LogoLayout, &s.LogoLayout},
+		{raw.BackdropLayout, &s.BackdropLayout},
+		{raw.EpisodeLayout, &s.EpisodeLayout},
+	}
+	for _, f := range fields {
+		v, err := layoutJSONField(f.raw)
+		if err != nil {
+			return err
+		}
+		*f.dst = v
+	}
+	return nil
+}
+
 func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 	var s APIKeySettings
 	err := db.QueryRow(`SELECT
@@ -1548,9 +1644,9 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 			PosterLayout:           UnmarshalLayout(perKey.PosterLayout, &defaults.PosterLayout),
 			LogoRatingsLimit:       perKey.LogoRatingsLimit,
 			BackdropRatingsLimit:   perKey.BackdropRatingsLimit,
-			PosterBadgeStyle:       BadgeStyle(perKey.PosterBadgeStyle),
-			LogoBadgeStyle:         BadgeStyle(perKey.LogoBadgeStyle),
-			BackdropBadgeStyle:     BadgeStyle(perKey.BackdropBadgeStyle),
+			PosterBadgeStyle:       ParseBadgeStyle(perKey.PosterBadgeStyle),
+			LogoBadgeStyle:         ParseBadgeStyle(perKey.LogoBadgeStyle),
+			BackdropBadgeStyle:     ParseBadgeStyle(perKey.BackdropBadgeStyle),
 			PosterLabelStyle:       LabelStyle(perKey.PosterLabelStyle),
 			LogoLabelStyle:         LabelStyle(perKey.LogoLabelStyle),
 			BackdropLabelStyle:     LabelStyle(perKey.BackdropLabelStyle),
@@ -1571,7 +1667,7 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 			BackdropEdgeInsetX:     ClampEdgeInset(perKey.BackdropEdgeInsetX),
 			BackdropEdgeInsetY:     ClampEdgeInset(perKey.BackdropEdgeInsetY),
 			EpisodeRatingsLimit:    perKey.EpisodeRatingsLimit,
-			EpisodeBadgeStyle:      BadgeStyle(perKey.EpisodeBadgeStyle),
+			EpisodeBadgeStyle:      ParseBadgeStyle(perKey.EpisodeBadgeStyle),
 			EpisodeLabelStyle:      LabelStyle(perKey.EpisodeLabelStyle),
 			EpisodeTextSize:        ClampScalePercent(perKey.EpisodeTextSize),
 			EpisodeBadgeSize:       ClampScalePercent(perKey.EpisodeBadgeSize),

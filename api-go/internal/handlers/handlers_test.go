@@ -136,8 +136,8 @@ func TestApplyQueryOverridesPosterMapping(t *testing.T) {
 	if result.RatingsLimit != 3 {
 		t.Error("ratings_limit should be 3")
 	}
-	if result.PosterBadgeStyle != services.BadgeStyleHorizontal {
-		t.Error("should be Horizontal")
+	if result.PosterBadgeStyle != services.BadgeStyleLogoLeftValueRight {
+		t.Error("should be LogoLeftValueRight")
 	}
 	if result.PosterLabelStyle != services.LabelStyleIcon {
 		t.Error("should be Icon")
