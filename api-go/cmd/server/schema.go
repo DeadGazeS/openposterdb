@@ -239,16 +239,20 @@ var migrations = []migration{
 		"no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_background TEXT NOT NULL DEFAULT 'd'",
-		"duplicate column",
+		// The logo/backdrop/episode_badge_background columns were added by a
+		// later migration but nothing ever reads or writes them (the alpha
+		// replaced the background enum). Drop them for DBs that already ran the
+		// ADD; fresh DBs never had them and tolerate the failed DROP.
+		"ALTER TABLE api_key_settings DROP COLUMN logo_badge_background",
+		"no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_background TEXT NOT NULL DEFAULT 'd'",
-		"duplicate column",
+		"ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_background",
+		"no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_background TEXT NOT NULL DEFAULT 'd'",
-		"duplicate column",
+		"ALTER TABLE api_key_settings DROP COLUMN episode_badge_background",
+		"no such column",
 	},
 	{
 		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_split INTEGER NOT NULL DEFAULT 0",
@@ -296,6 +300,38 @@ var migrations = []migration{
 	},
 	{
 		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_size INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_width INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_height INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_width INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_height INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_width INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_height INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_width INTEGER NOT NULL DEFAULT 100",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_height INTEGER NOT NULL DEFAULT 100",
 		"duplicate column",
 	},
 	{

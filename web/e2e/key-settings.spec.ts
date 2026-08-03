@@ -1,9 +1,9 @@
-import { test, expect } from '@playwright/test'
-import { selectOption } from './helpers'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { selectOption, resetGlobalSettings } from './helpers'
 
 test.describe('key settings (self-service)', () => {
   /** Ensure admin exists and return an admin JWT token. */
-  async function ensureAdmin(request: any): Promise<string> {
+  async function ensureAdmin(request: APIRequestContext): Promise<string> {
     await request.post('/api/auth/setup', {
       data: { username: 'admin', password: 'testpassword123' },
     })
@@ -16,8 +16,8 @@ test.describe('key settings (self-service)', () => {
 
   /** Create admin + API key, login with key via UI. */
   async function loginWithApiKey(
-    page: any,
-    request: any,
+    page: Page,
+    request: APIRequestContext,
   ): Promise<string> {
     const token = await ensureAdmin(request)
 
@@ -41,13 +41,7 @@ test.describe('key settings (self-service)', () => {
   test('displays settings form with defaults', async ({ page, request }) => {
     // Ensure global settings are at a known state (other tests may change them)
     const adminToken = await ensureAdmin(request)
-    await request.put('/api/admin/settings', {
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        'Content-Type': 'application/json',
-      },
-      data: { image_source: 't' },
-    })
+    await resetGlobalSettings(request, adminToken)
 
     await loginWithApiKey(page, request)
 
@@ -58,13 +52,15 @@ test.describe('key settings (self-service)', () => {
     await expect(page.getByTestId('fanart-checkbox')).toBeVisible()
   })
 
-  test('auto-saves and shows confirmation', async ({ page, request }) => {
+  test('changes are only saved when Save is clicked', async ({ page, request }) => {
     await loginWithApiKey(page, request)
 
-    // Change a setting to trigger auto-save
+    // Change a setting — nothing persists until Save is clicked.
     await page.getByTestId('fanart-checkbox').check()
+    await expect(page.getByTestId('discard-settings-button')).toBeVisible()
+    await expect(page.locator('text=Saved')).toBeHidden()
 
-    // Wait for auto-save confirmation
+    await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
   })
 
@@ -75,13 +71,12 @@ test.describe('key settings (self-service)', () => {
     await expect(page.getByTestId('textless-checkbox')).toBeEnabled()
   })
 
-  test('settings persist after auto-save and reload', async ({ page, request }) => {
+  test('settings persist after save and reload', async ({ page, request }) => {
     await loginWithApiKey(page, request)
 
     // Enable fanart
     await page.getByTestId('fanart-checkbox').check()
-
-    // Wait for auto-save confirmation
+    await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
     // Reload
@@ -94,24 +89,32 @@ test.describe('key settings (self-service)', () => {
 
   test('rating display section is visible', async ({ page, request }) => {
     await loginWithApiKey(page, request)
+    await page.getByTestId('form-tab-ratings').click()
 
     await expect(page.locator('text=Rating Display')).toBeVisible()
     await expect(page.locator('text=Rating order')).toBeVisible()
   })
 
-  test('rating limit defaults to 3', async ({ page, request }) => {
+  test('ratings count is driven by the layout grid', async ({ page, request }) => {
     await loginWithApiKey(page, request)
+    await page.getByTestId('form-tab-poster').click()
 
-    const limitInput = page.locator('#ratings-limit-self')
-    await expect(limitInput).toBeVisible()
-    await expect(limitInput).toHaveValue('3')
+    // The poster layout defaults to 3 badges across one bottom row.
+    const layoutEditor = page.getByTestId('poster-layout-editor')
+    await expect(layoutEditor).toBeVisible()
+    await expect(layoutEditor).toContainText('3 ratings shown')
+
+    await page.getByTestId('poster-top-per-row').fill('2')
+    await page.getByTestId('poster-top-rows').fill('1')
+    await expect(layoutEditor).toContainText('5 ratings shown')
   })
 
-  test('exclude ratings section is visible', async ({ page, request }) => {
+  test('rating order list has an eye toggle per source', async ({ page, request }) => {
     await loginWithApiKey(page, request)
+    await page.getByTestId('form-tab-ratings').click()
 
-    await expect(page.locator('text=Exclude ratings')).toBeVisible()
-    await expect(page.getByTestId('exclude-rt-checkbox')).toBeVisible()
+    await expect(page.locator('text=Rating order')).toBeVisible()
+    await expect(page.getByTestId('exclude-rt-eye')).toBeVisible()
   })
 
   test('reset to defaults works', async ({ page, request }) => {
@@ -119,104 +122,40 @@ test.describe('key settings (self-service)', () => {
     // Other tests (e.g. settings.spec.ts) may change global poster_source,
     // which would make the post-reset value unpredictable.
     const adminToken = await ensureAdmin(request)
-    await request.put('/api/admin/settings', {
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        'Content-Type': 'application/json',
-      },
-      data: { image_source: 't' },
-    })
+    await resetGlobalSettings(request, adminToken)
 
     await loginWithApiKey(page, request)
 
     // Global is now "tmdb", key has no overrides → fanart should be unchecked
     await expect(page.getByTestId('fanart-checkbox')).not.toBeChecked()
 
-    // Enable fanart — auto-save triggers
+    // Enable fanart and save explicitly.
     await page.getByTestId('fanart-checkbox').check()
+    await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
     // Wait for "Using defaults" badge to disappear (confirms custom settings saved)
-    await expect(page.locator('text=Using defaults')).not.toBeVisible()
+    await expect(page.locator('text=Using defaults')).toBeHidden()
 
     // Reset to defaults
     await page.locator('button:has-text("Reset to defaults")').click()
 
-    // Should be back to global default (fanart unchecked)
+    // Should be back to global default (fanart unchecked) and not dirty.
     await expect(page.locator('text=Using defaults')).toBeVisible({ timeout: 10000 })
     await expect(page.getByTestId('fanart-checkbox')).not.toBeChecked()
-  })
-
-  test('reset to defaults does not trigger a spurious auto-save', async ({ page, request }) => {
-    const adminToken = await ensureAdmin(request)
-    await request.put('/api/admin/settings', {
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        'Content-Type': 'application/json',
-      },
-      data: { image_source: 't' },
-    })
-
-    await loginWithApiKey(page, request)
-
-    // Change a setting so we have custom overrides
-    await page.getByTestId('fanart-checkbox').check()
-    await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
-    await expect(page.locator('text=Using defaults')).not.toBeVisible()
-
-    // Start tracking network requests after clicking reset
-    const requestsAfterReset: string[] = []
-    await page.route('**/api/key/me/settings', (route) => {
-      requestsAfterReset.push(route.request().method())
-      route.continue()
-    })
-
-    // Click reset
-    await page.locator('button:has-text("Reset to defaults")').click()
-
-    // Should show "Using defaults" badge
-    await expect(page.locator('text=Using defaults')).toBeVisible({ timeout: 10000 })
-
-    // Wait for any auto-save to fire
-    await page.waitForTimeout(1000)
-
-    // Should have seen DELETE + GET, but no PUT
-    const putCount = requestsAfterReset.filter(m => m === 'PUT').length
-    expect(putCount).toBe(0)
-  })
-
-  test('poster position dropdown is visible', async ({ page, request }) => {
-    await loginWithApiKey(page, request)
-
-    await expect(page.locator('text=Badge position')).toBeVisible()
-  })
-
-  test('badge direction dropdown is visible with default', async ({ page, request }) => {
-    await loginWithApiKey(page, request)
-
-    const dirSelect = page.getByTestId('poster-badge-direction-select')
-    await expect(dirSelect).toBeVisible()
-    await expect(dirSelect).toContainText('Default')
-  })
-
-  test('badge direction persists after change and reload', async ({ page, request }) => {
-    await loginWithApiKey(page, request)
-
-    const dirSelect = page.getByTestId('poster-badge-direction-select')
-    await selectOption(page, dirSelect, 'Horizontal')
-
-    await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
-
-    await page.reload()
-    await expect(page.locator('h1')).toContainText('Image Settings')
-    await expect(page.getByTestId('poster-badge-direction-select')).toContainText('Horizontal')
+    await expect(page.getByTestId('discard-settings-button')).toBeHidden()
   })
 
   test('label style dropdowns are visible', async ({ page, request }) => {
     await loginWithApiKey(page, request)
 
     // Check poster, logo, and backdrop label style selects
-    for (const testId of ['poster-label-style-select', 'logo-label-style-select', 'backdrop-label-style-select']) {
+    for (const [testId, tab] of [
+      ['poster-label-style-select', 'poster'],
+      ['logo-label-style-select', 'logo'],
+      ['backdrop-label-style-select', 'backdrop'],
+    ] as const) {
+      await page.getByTestId(`form-tab-${tab}`).click()
       const select = page.getByTestId(testId)
       await expect(select).toBeVisible()
       await expect(select).toContainText('Official')
@@ -225,17 +164,19 @@ test.describe('key settings (self-service)', () => {
 
   test('label style persists after change and reload', async ({ page, request }) => {
     await loginWithApiKey(page, request)
+    await page.getByTestId('form-tab-poster').click()
 
     // Change poster label style to Text
     const labelSelect = page.getByTestId('poster-label-style-select')
     await selectOption(page, labelSelect, 'Text')
 
-    // Wait for auto-save confirmation
+    await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
     // Reload and verify persistence
     await page.reload()
     await expect(page.locator('h1')).toContainText('Image Settings')
+    await page.getByTestId('form-tab-poster').click()
 
     await expect(page.getByTestId('poster-label-style-select')).toContainText('Text')
   })

@@ -226,13 +226,15 @@ func ClampBadgeAlpha(v int32) BadgeAlpha {
 // --- BadgeAppearance ---
 
 type BadgeAppearance struct {
-	Shape BadgeShape
-	Alpha BadgeAlpha
-	Style BadgeStyle
+	Shape  BadgeShape
+	Alpha  BadgeAlpha
+	Style  BadgeStyle
+	Width  ScalePercent
+	Height ScalePercent
 }
 
 func DefaultBadgeAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: BadgeShapeRounded, Alpha: DefaultBadgeAlpha(), Style: BadgeStyleLogoLeftValueRight}
+	return BadgeAppearance{Shape: BadgeShapeRounded, Alpha: DefaultBadgeAlpha(), Style: BadgeStyleLogoLeftValueRight, Width: DefaultScalePercent(), Height: DefaultScalePercent()}
 }
 
 // --- BadgePosition ---
@@ -644,6 +646,14 @@ type RenderSettings struct {
 	PosterBadgeSize        ScalePercent   `json:"poster_badge_size"`
 	LogoBadgeSize          ScalePercent   `json:"logo_badge_size"`
 	BackdropBadgeSize      ScalePercent   `json:"backdrop_badge_size"`
+	PosterBadgeWidth       ScalePercent   `json:"poster_badge_width"`
+	PosterBadgeHeight      ScalePercent   `json:"poster_badge_height"`
+	LogoBadgeWidth         ScalePercent   `json:"logo_badge_width"`
+	LogoBadgeHeight        ScalePercent   `json:"logo_badge_height"`
+	BackdropBadgeWidth     ScalePercent   `json:"backdrop_badge_width"`
+	BackdropBadgeHeight    ScalePercent   `json:"backdrop_badge_height"`
+	EpisodeBadgeWidth      ScalePercent   `json:"episode_badge_width"`
+	EpisodeBadgeHeight     ScalePercent   `json:"episode_badge_height"`
 	PosterLogoSize         ScalePercent   `json:"poster_logo_size"`
 	LogoLogoSize           ScalePercent   `json:"logo_logo_size"`
 	BackdropLogoSize       ScalePercent   `json:"backdrop_logo_size"`
@@ -701,6 +711,14 @@ func DefaultRenderSettings() RenderSettings {
 		PosterBadgeSize:        DefaultScalePercent(),
 		LogoBadgeSize:          DefaultScalePercent(),
 		BackdropBadgeSize:      DefaultScalePercent(),
+		PosterBadgeWidth:       DefaultScalePercent(),
+		PosterBadgeHeight:      DefaultScalePercent(),
+		LogoBadgeWidth:         DefaultScalePercent(),
+		LogoBadgeHeight:        DefaultScalePercent(),
+		BackdropBadgeWidth:     DefaultScalePercent(),
+		BackdropBadgeHeight:    DefaultScalePercent(),
+		EpisodeBadgeWidth:      DefaultScalePercent(),
+		EpisodeBadgeHeight:     DefaultScalePercent(),
 		PosterLogoSize:         DefaultScalePercent(),
 		LogoLogoSize:           DefaultScalePercent(),
 		BackdropLogoSize:       DefaultScalePercent(),
@@ -730,19 +748,19 @@ func DefaultRenderSettings() RenderSettings {
 }
 
 func (s *RenderSettings) PosterAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.PosterBadgeShape, Alpha: s.PosterBadgeAlpha}
+	return BadgeAppearance{Shape: s.PosterBadgeShape, Alpha: s.PosterBadgeAlpha, Width: s.PosterBadgeWidth, Height: s.PosterBadgeHeight}
 }
 
 func (s *RenderSettings) LogoAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.LogoBadgeShape, Alpha: s.LogoBadgeAlpha}
+	return BadgeAppearance{Shape: s.LogoBadgeShape, Alpha: s.LogoBadgeAlpha, Width: s.LogoBadgeWidth, Height: s.LogoBadgeHeight}
 }
 
 func (s *RenderSettings) BackdropAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.BackdropBadgeShape, Alpha: s.BackdropBadgeAlpha}
+	return BadgeAppearance{Shape: s.BackdropBadgeShape, Alpha: s.BackdropBadgeAlpha, Width: s.BackdropBadgeWidth, Height: s.BackdropBadgeHeight}
 }
 
 func (s *RenderSettings) EpisodeAppearance() BadgeAppearance {
-	return BadgeAppearance{Shape: s.EpisodeBadgeShape, Alpha: s.EpisodeBadgeAlpha}
+	return BadgeAppearance{Shape: s.EpisodeBadgeShape, Alpha: s.EpisodeBadgeAlpha, Width: s.EpisodeBadgeWidth, Height: s.EpisodeBadgeHeight}
 }
 
 func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
@@ -776,6 +794,14 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		PosterBadgeSize:        ClampScalePercent(int32Or(globals, "poster_badge_size", int32(defaults.PosterBadgeSize))),
 		LogoBadgeSize:          ClampScalePercent(int32Or(globals, "logo_badge_size", int32(defaults.LogoBadgeSize))),
 		BackdropBadgeSize:      ClampScalePercent(int32Or(globals, "backdrop_badge_size", int32(defaults.BackdropBadgeSize))),
+		PosterBadgeWidth:       ClampScalePercent(int32Or(globals, "poster_badge_width", int32(defaults.PosterBadgeWidth))),
+		PosterBadgeHeight:      ClampScalePercent(int32Or(globals, "poster_badge_height", int32(defaults.PosterBadgeHeight))),
+		LogoBadgeWidth:         ClampScalePercent(int32Or(globals, "logo_badge_width", int32(defaults.LogoBadgeWidth))),
+		LogoBadgeHeight:        ClampScalePercent(int32Or(globals, "logo_badge_height", int32(defaults.LogoBadgeHeight))),
+		BackdropBadgeWidth:     ClampScalePercent(int32Or(globals, "backdrop_badge_width", int32(defaults.BackdropBadgeWidth))),
+		BackdropBadgeHeight:    ClampScalePercent(int32Or(globals, "backdrop_badge_height", int32(defaults.BackdropBadgeHeight))),
+		EpisodeBadgeWidth:      ClampScalePercent(int32Or(globals, "episode_badge_width", int32(defaults.EpisodeBadgeWidth))),
+		EpisodeBadgeHeight:     ClampScalePercent(int32Or(globals, "episode_badge_height", int32(defaults.EpisodeBadgeHeight))),
 		PosterLogoSize:         ClampScalePercent(int32Or(globals, "poster_logo_size", int32(defaults.PosterLogoSize))),
 		LogoLogoSize:           ClampScalePercent(int32Or(globals, "logo_logo_size", int32(defaults.LogoLogoSize))),
 		BackdropLogoSize:       ClampScalePercent(int32Or(globals, "backdrop_logo_size", int32(defaults.BackdropLogoSize))),
@@ -867,6 +893,14 @@ func RenderSettingsToMap(s *RenderSettings) map[string]string {
 		"poster_badge_size":        int32Str(int32(s.PosterBadgeSize)),
 		"logo_badge_size":          int32Str(int32(s.LogoBadgeSize)),
 		"backdrop_badge_size":      int32Str(int32(s.BackdropBadgeSize)),
+		"poster_badge_width":       int32Str(int32(s.PosterBadgeWidth)),
+		"poster_badge_height":      int32Str(int32(s.PosterBadgeHeight)),
+		"logo_badge_width":         int32Str(int32(s.LogoBadgeWidth)),
+		"logo_badge_height":        int32Str(int32(s.LogoBadgeHeight)),
+		"backdrop_badge_width":     int32Str(int32(s.BackdropBadgeWidth)),
+		"backdrop_badge_height":    int32Str(int32(s.BackdropBadgeHeight)),
+		"episode_badge_width":      int32Str(int32(s.EpisodeBadgeWidth)),
+		"episode_badge_height":     int32Str(int32(s.EpisodeBadgeHeight)),
 		"poster_logo_size":         int32Str(int32(s.PosterLogoSize)),
 		"logo_logo_size":           int32Str(int32(s.LogoLogoSize)),
 		"backdrop_logo_size":       int32Str(int32(s.BackdropLogoSize)),
@@ -1396,6 +1430,14 @@ type APIKeySettings struct {
 	PosterBadgeSize        int32  `json:"poster_badge_size"`
 	LogoBadgeSize          int32  `json:"logo_badge_size"`
 	BackdropBadgeSize      int32  `json:"backdrop_badge_size"`
+	PosterBadgeWidth       int32  `json:"poster_badge_width"`
+	PosterBadgeHeight      int32  `json:"poster_badge_height"`
+	LogoBadgeWidth         int32  `json:"logo_badge_width"`
+	LogoBadgeHeight        int32  `json:"logo_badge_height"`
+	BackdropBadgeWidth     int32  `json:"backdrop_badge_width"`
+	BackdropBadgeHeight    int32  `json:"backdrop_badge_height"`
+	EpisodeBadgeWidth      int32  `json:"episode_badge_width"`
+	EpisodeBadgeHeight     int32  `json:"episode_badge_height"`
 	PosterLogoSize         int32  `json:"poster_logo_size"`
 	LogoLogoSize           int32  `json:"logo_logo_size"`
 	BackdropLogoSize       int32  `json:"backdrop_logo_size"`
@@ -1501,11 +1543,14 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 		poster_badge_direction, poster_fit,
 		poster_text_size, logo_text_size, backdrop_text_size,
 		poster_badge_size, logo_badge_size, backdrop_badge_size,
+		poster_badge_width, poster_badge_height,
+		logo_badge_width, logo_badge_height,
+		backdrop_badge_width, backdrop_badge_height,
 		poster_logo_size, logo_logo_size, backdrop_logo_size,
 		logo_layout,
 		backdrop_layout, backdrop_badge_direction,
 		episode_ratings_limit, episode_badge_style, episode_label_style, episode_text_size,
-		episode_badge_size, episode_logo_size,
+		episode_badge_size, episode_badge_width, episode_badge_height, episode_logo_size,
 		episode_layout, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
 		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
@@ -1518,11 +1563,14 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 		&s.PosterBadgeDirection, &s.PosterFit,
 		&s.PosterTextSize, &s.LogoTextSize, &s.BackdropTextSize,
 		&s.PosterBadgeSize, &s.LogoBadgeSize, &s.BackdropBadgeSize,
+		&s.PosterBadgeWidth, &s.PosterBadgeHeight,
+		&s.LogoBadgeWidth, &s.LogoBadgeHeight,
+		&s.BackdropBadgeWidth, &s.BackdropBadgeHeight,
 		&s.PosterLogoSize, &s.LogoLogoSize, &s.BackdropLogoSize,
 		&s.LogoLayout,
 		&s.BackdropLayout, &s.BackdropBadgeDirection,
 		&s.EpisodeRatingsLimit, &s.EpisodeBadgeStyle, &s.EpisodeLabelStyle, &s.EpisodeTextSize,
-		&s.EpisodeBadgeSize, &s.EpisodeLogoSize,
+		&s.EpisodeBadgeSize, &s.EpisodeBadgeWidth, &s.EpisodeBadgeHeight, &s.EpisodeLogoSize,
 		&s.EpisodeLayout, &s.EpisodeBadgeDirection, &s.EpisodeBlur,
 		&s.PosterBadgeShape, &s.LogoBadgeShape, &s.BackdropBadgeShape, &s.EpisodeBadgeShape,
 		&s.PosterBadgeAlpha, &s.LogoBadgeAlpha, &s.BackdropBadgeAlpha, &s.EpisodeBadgeAlpha,
@@ -1543,16 +1591,19 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		poster_badge_direction, poster_fit,
 		poster_text_size, logo_text_size, backdrop_text_size,
 		poster_badge_size, logo_badge_size, backdrop_badge_size,
+		poster_badge_width, poster_badge_height,
+		logo_badge_width, logo_badge_height,
+		backdrop_badge_width, backdrop_badge_height,
 		poster_logo_size, logo_logo_size, backdrop_logo_size,
 		logo_layout,
 		backdrop_layout, backdrop_badge_direction,
 		episode_ratings_limit, episode_badge_style, episode_label_style, episode_text_size,
-		episode_badge_size, episode_logo_size,
+		episode_badge_size, episode_badge_width, episode_badge_height, episode_logo_size,
 		episode_layout, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
 		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
 		backdrop_edge_inset_x, backdrop_edge_inset_y
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(api_key_id) DO UPDATE SET
 		image_source = excluded.image_source,
 		lang = excluded.lang,
@@ -1577,6 +1628,12 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		poster_badge_size = excluded.poster_badge_size,
 		logo_badge_size = excluded.logo_badge_size,
 		backdrop_badge_size = excluded.backdrop_badge_size,
+		poster_badge_width = excluded.poster_badge_width,
+		poster_badge_height = excluded.poster_badge_height,
+		logo_badge_width = excluded.logo_badge_width,
+		logo_badge_height = excluded.logo_badge_height,
+		backdrop_badge_width = excluded.backdrop_badge_width,
+		backdrop_badge_height = excluded.backdrop_badge_height,
 		poster_logo_size = excluded.poster_logo_size,
 		logo_logo_size = excluded.logo_logo_size,
 		backdrop_logo_size = excluded.backdrop_logo_size,
@@ -1588,6 +1645,8 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		episode_label_style = excluded.episode_label_style,
 		episode_text_size = excluded.episode_text_size,
 		episode_badge_size = excluded.episode_badge_size,
+		episode_badge_width = excluded.episode_badge_width,
+		episode_badge_height = excluded.episode_badge_height,
 		episode_logo_size = excluded.episode_logo_size,
 		episode_layout = excluded.episode_layout,
 		episode_badge_direction = excluded.episode_badge_direction,
@@ -1609,11 +1668,14 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		s.PosterBadgeDirection, s.PosterFit,
 		s.PosterTextSize, s.LogoTextSize, s.BackdropTextSize,
 		s.PosterBadgeSize, s.LogoBadgeSize, s.BackdropBadgeSize,
+		s.PosterBadgeWidth, s.PosterBadgeHeight,
+		s.LogoBadgeWidth, s.LogoBadgeHeight,
+		s.BackdropBadgeWidth, s.BackdropBadgeHeight,
 		s.PosterLogoSize, s.LogoLogoSize, s.BackdropLogoSize,
 		s.LogoLayout,
 		s.BackdropLayout, s.BackdropBadgeDirection,
 		s.EpisodeRatingsLimit, s.EpisodeBadgeStyle, s.EpisodeLabelStyle, s.EpisodeTextSize,
-		s.EpisodeBadgeSize, s.EpisodeLogoSize,
+		s.EpisodeBadgeSize, s.EpisodeBadgeWidth, s.EpisodeBadgeHeight, s.EpisodeLogoSize,
 		s.EpisodeLayout, s.EpisodeBadgeDirection, s.EpisodeBlur,
 		s.PosterBadgeShape, s.LogoBadgeShape, s.BackdropBadgeShape, s.EpisodeBadgeShape,
 		s.PosterBadgeAlpha, s.LogoBadgeAlpha, s.BackdropBadgeAlpha, s.EpisodeBadgeAlpha,
@@ -1658,6 +1720,14 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 			PosterBadgeSize:        ClampScalePercent(perKey.PosterBadgeSize),
 			LogoBadgeSize:          ClampScalePercent(perKey.LogoBadgeSize),
 			BackdropBadgeSize:      ClampScalePercent(perKey.BackdropBadgeSize),
+			PosterBadgeWidth:       ClampScalePercent(perKey.PosterBadgeWidth),
+			PosterBadgeHeight:      ClampScalePercent(perKey.PosterBadgeHeight),
+			LogoBadgeWidth:         ClampScalePercent(perKey.LogoBadgeWidth),
+			LogoBadgeHeight:        ClampScalePercent(perKey.LogoBadgeHeight),
+			BackdropBadgeWidth:     ClampScalePercent(perKey.BackdropBadgeWidth),
+			BackdropBadgeHeight:    ClampScalePercent(perKey.BackdropBadgeHeight),
+			EpisodeBadgeWidth:      ClampScalePercent(perKey.EpisodeBadgeWidth),
+			EpisodeBadgeHeight:     ClampScalePercent(perKey.EpisodeBadgeHeight),
 			PosterLogoSize:         ClampScalePercent(perKey.PosterLogoSize),
 			LogoLogoSize:           ClampScalePercent(perKey.LogoLogoSize),
 			BackdropLogoSize:       ClampScalePercent(perKey.BackdropLogoSize),

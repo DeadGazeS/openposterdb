@@ -5,6 +5,18 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import SettingsView from '@/views/SettingsView.vue'
 import { shadcnStubs } from '@/__tests__/stubs'
 
+// The active settings section is derived from the route, so give the view a
+// fake route. Each test can switch the section by mutating mockRoute before
+// mounting (matching how the router names the settings routes).
+const mockRoute = vi.hoisted(() => ({
+  name: 'settings-general',
+  path: '/admin/settings/general',
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => mockRoute,
+}))
+
 const mockAdminApi = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
@@ -91,16 +103,29 @@ describe('SettingsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mockRoute.name = 'settings-general'
+    mockRoute.path = '/admin/settings/general'
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(defaultSettings),
     })
   })
 
-  it('renders settings heading', async () => {
+  it('renders the General headline with the general section by default', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('Settings')
+    expect(wrapper.find('h1').text()).toBe('General')
+    expect(wrapper.text()).toContain('Global Image Settings')
+  })
+
+  it('renders the Image headline on the image route', async () => {
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('h1').text()).toBe('Image')
     expect(wrapper.text()).toContain('Global Image Settings')
   })
 
@@ -364,7 +389,6 @@ describe('SettingsView', () => {
         episode_label_style: 'i',
         episode_text_size: 120,
         episode_layout: expect.objectContaining({ right: expect.objectContaining({ per_row: 1 }) }),
-        episode_badge_direction: 'h',
         episode_blur: true,
       }),
     )
@@ -386,13 +410,12 @@ describe('SettingsView', () => {
         episode_label_style: 'o',
         episode_text_size: 100,
         episode_layout: expect.objectContaining({ right: expect.objectContaining({ per_row: 1 }) }),
-        episode_badge_direction: 'v',
         episode_blur: false,
       }),
     )
   })
 
-  it('toggleFreeApiKey payload preserves backdrop position, direction, and edge insets', async () => {
+  it('toggleFreeApiKey payload preserves backdrop position and edge insets', async () => {
     // Regression guard: the toggle must forward the full settings, not a curated
     // subset. A previous payload omitted these backdrop fields, so flipping the
     // free-key switch silently reset them to their serde defaults on the server.
@@ -421,7 +444,6 @@ describe('SettingsView', () => {
       expect.objectContaining({
         free_api_key_enabled: true,
         backdrop_layout: expect.objectContaining({ top: expect.objectContaining({ per_row: 5 }) }),
-        backdrop_badge_direction: 'h',
         backdrop_edge_inset_x: 12,
         backdrop_edge_inset_y: 7,
       }),

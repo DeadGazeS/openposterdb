@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import { ALL_RATING_SOURCES } from '@/lib/constants'
 
@@ -16,6 +17,17 @@ function mountWithModel(initial: string[] = ['imdb', 'tmdb', 'rt'], compact = fa
 function mountWithExcluded(initial: string[], excluded: string[]) {
   return mount(RatingsOrderList, {
     props: { modelValue: initial, excluded },
+  })
+}
+
+function mountWithToggleable(initial: string[], excluded: string[] = []) {
+  return mount(RatingsOrderList, {
+    props: {
+      modelValue: initial,
+      excluded,
+      toggleable: true,
+      onToggleExclude: () => {},
+    },
   })
 }
 
@@ -150,9 +162,7 @@ describe('RatingsOrderList', () => {
 
       const labels = wrapper.findAll('span.flex-1')
       expect(labels[1]!.classes()).toContain('line-through')
-      expect(labels[1]!.attributes('title')).toBeTruthy()
       expect(labels[0]!.classes()).not.toContain('line-through')
-      expect(labels[0]!.attributes('title')).toBeUndefined()
     })
 
     it('applies no exclusion styling when excluded is omitted', () => {
@@ -171,6 +181,45 @@ describe('RatingsOrderList', () => {
       // Move tmdb (excluded, second row) up — up button is index 2.
       await buttons[2]!.trigger('click')
       expect(wrapper.emitted('update:modelValue')![0]![0]).toEqual(['tmdb', 'imdb', 'rt'])
+    })
+  })
+
+  describe('eye toggle (toggleable)', () => {
+    it('renders an eye button per row when toggleable', () => {
+      const wrapper = mountWithToggleable(['imdb', 'tmdb', 'rt'])
+      for (const key of ['imdb', 'tmdb', 'rt']) {
+        expect(wrapper.find(`[data-testid="exclude-${key}-eye"]`).exists()).toBe(true)
+      }
+    })
+
+    it('does not render eye buttons when not toggleable', () => {
+      const wrapper = mountWithModel(['imdb', 'tmdb'])
+      expect(wrapper.find('[data-testid^="exclude-"]').exists()).toBe(false)
+    })
+
+    it('shows a crossed, faded eye for excluded sources', () => {
+      const wrapper = mountWithToggleable(['imdb', 'tmdb'], ['tmdb'])
+      // tmdb is excluded → EyeOff; imdb is included → Eye
+      expect(wrapper.findComponent(EyeOff).exists()).toBe(true)
+      expect(wrapper.findComponent(Eye).exists()).toBe(true)
+
+      const eye = wrapper.find('[data-testid="exclude-tmdb-eye"]')
+      expect(eye.attributes('title')).toBe('Show rating')
+      expect(eye.attributes('aria-pressed')).toBe('true')
+    })
+
+    it('shows a plain eye with a hide tooltip for included sources', () => {
+      const wrapper = mountWithToggleable(['imdb', 'tmdb'], ['tmdb'])
+      const eye = wrapper.find('[data-testid="exclude-imdb-eye"]')
+      expect(eye.attributes('title')).toBe('Hide rating')
+      expect(eye.attributes('aria-pressed')).toBe('false')
+    })
+
+    it('emits toggle-exclude with the source key on click', async () => {
+      const wrapper = mountWithToggleable(['imdb', 'tmdb'], ['tmdb'])
+      await wrapper.find('[data-testid="exclude-imdb-eye"]').trigger('click')
+      expect(wrapper.emitted('toggle-exclude')).toBeTruthy()
+      expect(wrapper.emitted('toggle-exclude')![0]![0]).toBe('imdb')
     })
   })
 

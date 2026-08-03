@@ -1,3 +1,7 @@
 test-report/
 .env
 .idea/
+
+# local scratch
+.opencode/
+.cortexkit/

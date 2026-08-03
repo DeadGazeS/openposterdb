@@ -34,22 +34,27 @@ func TestVerticalBadgeFullHeightBackground(t *testing.T) {
 		probeRows map[int]bool // y -> expect label (accent) color; false = value color
 	}{
 		{
-			// tb: label [0,26], gap [26,36], value [36,70], bottom pad [70,80].
+			// tb: top pad [0,8], label [8,66] (text ink ~[22,48]),
+			// gap [66,70], value [70,128] (text ink ~[81,111]),
+			// bottom pad [128,136].
 			name:  "tb",
 			style: services.BadgeStyleLogoTB,
 			probeRows: map[int]bool{
-				30: true,  // gap between label and value -> label color
-				75: false, // bottom padding -> value color
+				4:   true,  // top padding -> label color
+				60:  true,  // label section, below the label text -> label color
+				120: false, // value section, below the value text -> value color
 			},
 		},
 		{
-			// bt: top pad [0,8], value [8,42], gap [42,44], label [44,70], bottom pad [70,80].
+			// bt: top pad [0,8], value [8,66] (text ink ~[19,50]),
+			// gap [66,70], label [70,128] (text ink ~[91,110]),
+			// bottom pad [128,136].
 			name:  "bt",
 			style: services.BadgeStyleValueTB,
 			probeRows: map[int]bool{
-				4:  false, // top padding -> value color
-				43: false, // gap between value and label -> value color
-				75: true,  // bottom padding -> label color
+				4:   false, // top padding -> value color
+				12:  false, // value section, above the value text -> value color
+				120: true,  // label section, below the label text -> label color
 			},
 		},
 	}
