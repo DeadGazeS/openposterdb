@@ -98,12 +98,20 @@ describe('parseRatingsExclude', () => {
 })
 
 describe('enum code → label maps', () => {
-  it('badge style/direction map the h/v/d codes', () => {
-    for (const map of [BADGE_STYLE_LABELS, BADGE_DIRECTION_LABELS]) {
-      expect(map.h).toBe('Horizontal')
-      expect(map.v).toBe('Vertical')
-      expect(map.d).toBe('Auto')
-    }
+  it('badge style maps the lr/rl/tb/bt/d codes', () => {
+    expect(BADGE_STYLE_LABELS).toEqual({
+      lr: 'Logo left · value right',
+      rl: 'Value left · logo right',
+      tb: 'Logo top · value bottom',
+      bt: 'Value top · logo bottom',
+      d: 'Auto',
+    })
+  })
+
+  it('badge direction maps the h/v/d codes', () => {
+    expect(BADGE_DIRECTION_LABELS.h).toBe('Horizontal')
+    expect(BADGE_DIRECTION_LABELS.v).toBe('Vertical')
+    expect(BADGE_DIRECTION_LABELS.d).toBe('Auto')
   })
 
   it('label style maps the t/i/o/h codes', () => {

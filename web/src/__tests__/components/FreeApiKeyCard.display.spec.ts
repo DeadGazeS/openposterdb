@@ -20,9 +20,18 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     image_source: 't', lang: 'en', textless: false, ratings_limit: 3,
     ratings_order: DEFAULT_RATINGS_ORDER, ratings_exclude: '',
     poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), logo_ratings_limit: 5, backdrop_ratings_limit: 5,
-    poster_badge_style: 'v', logo_badge_style: 'v', backdrop_badge_style: 'h',
+    logo_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 5, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+    poster_badge_style: 'tb', logo_badge_style: 'tb', backdrop_badge_style: 'lr',
     poster_label_style: 'o', logo_label_style: 'o', backdrop_label_style: 'o',
     poster_badge_direction: 'd', 
+    poster_badge_shape: 'r',
+    logo_badge_shape: 'r',
+    backdrop_badge_shape: 'r',
+    episode_badge_shape: 'r',
+    poster_badge_background: 'd',
+    logo_badge_background: 'd',
+    backdrop_badge_background: 'd',
+    episode_badge_background: 'd',
     poster_text_size: 100, logo_text_size: 100, backdrop_text_size: 100,
     poster_badge_size: 100, logo_badge_size: 100, backdrop_badge_size: 100,
     poster_logo_size: 100, logo_logo_size: 100, backdrop_logo_size: 100,
@@ -72,10 +81,10 @@ describe('FreeApiKeyCard trigger display across image-type switches', () => {
     // poster_badge_style=v (Vertical), backdrop_badge_style=h (Horizontal)
     const wrapper = mountReal()
     await flushPromises()
-    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Vertical)')
+    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo top · value bottom)')
 
     await setSelect(wrapper, 'free-image-type', 'backdrop')
-    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Horizontal)')
+    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo left · value right)')
   })
 
   it('reflects the poster fit default annotation', async () => {
@@ -92,8 +101,8 @@ describe('FreeApiKeyCard trigger display across image-type switches', () => {
     await flushPromises()
     expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default')
 
-    useAuthStore().freeKeyDefaults = makeDefaults({ poster_badge_style: 'h' })
+    useAuthStore().freeKeyDefaults = makeDefaults({ poster_badge_style: 'lr' })
     await flushPromises()
-    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Horizontal)')
+    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo left · value right)')
   })
 })

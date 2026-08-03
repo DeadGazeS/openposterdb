@@ -396,8 +396,10 @@ async function handleFetch() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="default" :key="badgeStyleDefaultLabel">{{ badgeStyleDefaultLabel }}</SelectItem>
-              <SelectItem value="h">Horizontal</SelectItem>
-              <SelectItem value="v">Vertical</SelectItem>
+              <SelectItem value="lr">Logo left · value right</SelectItem>
+              <SelectItem value="rl">Value left · logo right</SelectItem>
+              <SelectItem value="tb">Logo top · value bottom</SelectItem>
+              <SelectItem value="bt">Value top · logo bottom</SelectItem>
             </SelectContent>
           </Select>
           <Select v-model="labelStyle">

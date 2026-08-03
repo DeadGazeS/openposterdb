@@ -23,7 +23,16 @@ export default function placeholdersPlugin(): Plugin {
     async load(id) {
       if (id !== RESOLVED_ID) return
 
-      const sharp = (await import('sharp')).default
+      let sharp: typeof import('sharp')['default']
+      try {
+        sharp = (await import('sharp')).default
+      } catch {
+        // sharp is unavailable in some environments (e.g. the vitest module
+        // runner). Fall back to an empty placeholder map so imports of
+        // `virtual:placeholders` still resolve; BlurImage treats a missing
+        // placeholder as "no placeholder".
+        return 'export const placeholders = {};\n'
+      }
       const entries: string[] = []
 
       for (const dir of IMAGE_DIRS) {

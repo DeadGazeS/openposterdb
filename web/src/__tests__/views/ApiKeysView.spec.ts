@@ -221,7 +221,7 @@ describe('ApiKeysView', () => {
     await flushPromises()
 
     expect(window.confirm).toHaveBeenCalled()
-    expect(mockKeysApi.delete).toHaveBeenCalledWith(sampleKeys[0].id)
+    expect(mockKeysApi.delete).toHaveBeenCalledWith(sampleKeys[0]!.id)
   })
 
   it('cancels delete when confirmation declined', async () => {

@@ -103,7 +103,7 @@ function sideLabel(side: string): string {
             <Label :for="`${side}-start`">{{ startLabel(side) }}</Label>
             <Select
               :model-value="slotValue(side).start"
-              @update:model-value="(v: string) => setField(side, 'start', v)"
+              @update:model-value="(v) => setField(side, 'start', String(v))"
             >
               <SelectTrigger :id="`${side}-start`" class="w-full max-w-xs" :data-testid="`${testPrefix}-${side}-start`">
                 <SelectValue />

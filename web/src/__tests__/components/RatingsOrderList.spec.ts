@@ -38,9 +38,9 @@ describe('RatingsOrderList', () => {
     const wrapper = mountWithModel(['imdb', 'tmdb', 'rt'])
 
     const indices = wrapper.findAll('.text-muted-foreground.text-xs')
-    expect(indices[0].text()).toBe('1')
-    expect(indices[1].text()).toBe('2')
-    expect(indices[2].text()).toBe('3')
+    expect(indices[0]!.text()).toBe('1')
+    expect(indices[1]!.text()).toBe('2')
+    expect(indices[2]!.text()).toBe('3')
   })
 
   it('renders colored dots from ALL_RATING_SOURCES', () => {
@@ -54,14 +54,14 @@ describe('RatingsOrderList', () => {
     const wrapper = mountWithModel(['imdb', 'tmdb', 'rt'])
     const buttons = wrapper.findAll('button')
     // First row: up button (index 0), down button (index 1)
-    expect((buttons[0].element as HTMLButtonElement).disabled).toBe(true)
+    expect((buttons[0]!.element as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('disables down button on last item', () => {
     const wrapper = mountWithModel(['imdb', 'tmdb', 'rt'])
     const buttons = wrapper.findAll('button')
     // Last row: up button (index 4), down button (index 5)
-    const lastDown = buttons[buttons.length - 1]
+    const lastDown = buttons[buttons.length - 1]!
     expect((lastDown.element as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -69,37 +69,37 @@ describe('RatingsOrderList', () => {
     const wrapper = mountWithModel(['imdb', 'tmdb', 'rt'])
     const buttons = wrapper.findAll('button')
     // Middle row (tmdb): up button (index 2), down button (index 3)
-    expect((buttons[2].element as HTMLButtonElement).disabled).toBe(false)
-    expect((buttons[3].element as HTMLButtonElement).disabled).toBe(false)
+    expect((buttons[2]!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((buttons[3]!.element as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('emits update:modelValue with swapped items when moving up', async () => {
     const wrapper = mountWithModel(['imdb', 'tmdb', 'rt'])
     const buttons = wrapper.findAll('button')
     // Click "up" on tmdb (second row, up button = index 2)
-    await buttons[2].trigger('click')
+    await buttons[2]!.trigger('click')
 
     const emitted = wrapper.emitted('update:modelValue')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toEqual(['tmdb', 'imdb', 'rt'])
+    expect(emitted![0]![0]).toEqual(['tmdb', 'imdb', 'rt'])
   })
 
   it('emits update:modelValue with swapped items when moving down', async () => {
     const wrapper = mountWithModel(['imdb', 'tmdb', 'rt'])
     const buttons = wrapper.findAll('button')
     // Click "down" on tmdb (second row, down button = index 3)
-    await buttons[3].trigger('click')
+    await buttons[3]!.trigger('click')
 
     const emitted = wrapper.emitted('update:modelValue')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toEqual(['imdb', 'rt', 'tmdb'])
+    expect(emitted![0]![0]).toEqual(['imdb', 'rt', 'tmdb'])
   })
 
   it('does not emit when clicking disabled up button on first item', async () => {
     const wrapper = mountWithModel(['imdb', 'tmdb'])
     const buttons = wrapper.findAll('button')
     // First item's up button is disabled — clicking should not emit
-    await buttons[0].trigger('click')
+    await buttons[0]!.trigger('click')
 
     const emitted = wrapper.emitted('update:modelValue')
     expect(emitted).toBeUndefined()
@@ -109,7 +109,7 @@ describe('RatingsOrderList', () => {
     const wrapper = mountWithModel(['imdb', 'tmdb'])
     const buttons = wrapper.findAll('button')
     // Last item's down button
-    const lastDown = buttons[buttons.length - 1]
+    const lastDown = buttons[buttons.length - 1]!
     await lastDown.trigger('click')
 
     const emitted = wrapper.emitted('update:modelValue')
@@ -120,8 +120,8 @@ describe('RatingsOrderList', () => {
     const wrapper = mountWithModel(['imdb'])
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(2)
-    expect((buttons[0].element as HTMLButtonElement).disabled).toBe(true)
-    expect((buttons[1].element as HTMLButtonElement).disabled).toBe(true)
+    expect((buttons[0]!.element as HTMLButtonElement).disabled).toBe(true)
+    expect((buttons[1]!.element as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('falls back to key when rating source not found', () => {
@@ -145,14 +145,14 @@ describe('RatingsOrderList', () => {
     it('dims and strikes through excluded sources only', () => {
       const wrapper = mountWithExcluded(['imdb', 'tmdb', 'rt'], ['tmdb'])
       const rows = wrapper.findAll('.flex.items-center')
-      expect(rows[1].classes()).toContain('opacity-40')
-      expect(rows[0].classes()).not.toContain('opacity-40')
+      expect(rows[1]!.classes()).toContain('opacity-40')
+      expect(rows[0]!.classes()).not.toContain('opacity-40')
 
       const labels = wrapper.findAll('span.flex-1')
-      expect(labels[1].classes()).toContain('line-through')
-      expect(labels[1].attributes('title')).toBeTruthy()
-      expect(labels[0].classes()).not.toContain('line-through')
-      expect(labels[0].attributes('title')).toBeUndefined()
+      expect(labels[1]!.classes()).toContain('line-through')
+      expect(labels[1]!.attributes('title')).toBeTruthy()
+      expect(labels[0]!.classes()).not.toContain('line-through')
+      expect(labels[0]!.attributes('title')).toBeUndefined()
     })
 
     it('applies no exclusion styling when excluded is omitted', () => {
@@ -169,8 +169,8 @@ describe('RatingsOrderList', () => {
       const wrapper = mountWithExcluded(['imdb', 'tmdb', 'rt'], ['tmdb'])
       const buttons = wrapper.findAll('button')
       // Move tmdb (excluded, second row) up — up button is index 2.
-      await buttons[2].trigger('click')
-      expect(wrapper.emitted('update:modelValue')![0][0]).toEqual(['tmdb', 'imdb', 'rt'])
+      await buttons[2]!.trigger('click')
+      expect(wrapper.emitted('update:modelValue')![0]![0]).toEqual(['tmdb', 'imdb', 'rt'])
     })
   })
 

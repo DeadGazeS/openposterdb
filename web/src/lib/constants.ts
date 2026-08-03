@@ -116,7 +116,7 @@ export const RATING_COLOR_ROWS = [
 // to human-readable labels. Used to show what a server "default" resolves to in
 // the free-key "Try it out" form. `d` (style/direction) means "auto" — resolved
 // at render time from the badge position/direction.
-export const BADGE_STYLE_LABELS: Record<string, string> = { h: 'Horizontal', v: 'Vertical', d: 'Auto' }
+export const BADGE_STYLE_LABELS: Record<string, string> = { lr: 'Logo left · value right', rl: 'Value left · logo right', tb: 'Logo top · value bottom', bt: 'Value top · logo bottom', d: 'Auto' }
 export const BADGE_DIRECTION_LABELS: Record<string, string> = { h: 'Horizontal', v: 'Vertical', d: 'Auto' }
 export const LABEL_STYLE_LABELS: Record<string, string> = { t: 'Text', i: 'White', o: 'Official', h: 'High Res' }
 export const BADGE_SHAPE_LABELS: Record<string, string> = { r: 'Rounded', p: 'Pill' }
