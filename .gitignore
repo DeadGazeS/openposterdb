@@ -5,3 +5,7 @@ test-report/
 # local scratch
 .opencode/
 .cortexkit/
+
+# agent rules/notes — workspace artifacts, never committed
+/RULES.md
+/NOTES.md
