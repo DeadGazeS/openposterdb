@@ -24,7 +24,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - **Posters, logos, backdrops, and episode stills** — generated on demand with rating overlays.
 - **Per-source badge colours** — logo background, text background, border, and text colour for every rating source. Rotten Tomatoes gets separate settings for each logo variant (Certified Fresh, Fresh, Rotten, Verified Hot, and more).
 - **Anti-aliased rendering** — smooth rounded and pill badge shapes with crisp border rings.
-- **Flexible layouts** — badge style (logo/value arrangement: left-right, right-left, top-bottom, or bottom-top), shape, size, and aspect-ratio fitting are all configurable, plus a per-kind **badge layout grid**: set how many badges (per row × rows) sit on each of the four sides (top/right/bottom/left), each anchored to a start position, with a configurable fill order. The total number of ratings shown equals the sum of the four sides.
+- **Flexible layouts** — badge style (logo/number arrangement: left-right, right-left, top-bottom, or bottom-top), shape, size, and aspect-ratio fitting are all configurable, plus a per-kind **badge layout grid**: set how many badges (per row × rows) sit on each of the four sides (top/right/bottom/left), each anchored to a start position, with a configurable fill order. The total number of ratings shown equals the sum of the four sides.
 - **Independent sizing up to 400%** — text, badge, and logo size sliders per image type (50–400%).
 - **High-resolution label style** — a `High Res` label option renders each rating source's crisp, source-SVG logo (instead of the 48px official PNGs).
 - **Aspect-ratio fitting** — poster fit modes (`native`/`cover`/`pad`/`blur`) keep non-2:3 posters from being cropped.

@@ -3,7 +3,6 @@ package image
 import (
 	"image"
 	"image/color"
-	"math"
 	"testing"
 
 	"openposterdb/internal/services"
@@ -19,7 +18,7 @@ func verticalSectionY(style services.BadgeStyle, value bool) (int, int) {
 	dims := newScaledDims(1.0)
 	vertPadV := int(baseVertBadgePaddingV) // rounded badge: no pill padding
 	sectionH := int(dims.badgeHeight)
-	gap := int(math.Round(4.0))
+	gap := badgeInwardGap
 	if labelTop == value {
 		// tb value / bt label sits in the bottom section.
 		y0 := vertPadV + sectionH + gap
@@ -70,15 +69,9 @@ func verticalAppearance(style services.BadgeStyle) services.BadgeAppearance {
 }
 
 // TestVerticalValueTextCentredLikeHorizontal guards the vertical badge (tb/bt)
-// text centring: the value text must sit in its section exactly where the
-// horizontal (lr) badge puts it — same top and bottom gaps relative to the
-// section, and horizontally centred on the badge. Both paths centre the text
-// by its ink bounding box, so the visible ink matches.
-// TestVerticalValueTextCentredLikeHorizontal guards the vertical value text
-// placement: it stays horizontally centred on the badge, and hugs the seam so
-// the logo's INWARD side keeps barely any margin from the text (tb: text top at
-// the seam; bt: text bottom at the seam) — the user requirement "the side that
-// goes inward, into the badge, not outside, i want barely any margin".
+// text centring: the value text is centred in its (fixed) value section on
+// BOTH axes, exactly like the horizontal (lr) badge centres it in the value
+// section — the text box owns the remaining space below/above the logo.
 func TestVerticalValueTextCentredLikeHorizontal(t *testing.T) {
 	loadTestFont(t)
 	vf := GetValueFontFace()
@@ -123,16 +116,11 @@ func TestVerticalValueTextCentredLikeHorizontal(t *testing.T) {
 			t.Errorf("%s: value text ink centre x=%d, badge centre x=%d (off by %d)", tc.name, inkCentreX, badgeCentreX, diff)
 		}
 
-		// Hugs the seam: the text's seam-side gap is tiny (the inward margin),
-		// and the opposite-side gap absorbs the rest of the section.
-		var seamGap int
-		if tc.style == services.BadgeStyleLogoTB {
-			seamGap = minY - vY0 // tb: text top hugs the seam
-		} else {
-			seamGap = vY1 - maxY // bt: text bottom hugs the seam
-		}
-		if seamGap > 6 {
-			t.Errorf("%s: value text seam gap=%d, want <= 6px (barely any inward margin)", tc.name, seamGap)
+		// Vertically centred in the value section, like the horizontal badge.
+		inkCentreY := (minY + maxY) / 2
+		sectionCentreY := (vY0 + vY1) / 2
+		if diff := abs(inkCentreY - sectionCentreY); diff > 1 {
+			t.Errorf("%s: value text ink centre y=%d, section centre y=%d (off by %d)", tc.name, inkCentreY, sectionCentreY, diff)
 		}
 	}
 }
@@ -273,7 +261,7 @@ func TestVerticalBadgeBoxFixedAcrossTextScale(t *testing.T) {
 					dims := newScaledDims(1.0)
 					vertPadV := int(baseVertBadgePaddingV) + int(basePillPadding)
 					sectionH := int(dims.badgeHeight) + int(dims.pillPaddingV)
-					gap := int(math.Round(4.0))
+					gap := badgeInwardGap
 					if (tc.style == services.BadgeStyleLogoTB) == section.value {
 						y0 = vertPadV + sectionH + gap
 						y1 = y0 + sectionH
@@ -548,9 +536,9 @@ func TestVerticalBadgeLogoMarginsMatchHorizontal(t *testing.T) {
 			}
 
 			// Side margins (left/right) must match the horizontal logo's outer
-			// side margin. The horizontal logo is centred in its label section,
-			// so its left and right margins are equal; the tb/bt logo's outer
-			// left and right margins must each equal that side margin.
+			// side margin. The horizontal logo is pinned to the seam, so its
+			// outer side margin (hLeft for lr) is the equal outer margin; the
+			// tb/bt logo's outer left and right margins must each equal that.
 			if diff := abs(vLeft - hLeft); diff > 1 {
 				t.Errorf("%s/%s: logo left margin=%d, horizontal logo side margin=%d (off by %d)", sh.name, tc.name, vLeft, hLeft, diff)
 			}
@@ -570,6 +558,60 @@ func TestVerticalBadgeLogoMarginsMatchHorizontal(t *testing.T) {
 					t.Errorf("%s/bt: logo bottom margin=%d, horizontal logo bottom margin=%d (off by %d)", sh.name, vBottom, hBottom, diff)
 				}
 			}
+		}
+	}
+}
+
+// TestVerticalLogoSizeIndependentOfBadgeHeight guards that the tb/bt logo
+// size never tracks badge_height (per-axis): rendering at Height 100 vs 200
+// must yield the SAME logo ink size — the extra height becomes padding, not a
+// smaller/bigger logo (mirrors the horizontal badge, which keeps its logo at
+// logo_size regardless of badge height).
+func TestVerticalLogoSizeIndependentOfBadgeHeight(t *testing.T) {
+	loadTestFont(t)
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	if vf == nil || lf == nil {
+		t.Skip("fonts not loaded")
+	}
+	defer vf.Close()
+	defer lf.Close()
+
+	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 48; x++ {
+			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+		}
+	}
+	iconCacheMu.Lock()
+	iconCache[*services.SourceImdb] = synthetic
+	iconCacheMu.Unlock()
+	defer func() {
+		iconCacheMu.Lock()
+		delete(iconCache, *services.SourceImdb)
+		iconCacheMu.Unlock()
+	}()
+
+	colors := map[string]services.SourceColorSet{
+		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
+	}
+	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
+
+	for _, style := range []services.BadgeStyle{services.BadgeStyleLogoTB, services.BadgeStyleValueTB} {
+		base := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: style, Height: 100}
+		tall := base
+		tall.Height = 200
+		img1 := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, base, 1.0, 1.0, 1.0, colors)
+		img2 := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, tall, 1.0, 1.0, 1.0, colors)
+		ax0, ay0, ax1, ay1, ok1 := cyanBounds(img1)
+		bx0, by0, bx1, by1, ok2 := cyanBounds(img2)
+		if !ok1 || !ok2 {
+			t.Fatalf("%s: logo ink not found at Height 100 (%v) or 200 (%v)", style, ok1, ok2)
+		}
+		w1, h1 := ax1-ax0+1, ay1-ay0+1
+		w2, h2 := bx1-bx0+1, by1-by0+1
+		if w1 != w2 || h1 != h2 {
+			t.Errorf("%s: logo size changes with badge_height: Height100 %dx%d vs Height200 %dx%d (must be identical)", style, w1, h1, w2, h2)
 		}
 	}
 }

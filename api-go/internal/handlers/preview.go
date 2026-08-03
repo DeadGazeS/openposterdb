@@ -360,13 +360,11 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Shape the demo artwork so the fit modes (native/cover/pad/blur) are
-	// visibly different in the preview while the output canvas always stays a
-	// 2:3 portrait (the web preview box is sized from the rendered image's
-	// natural dimensions): a genuine 2:3 poster renders identically under every
-	// fit, so 2:3 artwork is centre-cropped to a wide 3:2 box first, and native
-	// is composed onto a 2:3 canvas so the preview box never changes shape.
-	// Non-2:3 artwork passes through unchanged.
+	// Pass the demo artwork through unchanged so every fit previews exactly
+	// what the real image endpoint renders (native = the full poster at its
+	// natural ratio; cover/pad/blur shape the 2:3 canvas). The web preview box
+	// is sized from the rendered image's natural dimensions, so the portrait
+	// box is stable for the 2:3 demo poster under every fit.
 	posterBytes, err = image.PosterPreviewArtwork(posterBytes, posterFit, targetWidth)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})

@@ -173,10 +173,15 @@ func fitPoster(base image.Image, targetWidth uint32, fit services.PosterFit) *im
 		return scaled
 
 	case services.PosterFitBlur:
-		// For blur, we just do pad for now (blur requires image processing not available in stdlib)
+		// Fit the whole poster inside the 2:3 frame and fill the leftover bars
+		// with a genuinely blurred, zoomed copy of the poster: the fill is a
+		// cover-crop of the artwork, blurred via the same dependency-free
+		// downscale/upscale trick the episode spoiler blur uses, with the
+		// sharp full poster drawn centred on top.
 		th := posterTargetHeight(targetWidth)
 		scaled := image.NewRGBA(image.Rect(0, 0, int(targetWidth), int(th)))
 		filled := resizeToFill(base, int(targetWidth), int(th))
+		filled = blurImage(filled, 4)
 		draw.Draw(scaled, scaled.Bounds(), filled, image.Point{}, draw.Src)
 		scaledImg := resizeExact(base, int(targetWidth), int(th))
 		ox := (int(targetWidth) - int(scaledImg.Bounds().Dx())) / 2
@@ -190,8 +195,7 @@ func fitPoster(base image.Image, targetWidth uint32, fit services.PosterFit) *im
 	return rgba
 }
 
-func resizeToFill(img image.Image, targetW, targetH int) *image.RGBA {
-	bounds := img.Bounds()
+func resizeToFill(img image.Image, targetW, targetH int) *image.RGBA {	bounds := img.Bounds()
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
@@ -221,6 +225,26 @@ func resizeExact(img image.Image, targetW, targetH int) *image.RGBA {
 	resized := image.NewRGBA(image.Rect(0, 0, nw, nh))
 	draw.ApproxBiLinear.Scale(resized, resized.Bounds(), img, bounds, draw.Src, nil)
 	return resized
+}
+
+// blurImage blurs an RGBA image by downscaling it to 1/divisor and scaling it
+// back up with bilinear interpolation — a cheap, dependency-free blur used for
+// blurred backdrops (the episode spoiler blur and the poster blur-fill fit).
+// Very small images are returned unchanged.
+func blurImage(img *image.RGBA, divisor int) *image.RGBA {
+	if divisor < 2 {
+		divisor = 2
+	}
+	b := img.Bounds()
+	cw, ch := b.Dx(), b.Dy()
+	if cw < divisor*2 || ch < divisor*2 {
+		return img
+	}
+	small := image.NewRGBA(image.Rect(0, 0, cw/divisor, ch/divisor))
+	draw.ApproxBiLinear.Scale(small, small.Bounds(), img, b, draw.Src, nil)
+	out := image.NewRGBA(b)
+	draw.ApproxBiLinear.Scale(out, out.Bounds(), small, small.Bounds(), draw.Src, nil)
+	return out
 }
 
 // --- Logo rendering ---
@@ -501,12 +525,7 @@ func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFac
 	}
 
 	if blur && canvas.Bounds().Dx() >= 8 && canvas.Bounds().Dy() >= 8 {
-		cw := canvas.Bounds().Dx()
-		ch := canvas.Bounds().Dy()
-		small := image.NewRGBA(image.Rect(0, 0, cw/4, ch/4))
-		draw.ApproxBiLinear.Scale(small, small.Bounds(), canvas, canvas.Bounds(), draw.Src, nil)
-		canvas = image.NewRGBA(image.Rect(0, 0, cw, ch))
-		draw.ApproxBiLinear.Scale(canvas, canvas.Bounds(), small, small.Bounds(), draw.Src, nil)
+		canvas = blurImage(canvas, 4)
 	}
 
 	if len(badges) == 0 {

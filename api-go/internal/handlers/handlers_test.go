@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"openposterdb/internal/services"
@@ -159,6 +161,50 @@ func TestApplyQueryOverridesLogoIgnoresPosterOnly(t *testing.T) {
 	}
 	if result.PosterLayout.Bottom.PerRow != s.PosterLayout.Bottom.PerRow {
 		t.Error("poster layout should be untouched for logo")
+	}
+}
+
+func TestParseImageQueryBadgeWidthHeight(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/preview/poster?badge_width=200&badge_height=50", nil)
+	q := parseImageQuery(req)
+	if q.BadgeWidth == nil || *q.BadgeWidth != 200 {
+		t.Errorf("badge_width not parsed: got %v", q.BadgeWidth)
+	}
+	if q.BadgeHeight == nil || *q.BadgeHeight != 50 {
+		t.Errorf("badge_height not parsed: got %v", q.BadgeHeight)
+	}
+	if !q.HasOverrides() {
+		t.Error("badge_width/badge_height should count as overrides")
+	}
+}
+
+func TestParseImageQueryBadgeWidthHeightAbsent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/preview/poster", nil)
+	q := parseImageQuery(req)
+	if q.BadgeWidth != nil || q.BadgeHeight != nil {
+		t.Error("badge_width/badge_height should be nil when absent")
+	}
+}
+
+func TestApplyQueryOverridesBadgeWidthHeight(t *testing.T) {
+	s := services.DefaultRenderSettings()
+	q := &ImageQuery{}
+	w := int32(150)
+	h := int32(80)
+	q.BadgeWidth = &w
+	q.BadgeHeight = &h
+
+	result := applyQueryOverrides(&s, q, "poster")
+	if result.PosterBadgeWidth != 150 || result.PosterBadgeHeight != 80 {
+		t.Errorf("poster badge width/height: got %d/%d want 150/80", result.PosterBadgeWidth, result.PosterBadgeHeight)
+	}
+
+	other := applyQueryOverrides(&s, q, "logo")
+	if other.LogoBadgeWidth != 150 || other.LogoBadgeHeight != 80 {
+		t.Errorf("logo badge width/height: got %d/%d want 150/80", other.LogoBadgeWidth, other.LogoBadgeHeight)
+	}
+	if other.PosterBadgeWidth != s.PosterBadgeWidth {
+		t.Error("poster settings should be untouched for logo kind")
 	}
 }
 

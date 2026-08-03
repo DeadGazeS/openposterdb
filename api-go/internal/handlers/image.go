@@ -65,6 +65,7 @@ func (q *ImageQuery) HasOverrides() bool {
 		q.BadgeStyle != nil || q.LabelStyle != nil || q.TextSize != nil ||
 		q.BadgeSize != nil || q.LogoSize != nil ||
 		q.BadgeDirection != nil || q.BadgeShape != nil || q.BadgeAlpha != nil ||
+		q.BadgeWidth != nil || q.BadgeHeight != nil ||
 		q.Layout != nil || q.ImageSource != nil || q.Textless != nil ||
 		q.Blur != nil || q.Fit != nil ||
 		q.EdgeInsetX != nil || q.EdgeInsetY != nil
@@ -159,6 +160,34 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 			s.BackdropBadgeSize = size
 		case "episode":
 			s.EpisodeBadgeSize = size
+		}
+	}
+
+	if query.BadgeWidth != nil {
+		width := services.ClampScalePercent(*query.BadgeWidth)
+		switch kind {
+		case "poster":
+			s.PosterBadgeWidth = width
+		case "logo":
+			s.LogoBadgeWidth = width
+		case "backdrop":
+			s.BackdropBadgeWidth = width
+		case "episode":
+			s.EpisodeBadgeWidth = width
+		}
+	}
+
+	if query.BadgeHeight != nil {
+		height := services.ClampScalePercent(*query.BadgeHeight)
+		switch kind {
+		case "poster":
+			s.PosterBadgeHeight = height
+		case "logo":
+			s.LogoBadgeHeight = height
+		case "backdrop":
+			s.BackdropBadgeHeight = height
+		case "episode":
+			s.EpisodeBadgeHeight = height
 		}
 	}
 
@@ -610,6 +639,18 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 		var n int32
 		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
 			query.BadgeSize = &n
+		}
+	}
+	if v := q.Get("badge_width"); v != "" {
+		var n int32
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			query.BadgeWidth = &n
+		}
+	}
+	if v := q.Get("badge_height"); v != "" {
+		var n int32
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			query.BadgeHeight = &n
 		}
 	}
 	if v := q.Get("text_size"); v != "" {

@@ -596,7 +596,7 @@ describe('FreeApiKeyCard', () => {
       lang: 'de',
     }))
     const text = wrapper.text()
-    expect(text).toContain('Badge style: default (Logo top · value bottom)')
+    expect(text).toContain('Badge style: default (Logo top · Number bottom)')
     expect(text).toContain('Label style: default (Text)')
     expect(wrapper.find('input#free-text-size').attributes('placeholder')).toContain('150%')
     expect(text).toContain('Max badges: default (5)')
@@ -606,10 +606,10 @@ describe('FreeApiKeyCard', () => {
 
   it('reflects per-image-type defaults when switching image type', async () => {
     const wrapper = mountCard(true, makeDefaults({ poster_badge_style: 'tb', logo_badge_style: 'lr' }))
-    expect(wrapper.text()).toContain('Badge style: default (Logo top · value bottom)')
+    expect(wrapper.text()).toContain('Badge style: default (Logo top · Number bottom)')
 
     await setSelectById(wrapper, 'free-image-type', 'logo')
-    expect(wrapper.text()).toContain('Badge style: default (Logo left · value right)')
+    expect(wrapper.text()).toContain('Badge style: default (Logo left · Number right)')
   })
 
   it('dims excluded sources in the priority list and pre-checks them', () => {
@@ -681,7 +681,7 @@ describe('FreeApiKeyCard', () => {
     await flushPromises()
 
     const text = wrapper.text()
-    expect(text).toContain('Badge style: default (Logo left · value right)')
+    expect(text).toContain('Badge style: default (Logo left · Number right)')
     expect(text).toContain('Language: any (fr)')
   })
 })

@@ -81,10 +81,10 @@ describe('FreeApiKeyCard trigger display across image-type switches', () => {
     // poster_badge_style=v (Vertical), backdrop_badge_style=h (Horizontal)
     const wrapper = mountReal()
     await flushPromises()
-    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo top · value bottom)')
+    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo top · Number bottom)')
 
     await setSelect(wrapper, 'free-image-type', 'backdrop')
-    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo left · value right)')
+    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo left · Number right)')
   })
 
   it('reflects the poster fit default annotation', async () => {
@@ -103,6 +103,6 @@ describe('FreeApiKeyCard trigger display across image-type switches', () => {
 
     useAuthStore().freeKeyDefaults = makeDefaults({ poster_badge_style: 'lr' })
     await flushPromises()
-    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo left · value right)')
+    expect(triggerText(wrapper, 'free-badge-style')).toBe('Badge style: default (Logo left · Number right)')
   })
 })
