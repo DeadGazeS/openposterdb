@@ -133,7 +133,7 @@ describe('auth store - API key session', () => {
 
     await auth.loginWithApiKey('my-key')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!
     expect(url).toContain('/api/auth/key-login')
     expect(options.method).toBe('POST')
     expect(JSON.parse(options.body)).toEqual({ api_key: 'my-key' })

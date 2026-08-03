@@ -672,6 +672,7 @@ function toggleExclude(key: string, checked: boolean) {
         <Check class="size-4" />
         Saved
       </span>
+      <span v-if="error" class="text-sm text-destructive">{{ error }}</span>
       <Button size="sm" :disabled="saving" data-testid="save-settings-button" @click="save">
         <Loader2 v-if="saving" class="size-4 animate-spin mr-1" />
         Save
@@ -688,7 +689,6 @@ function toggleExclude(key: string, checked: boolean) {
       >
         Reset to defaults
       </Button>
-      <span v-if="error" class="text-sm text-destructive">{{ error }}</span>
     </div>
 
     <Tabs default-value="image-settings" :unmount-on-hide="false">
@@ -1115,8 +1115,11 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="h">Horizontal</SelectItem>
-                  <SelectItem value="v">Vertical</SelectItem>
+                  <SelectItem value="d">Auto</SelectItem>
+                  <SelectItem value="lr">Logo left · value right</SelectItem>
+                  <SelectItem value="rl">Value left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
+                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editLogoBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
@@ -1257,8 +1260,11 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="h">Horizontal</SelectItem>
-                  <SelectItem value="v">Vertical</SelectItem>
+                  <SelectItem value="d">Auto</SelectItem>
+                  <SelectItem value="lr">Logo left · value right</SelectItem>
+                  <SelectItem value="rl">Value left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
+                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editBackdropBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
@@ -1451,8 +1457,11 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="h">Horizontal</SelectItem>
-                  <SelectItem value="v">Vertical</SelectItem>
+                  <SelectItem value="d">Auto</SelectItem>
+                  <SelectItem value="lr">Logo left · value right</SelectItem>
+                  <SelectItem value="rl">Value left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
+                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editEpisodeBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
@@ -1568,8 +1577,10 @@ function toggleExclude(key: string, checked: boolean) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="d">Auto</SelectItem>
-                  <SelectItem value="h">Horizontal</SelectItem>
-                  <SelectItem value="v">Vertical</SelectItem>
+                  <SelectItem value="lr">Logo left · value right</SelectItem>
+                  <SelectItem value="rl">Value left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
+                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
             </div>

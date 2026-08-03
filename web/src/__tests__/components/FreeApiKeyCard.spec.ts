@@ -24,14 +24,22 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     poster_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
     logo_ratings_limit: 5,
     backdrop_ratings_limit: 5,
-    poster_badge_style: 'v',
+    logo_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 5, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+    poster_badge_style: 'tb',
     logo_badge_style: 'v',
     backdrop_badge_style: 'v',
     poster_label_style: 'o',
     logo_label_style: 'o',
     backdrop_label_style: 'o',
     poster_badge_direction: 'd',
-    
+    poster_badge_shape: 'r',
+    logo_badge_shape: 'r',
+    backdrop_badge_shape: 'r',
+    episode_badge_shape: 'r',
+    poster_badge_background: 'd',
+    logo_badge_background: 'd',
+    backdrop_badge_background: 'd',
+    episode_badge_background: 'd',
     poster_fit: 'native',
     poster_text_size: 100,
     logo_text_size: 100,
@@ -143,7 +151,7 @@ async function setSelectById(wrapper: VueWrapper, triggerId: string, value: stri
 /** Get the curl example code element (the last code element). */
 function findCurlCode(wrapper: VueWrapper) {
   const codes = wrapper.findAll('code')
-  return codes[codes.length - 1]
+  return codes[codes.length - 1]!
 }
 
 describe('FreeApiKeyCard', () => {
@@ -318,7 +326,7 @@ describe('FreeApiKeyCard', () => {
     const wrapper = mountCard(true)
 
     // Override poster's per-type render settings away from their defaults.
-    await setSelectById(wrapper, 'free-badge-style', 'h')
+    await setSelectById(wrapper, 'free-badge-style', 'lr')
     await setSelectById(wrapper, 'free-label-style', 't')
     await wrapper.find('input[aria-label*="Badge text size"]').setValue('150')
     await wrapper.find('input[aria-label*="Badge size"]').setValue('180')
@@ -327,7 +335,7 @@ describe('FreeApiKeyCard', () => {
     // A global control (lang) that should survive the switch.
     await setSelectById(wrapper, 'free-lang', 'en')
     const posterCurl = findCurlCode(wrapper).text()
-    expect(posterCurl).toContain('badge_style=h')
+    expect(posterCurl).toContain('badge_style=lr')
     expect(posterCurl).toContain('label_style=t')
     expect(posterCurl).toContain('text_size=150')
     expect(posterCurl).toContain('badge_size=180')
@@ -516,13 +524,13 @@ describe('FreeApiKeyCard', () => {
   it('seeds the rating priority list from the server order', () => {
     const wrapper = mountCard(true, makeDefaults({ ratings_order: 'tmdb,imdb,rt' }))
     const labels = orderLabels(wrapper)
-    expect(labels[0].text()).toBe('TMDB')
-    expect(labels[1].text()).toBe('IMDb')
+    expect(labels[0]!.text()).toBe('TMDB')
+    expect(labels[1]!.text()).toBe('IMDb')
   })
 
   it('annotates dropdown defaults with the server values', () => {
     const wrapper = mountCard(true, makeDefaults({
-      poster_badge_style: 'v',
+      poster_badge_style: 'tb',
       poster_label_style: 't',
       poster_text_size: 150,
       ratings_limit: 5,
@@ -530,7 +538,7 @@ describe('FreeApiKeyCard', () => {
       lang: 'de',
     }))
     const text = wrapper.text()
-    expect(text).toContain('Badge style: default (Vertical)')
+    expect(text).toContain('Badge style: default (Logo top · value bottom)')
     expect(text).toContain('Label style: default (Text)')
     expect(wrapper.find('input#free-text-size').attributes('placeholder')).toContain('150%')
     expect(text).toContain('Max badges: default (5)')
@@ -539,11 +547,11 @@ describe('FreeApiKeyCard', () => {
   })
 
   it('reflects per-image-type defaults when switching image type', async () => {
-    const wrapper = mountCard(true, makeDefaults({ poster_badge_style: 'v', logo_badge_style: 'h' }))
-    expect(wrapper.text()).toContain('Badge style: default (Vertical)')
+    const wrapper = mountCard(true, makeDefaults({ poster_badge_style: 'tb', logo_badge_style: 'lr' }))
+    expect(wrapper.text()).toContain('Badge style: default (Logo top · value bottom)')
 
     await setSelectById(wrapper, 'free-image-type', 'logo')
-    expect(wrapper.text()).toContain('Badge style: default (Horizontal)')
+    expect(wrapper.text()).toContain('Badge style: default (Logo left · value right)')
   })
 
   it('dims excluded sources in the priority list and pre-checks them', () => {
@@ -589,7 +597,7 @@ describe('FreeApiKeyCard', () => {
     const wrapper = mountCard(true, makeDefaults({ ratings_order: 'tmdb,imdb,rt' }))
     // Move the second item (imdb) above tmdb — diverges from the server baseline.
     const upButtons = wrapper.findAll('button[title="Move up"]')
-    await upButtons[1].trigger('click')
+    await upButtons[1]!.trigger('click')
     await flushPromises()
     expect(findCurlCode(wrapper).text()).toContain('ratings_order=imdb%2Ctmdb')
   })
@@ -608,14 +616,14 @@ describe('FreeApiKeyCard', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve(makeDefaults({ poster_badge_style: 'h', lang: 'fr' })),
+        json: () => Promise.resolve(makeDefaults({ poster_badge_style: 'lr', lang: 'fr' })),
       }),
     )
     const wrapper = mountCard(true, null)
     await flushPromises()
 
     const text = wrapper.text()
-    expect(text).toContain('Badge style: default (Horizontal)')
+    expect(text).toContain('Badge style: default (Logo left · value right)')
     expect(text).toContain('Language: any (fr)')
   })
 })

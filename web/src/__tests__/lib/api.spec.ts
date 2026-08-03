@@ -42,7 +42,7 @@ describe('api', () => {
     await get('/api/test')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/test')
     expect(options.headers.get('Authorization')).toBe('Bearer test-token')
   })
@@ -53,7 +53,7 @@ describe('api', () => {
 
     await post('/api/items', { name: 'test' })
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!!
     expect(options.method).toBe('POST')
     expect(options.headers.get('Content-Type')).toBe('application/json')
     expect(options.body).toBe(JSON.stringify({ name: 'test' }))
@@ -65,7 +65,7 @@ describe('api', () => {
 
     await del('/api/items/1')
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!!
     expect(options.method).toBe('DELETE')
   })
 
@@ -115,7 +115,7 @@ describe('api', () => {
 
     await get('/api/test')
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!!
     expect(options.credentials).toBe('include')
   })
 
@@ -126,7 +126,7 @@ describe('api', () => {
 
     await get('/api/public')
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!!
     expect(options.headers.has('Authorization')).toBe(false)
   })
 
@@ -154,7 +154,7 @@ describe('api', () => {
 
     await put('/api/settings', { image_source: 'f' })
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!!
     expect(options.method).toBe('PUT')
     expect(options.headers.get('Content-Type')).toBe('application/json')
     expect(options.body).toBe(JSON.stringify({ image_source: 'f' }))
@@ -166,7 +166,7 @@ describe('api', () => {
 
     await post('/api/action')
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!!
     expect(options.headers.has('Content-Type')).toBe(false)
     expect(options.body).toBeUndefined()
   })
@@ -177,7 +177,7 @@ describe('api', () => {
 
     await adminApi.fetchPoster('imdb', 'tt0111161')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/posters/imdb/tt0111161/fetch')
     expect(options.method).toBe('POST')
   })
@@ -188,7 +188,7 @@ describe('api', () => {
 
     await adminApi.fetchPoster('tmdb', '550')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/posters/tmdb/550/fetch')
   })
 
@@ -198,7 +198,7 @@ describe('api', () => {
 
     await adminApi.purgeAll()
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/cache/purge')
     expect(options.method).toBe('POST')
   })
@@ -209,7 +209,7 @@ describe('api', () => {
 
     await adminApi.clearPosters()
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/posters')
     expect(options.method).toBe('DELETE')
   })
@@ -220,7 +220,7 @@ describe('api', () => {
 
     await adminApi.purgePoster('imdb', 'tt0111161')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/posters/imdb/tt0111161')
     expect(options.method).toBe('DELETE')
   })
@@ -231,7 +231,7 @@ describe('api', () => {
 
     await adminApi.purgeEpisode('tmdb', 'episode-1396-S1E1')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/episodes/tmdb/episode-1396-S1E1')
     expect(options.method).toBe('DELETE')
   })
@@ -242,7 +242,7 @@ describe('api', () => {
 
     await adminApi.purgePoster('imdb', 'tt0111161_t_de@imc', 'variant')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/posters/imdb/tt0111161_t_de%40imc?scope=variant')
     expect(options.method).toBe('DELETE')
   })
@@ -253,7 +253,7 @@ describe('api', () => {
 
     await adminApi.previewPoster(3, 'imdb,rt,tmdb')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('/api/admin/preview/poster')
     expect(url).toContain('ratings_limit=3')
     expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
@@ -265,7 +265,7 @@ describe('api', () => {
 
     await adminApi.previewPoster(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"bottom":{"per_row":2}}')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('layout=%7B%22bottom%22%3A%7B%22per_row%22%3A2%7D%7D')
   })
 
@@ -275,7 +275,7 @@ describe('api', () => {
 
     await adminApi.previewPoster(3, 'imdb,rt')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).not.toContain('layout')
   })
 
@@ -285,7 +285,7 @@ describe('api', () => {
 
     await adminApi.previewPoster(3, 'imdb,rt', 'h', 'i')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('label_style=i')
   })
 
@@ -295,7 +295,7 @@ describe('api', () => {
 
     await adminApi.previewPoster(3, 'imdb,rt', 'h', 'i', 'v')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('badge_direction=v')
   })
 
@@ -305,7 +305,7 @@ describe('api', () => {
 
     await adminApi.previewPoster(3, 'imdb,rt')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).not.toContain('badge_direction')
   })
 
@@ -315,7 +315,7 @@ describe('api', () => {
 
     await adminApi.previewLogo(3, 'imdb,rt', 'h', 'i')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('label_style=i')
   })
 
@@ -325,7 +325,7 @@ describe('api', () => {
 
     await adminApi.previewBackdrop(3, 'imdb,rt', 'v', 'i')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('label_style=i')
   })
 
@@ -335,7 +335,7 @@ describe('api', () => {
 
     await adminApi.getLogos(1, 50)
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/logos?page=1&page_size=50')
   })
 
@@ -345,7 +345,7 @@ describe('api', () => {
 
     await adminApi.getLogoImage('imdb/tt0111161')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/logos/imdb/tt0111161')
   })
 
@@ -355,7 +355,7 @@ describe('api', () => {
 
     await adminApi.fetchLogo('imdb', 'tt0111161')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/logos/imdb/tt0111161/fetch')
     expect(options.method).toBe('POST')
   })
@@ -366,7 +366,7 @@ describe('api', () => {
 
     await adminApi.getBackdrops(1, 50)
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/backdrops?page=1&page_size=50')
   })
 
@@ -376,7 +376,7 @@ describe('api', () => {
 
     await adminApi.getBackdropImage('tmdb/550')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/backdrops/tmdb/550')
   })
 
@@ -386,7 +386,7 @@ describe('api', () => {
 
     await adminApi.fetchBackdrop('tmdb', '550')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/backdrops/tmdb/550/fetch')
     expect(options.method).toBe('POST')
   })
@@ -397,7 +397,7 @@ describe('api', () => {
 
     await adminApi.getEpisodes(1, 50)
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/episodes?page=1&page_size=50')
   })
 
@@ -407,7 +407,7 @@ describe('api', () => {
 
     await adminApi.getEpisodeImage('tmdb/episode-1396-S1E1')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/episodes/tmdb/episode-1396-S1E1/image')
   })
 
@@ -417,7 +417,7 @@ describe('api', () => {
 
     await adminApi.fetchEpisode('tmdb', 'episode-1396-S1E1')
 
-    const [url, options] = fetchMock.mock.calls[0]
+    const [url, options] = fetchMock.mock.calls[0]!!
     expect(url).toBe('/api/admin/episodes/tmdb/episode-1396-S1E1/fetch')
     expect(options.method).toBe('POST')
   })
@@ -428,7 +428,7 @@ describe('api', () => {
 
     await adminApi.previewEpisode(3, 'imdb,rt,tmdb')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('/api/admin/preview/episode')
     expect(url).toContain('ratings_limit=3')
     expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
@@ -440,7 +440,7 @@ describe('api', () => {
 
     await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"right":{"per_row":1}}')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('layout=%7B%22right%22%3A%7B%22per_row%22%3A1%7D%7D')
   })
 
@@ -450,7 +450,7 @@ describe('api', () => {
 
     await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'h')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('badge_direction=h')
   })
 
@@ -460,7 +460,7 @@ describe('api', () => {
 
     await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, true)
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('blur=true')
   })
 
@@ -470,7 +470,7 @@ describe('api', () => {
 
     await adminApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, false)
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).not.toContain('blur')
   })
 
@@ -480,7 +480,7 @@ describe('api', () => {
 
     await adminApi.previewEpisode(3, 'imdb,rt', 'v', 'i')
 
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0]!!
     expect(url).toContain('label_style=i')
   })
 })

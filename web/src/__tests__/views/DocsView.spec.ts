@@ -89,7 +89,7 @@ describe('DocsView', () => {
     mountView()
     await flushPromises()
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!
     expect(options.headers['Authorization']).toBe('Bearer admin-jwt')
   })
 
@@ -100,7 +100,7 @@ describe('DocsView', () => {
     mountView()
     await flushPromises()
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!
     expect(options.headers['Authorization']).toBe('Bearer key-jwt')
   })
 
@@ -110,7 +110,7 @@ describe('DocsView', () => {
     mountView()
     await flushPromises()
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!
     expect(options.headers['Authorization']).toBeUndefined()
   })
 })

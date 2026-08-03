@@ -186,7 +186,7 @@ describe('auth store', () => {
 
     await auth.login('user', 'pass')
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!
     expect(options.credentials).toBe('include')
   })
 
@@ -197,7 +197,7 @@ describe('auth store', () => {
 
     await auth.setup('user', 'password123')
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!
     expect(options.credentials).toBe('include')
   })
 
@@ -208,7 +208,7 @@ describe('auth store', () => {
 
     await auth.refresh()
 
-    const [, options] = fetchMock.mock.calls[0]
+    const [, options] = fetchMock.mock.calls[0]!
     expect(options.credentials).toBe('include')
   })
 

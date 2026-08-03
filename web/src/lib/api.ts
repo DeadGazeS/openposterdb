@@ -79,12 +79,12 @@ export interface SaveSettingsPayload {
   image_source: string
   lang: string
   textless: boolean
-  ratings_limit: number
+  ratings_limit?: number
   ratings_order: string
   ratings_exclude: string
   poster_layout: ImageLayout
-  logo_ratings_limit: number
-  backdrop_ratings_limit: number
+  logo_ratings_limit?: number
+  backdrop_ratings_limit?: number
   poster_badge_style: string
   logo_badge_style: string
   backdrop_badge_style: string
@@ -107,7 +107,7 @@ export interface SaveSettingsPayload {
   backdrop_badge_direction: string
   backdrop_edge_inset_x: number
   backdrop_edge_inset_y: number
-  episode_ratings_limit: number
+  episode_ratings_limit?: number
   episode_badge_style: string
   episode_label_style: string
   episode_text_size: number
