@@ -15,7 +15,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 
 - **Everything self-hosted** — your keys, your data, no third-party dependency for image serving.
 - **Drop-in RPDB compatibility** — same API shape, so existing Plex/Jellyfin/aiometadata setups can switch over.
-- **Fully customisable overlays** — per-source badge colours, shape, size, position, and opacity.
+- **Fully customisable overlays** — per-source badge colours, badge style, shape, size, and opacity.
 - **Works with the tools you already use** — Plex, Jellyfin, and aiometadata.
 
 ## Features
@@ -24,7 +24,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - **Posters, logos, backdrops, and episode stills** — generated on demand with rating overlays.
 - **Per-source badge colours** — logo background, text background, border, and text colour for every rating source. Rotten Tomatoes gets separate settings for each logo variant (Certified Fresh, Fresh, Rotten, Verified Hot, and more).
 - **Anti-aliased rendering** — smooth rounded and pill badge shapes with crisp border rings.
-- **Flexible layouts** — badge direction, style, shape, size, and aspect-ratio fitting are all configurable, plus a per-kind **badge layout grid**: set how many badges (per row × rows) sit on each of the four sides (top/right/bottom/left), each anchored to a start position, with a configurable fill order. The total number of ratings shown equals the sum of the four sides.
+- **Flexible layouts** — badge style (logo/value arrangement: left-right, right-left, top-bottom, or bottom-top), shape, size, and aspect-ratio fitting are all configurable, plus a per-kind **badge layout grid**: set how many badges (per row × rows) sit on each of the four sides (top/right/bottom/left), each anchored to a start position, with a configurable fill order. The total number of ratings shown equals the sum of the four sides.
 - **Independent sizing up to 400%** — text, badge, and logo size sliders per image type (50–400%).
 - **High-resolution label style** — a `High Res` label option renders each rating source's crisp, source-SVG logo (instead of the 48px official PNGs).
 - **Aspect-ratio fitting** — poster fit modes (`native`/`cover`/`pad`/`blur`) keep non-2:3 posters from being cropped.
@@ -33,7 +33,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 
 ### Ratings
 - Aggregates ratings from **MDBList, OMDb, Trakt, and TMDB** across IMDb, Rotten Tomatoes (critics and audience), Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.
-- Configurable **rating order, exclusion, and per-image limits**.
+- Configurable **rating order and per-source exclusion** — reorder with the arrows, hide a source with the eye toggle. The number of ratings shown is driven by the layout grid.
 - Ratings are cached so repeated requests are fast and don't hammer the providers.
 
 ### Configuration & keys

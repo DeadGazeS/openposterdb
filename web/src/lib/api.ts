@@ -91,30 +91,39 @@ export interface SaveSettingsPayload {
   poster_label_style: string
   logo_label_style: string
   backdrop_label_style: string
-  poster_badge_direction: string
+  // Direction fields are optional: when omitted the backend keeps the stored value.
+  poster_badge_direction?: string
   poster_fit: string
   poster_text_size: number
   logo_text_size: number
   backdrop_text_size: number
-  poster_badge_size: number
-  logo_badge_size: number
-  backdrop_badge_size: number
+  poster_badge_size?: number
+  poster_badge_width?: number
+  poster_badge_height?: number
+  logo_badge_size?: number
+  logo_badge_width?: number
+  logo_badge_height?: number
+  backdrop_badge_size?: number
+  backdrop_badge_width?: number
+  backdrop_badge_height?: number
   poster_logo_size: number
   logo_logo_size: number
   backdrop_logo_size: number
   logo_layout: ImageLayout
   backdrop_layout: ImageLayout
-  backdrop_badge_direction: string
+  backdrop_badge_direction?: string
   backdrop_edge_inset_x: number
   backdrop_edge_inset_y: number
   episode_ratings_limit?: number
   episode_badge_style: string
   episode_label_style: string
   episode_text_size: number
-  episode_badge_size: number
+  episode_badge_size?: number
+  episode_badge_width?: number
+  episode_badge_height?: number
   episode_logo_size: number
   episode_layout: ImageLayout
-  episode_badge_direction: string
+  episode_badge_direction?: string
   episode_blur: boolean
   poster_badge_shape: string
   logo_badge_shape: string
@@ -210,14 +219,14 @@ export const adminApi = {
     post(`/api/admin/episodes/${idType}/${idValue}/fetch`),
   purgeEpisode: (idType: string, idValue: string, scope: PurgeScope = 'title'): Promise<Response> =>
     del(purgeUrl('episodes', idType, idValue, scope)),
-  previewPoster: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, textSize?: number, ratingsExclude?: string, layout?: string, badgeShape?: string, badgeAlpha?: number, posterFit?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>): Promise<Response> =>
-    get(buildUrl('/api/admin/preview/poster', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, badge_direction: badgeDirection, text_size: textSize, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, fit: posterFit, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors) })),
-  previewLogo: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, layout?: string, colors?: Record<string, SourceColors>): Promise<Response> =>
-    get(buildUrl('/api/admin/preview/logo', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, layout: layout, colors: colorsQuery(colors) })),
-  previewBackdrop: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, layout?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>): Promise<Response> =>
-    get(buildUrl('/api/admin/preview/backdrop', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, badge_shape: badgeShape, badge_alpha: badgeAlpha, edge_inset_x: edgeInsetX, edge_inset_y: edgeInsetY, layout: layout, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors) })),
-  previewEpisode: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, blur?: boolean, layout?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>): Promise<Response> =>
-    get(buildUrl('/api/admin/preview/episode', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, blur: blur ? 'true' : undefined, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors) })),
+  previewPoster: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, textSize?: number, ratingsExclude?: string, layout?: string, badgeShape?: string, badgeAlpha?: number, posterFit?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    get(buildUrl('/api/admin/preview/poster', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, badge_direction: badgeDirection, text_size: textSize, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, fit: posterFit, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
+  previewLogo: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, layout?: string, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    get(buildUrl('/api/admin/preview/logo', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, layout: layout, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
+  previewBackdrop: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, layout?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    get(buildUrl('/api/admin/preview/backdrop', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, badge_shape: badgeShape, badge_alpha: badgeAlpha, edge_inset_x: edgeInsetX, edge_inset_y: edgeInsetY, layout: layout, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
+  previewEpisode: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, blur?: boolean, layout?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    get(buildUrl('/api/admin/preview/episode', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, blur: blur ? 'true' : undefined, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
 }
 
 // --- Self-service API (API key session JWT auth) ---
@@ -249,14 +258,14 @@ export const selfApi = {
     }),
   resetSettings: (): Promise<Response> =>
     keyRequest('/api/key/me/settings', { method: 'DELETE' }),
-  previewPoster: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, textSize?: number, ratingsExclude?: string, layout?: string, badgeShape?: string, badgeAlpha?: number, posterFit?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>): Promise<Response> =>
-    keyRequest(buildUrl('/api/key/me/preview/poster', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, badge_direction: badgeDirection, text_size: textSize, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, fit: posterFit, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors) })),
-  previewLogo: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, layout?: string, colors?: Record<string, SourceColors>): Promise<Response> =>
-    keyRequest(buildUrl('/api/key/me/preview/logo', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, layout: layout, colors: colorsQuery(colors) })),
-  previewBackdrop: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, layout?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>): Promise<Response> =>
-    keyRequest(buildUrl('/api/key/me/preview/backdrop', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, badge_shape: badgeShape, badge_alpha: badgeAlpha, edge_inset_x: edgeInsetX, edge_inset_y: edgeInsetY, layout: layout, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors) })),
-  previewEpisode: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, blur?: boolean, layout?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>): Promise<Response> =>
-    keyRequest(buildUrl('/api/key/me/preview/episode', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, blur: blur ? 'true' : undefined, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors) })),
+  previewPoster: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, badgeDirection?: string, textSize?: number, ratingsExclude?: string, layout?: string, badgeShape?: string, badgeAlpha?: number, posterFit?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    keyRequest(buildUrl('/api/key/me/preview/poster', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, badge_direction: badgeDirection, text_size: textSize, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, fit: posterFit, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
+  previewLogo: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, layout?: string, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    keyRequest(buildUrl('/api/key/me/preview/logo', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, layout: layout, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
+  previewBackdrop: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, edgeInsetX?: number, edgeInsetY?: number, layout?: string, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    keyRequest(buildUrl('/api/key/me/preview/backdrop', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, badge_shape: badgeShape, badge_alpha: badgeAlpha, edge_inset_x: edgeInsetX, edge_inset_y: edgeInsetY, layout: layout, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
+  previewEpisode: (ratingsLimit: number, ratingsOrder: string, badgeStyle?: string, labelStyle?: string, textSize?: number, badgeDirection?: string, blur?: boolean, layout?: string, ratingsExclude?: string, badgeShape?: string, badgeAlpha?: number, badgeSize?: number, logoSize?: number, colors?: Record<string, SourceColors>, badgeWidth?: number, badgeHeight?: number): Promise<Response> =>
+    keyRequest(buildUrl('/api/key/me/preview/episode', { ratings_limit: ratingsLimit, ratings_order: ratingsOrder, ratings_exclude: ratingsExclude, badge_style: badgeStyle, label_style: labelStyle, text_size: textSize, badge_direction: badgeDirection, blur: blur ? 'true' : undefined, layout: layout, badge_shape: badgeShape, badge_alpha: badgeAlpha, badge_size: badgeSize, logo_size: logoSize, colors: colorsQuery(colors), badge_width: badgeWidth, badge_height: badgeHeight })),
 }
 
 export const keysApi = {

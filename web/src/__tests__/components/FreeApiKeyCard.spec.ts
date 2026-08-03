@@ -36,10 +36,10 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     logo_badge_shape: 'r',
     backdrop_badge_shape: 'r',
     episode_badge_shape: 'r',
-    poster_badge_background: 'd',
-    logo_badge_background: 'd',
-    backdrop_badge_background: 'd',
-    episode_badge_background: 'd',
+    poster_badge_alpha: 80,
+    logo_badge_alpha: 80,
+    backdrop_badge_alpha: 80,
+    episode_badge_alpha: 80,
     poster_fit: 'native',
     poster_text_size: 100,
     logo_text_size: 100,
@@ -512,6 +512,64 @@ describe('FreeApiKeyCard', () => {
     await setSelectById(wrapper, 'free-image-type', 'episode')
 
     expect(wrapper.find('#free-fit').exists()).toBe(false)
+  })
+
+  // --- Background opacity (badge_alpha) ---
+
+  it('emits a badge_alpha override from the background opacity input', async () => {
+    const wrapper = mountCard(true)
+    const input = () => wrapper.find('input[aria-label*="background opacity"]')
+    expect(input().exists()).toBe(true)
+    await input().setValue('65')
+    expect(findCurlCode(wrapper).text()).toContain('badge_alpha=65')
+  })
+
+  it('clamps background opacity to the accepted 0–100 range', async () => {
+    const wrapper = mountCard(true)
+    const input = () => wrapper.find('input[aria-label*="background opacity"]')
+    await input().setValue('999')
+    expect(findCurlCode(wrapper).text()).toContain('badge_alpha=100')
+    await input().setValue('-5')
+    expect(findCurlCode(wrapper).text()).toContain('badge_alpha=0')
+  })
+
+  it('omits badge_alpha when background opacity is left empty', async () => {
+    const wrapper = mountCard(true)
+    expect(findCurlCode(wrapper).text()).not.toContain('badge_alpha=')
+  })
+
+  it('clears badge_alpha when the background opacity input is emptied', async () => {
+    const wrapper = mountCard(true)
+    const input = () => wrapper.find('input[aria-label*="background opacity"]')
+    await input().setValue('65')
+    expect(findCurlCode(wrapper).text()).toContain('badge_alpha=65')
+    await input().setValue('')
+    expect(findCurlCode(wrapper).text()).not.toContain('badge_alpha=')
+  })
+
+  it('resets background opacity when switching image type', async () => {
+    const wrapper = mountCard(true)
+    const input = () => wrapper.find('input[aria-label*="background opacity"]')
+    await input().setValue('65')
+    expect(findCurlCode(wrapper).text()).toContain('badge_alpha=65')
+
+    await setSelectById(wrapper, 'free-image-type', 'backdrop')
+    expect(findCurlCode(wrapper).text()).not.toContain('badge_alpha=')
+  })
+
+  it('annotates the opacity placeholder with the per-type server default', async () => {
+    const wrapper = mountCard(true, makeDefaults({ poster_badge_alpha: 90 }))
+    expect(wrapper.find('input[aria-label*="background opacity"]').attributes('placeholder')).toBe('default (90%)')
+
+    // logo_badge_alpha is 80 in the fixture — the placeholder follows the type.
+    await setSelectById(wrapper, 'free-image-type', 'logo')
+    expect(wrapper.find('input[aria-label*="background opacity"]').attributes('placeholder')).toBe('default (80%)')
+  })
+
+  it('falls back to the built-in 80% opacity default without server settings', () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    const wrapper = mountCard(true, null)
+    expect(wrapper.find('input[aria-label*="background opacity"]').attributes('placeholder')).toBe('default (80%)')
   })
 
   // --- Reflecting the server's global defaults ---

@@ -23,7 +23,7 @@ export default function placeholdersPlugin(): Plugin {
     async load(id) {
       if (id !== RESOLVED_ID) return
 
-      let sharp: typeof import('sharp')['default']
+      let sharp: typeof import('sharp')
       try {
         sharp = (await import('sharp')).default
       } catch {

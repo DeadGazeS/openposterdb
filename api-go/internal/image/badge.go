@@ -82,6 +82,12 @@ const (
 	baseBadgeValuePad     = 5
 	baseBadgeRadius       = 10
 	baseBadgeBorder       = 3
+	// badgeContentGapBase is the minimum distance between content ink (value
+	// text, label text, source logo) and the badge's outer border. Oversized
+	// content is clipped at (border − gap) instead of AT the border, so scaled-up
+	// text/logos are cut off before touching the badge edge. It is derived from
+	// the border width so content never sits on the border itself.
+	badgeContentGapBase   = baseBadgeBorder
 	basePillPadding       = 10
 	basePillPaddingV      = 6
 	baseFontSize          = 34.0
@@ -89,8 +95,6 @@ const (
 	baseIconHeight        = 48
 	baseVertBadgeWidth    = 88
 	baseVertBadgePaddingV = 8
-	baseVertLabelFontSize = 26.0
-	baseVertValueFontSize = 34.0
 
 	badgeSpacing        = 10
 	badgeBottomMargin   = 10
@@ -111,6 +115,7 @@ type scaledDims struct {
 	pillPadding   uint32
 	pillPaddingV  uint32
 	iconHeight    uint32
+	contentGap    uint32
 }
 
 func newScaledDims(badgeScale float32) scaledDims {
@@ -124,6 +129,7 @@ func newScaledDims(badgeScale float32) scaledDims {
 		pillPadding:   uint32(math.Round(float64(basePillPadding) * float64(badgeScale))),
 		pillPaddingV:  uint32(math.Round(float64(basePillPaddingV) * float64(badgeScale))),
 		iconHeight:    uint32(math.Round(float64(baseIconHeight) * float64(badgeScale))),
+		contentGap:    uint32(math.Round(float64(badgeContentGapBase) * float64(badgeScale))),
 	}
 }
 
@@ -172,6 +178,89 @@ func drawTextShadowed(img *image.RGBA, col color.RGBA, x, y int, f font.Face, te
 		drawText(img, shadowColor, x+shadow, y+shadow, f, text)
 	}
 	drawText(img, col, x, y, f, text)
+}
+
+// drawTextSub is drawText with an arbitrary destination image, so the drawing
+// can be clipped to a sub-image of the badge (font.Drawer clips glyph ink to
+// dst.Bounds()).
+func drawTextSub(dst draw.Image, col color.RGBA, x, y int, f font.Face, text string) {
+	d := &font.Drawer{
+		Dst:  dst,
+		Src:  image.NewUniform(col),
+		Face: f,
+	}
+	dot := fixed.P(x, y)
+	for _, r := range text {
+		d.Dot = dot
+		func() {
+			defer func() {
+				recover()
+			}()
+			d.DrawString(string(r))
+		}()
+		dot.X += safeGlyphAdvance(f, r)
+	}
+}
+
+// drawTextShadowedInRect draws text (and its shadow) clipped to clip, so
+// oversized text is cut off exactly at the rect's edges instead of spilling
+// into the neighbouring section.
+func drawTextShadowedInRect(img *image.RGBA, col color.RGBA, x, y int, f font.Face, text string, shadow int, clip image.Rectangle) {
+	if clip.Dx() <= 0 || clip.Dy() <= 0 {
+		return
+	}
+	dst, ok := img.SubImage(clip).(*image.RGBA)
+	if !ok {
+		return
+	}
+	if shadow > 0 {
+		drawTextSub(dst, shadowColor, x+shadow, y+shadow, f, text)
+	}
+	drawTextSub(dst, col, x, y, f, text)
+}
+
+// textInkBBox measures the exact bounding box of the ink pixels that drawText
+// produces for text rendered with face, relative to the pen origin (0,0). It
+// renders the text once into an offscreen image and scans it, so the box
+// includes glyph side bearings and optical overhangs. Centring on this box
+// centres the visible ink, unlike centring on the advance width (which leaves
+// the ink shifted by the side-bearing asymmetry) or the face.Glyph mask rect
+// (which includes empty padding on the right/bottom).
+func textInkBBox(f font.Face, text string) (x0, y0, x1, y1 int, ok bool) {
+	adv := textWidth(text, f)
+	if adv <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	m := f.Metrics()
+	height := m.Height.Ceil() + 4
+	baseline := m.Ascent.Ceil() + 2
+	img := image.NewRGBA(image.Rect(0, 0, adv+4, height))
+	drawText(img, color.RGBA{255, 255, 255, 255}, 0, baseline, f, text)
+	x0, y0 = adv+4, height
+	x1, y1 = 0, 0
+	for y := 0; y < height; y++ {
+		for x := 0; x < adv+4; x++ {
+			if img.RGBAAt(x, y).A > 0 {
+				if x < x0 {
+					x0 = x
+				}
+				if x > x1 {
+					x1 = x
+				}
+				if y < y0 {
+					y0 = y
+				}
+				if y > y1 {
+					y1 = y
+				}
+			}
+		}
+	}
+	if x0 > x1 || y0 > y1 {
+		return 0, 0, 0, 0, false
+	}
+	// Ink coordinates relative to the pen (baseline) origin.
+	return x0, y0 - baseline, x1, y1 - baseline, true
 }
 
 // corner bits select which corners of a rectangle are rounded.
@@ -315,14 +404,22 @@ func scaleIcon(icon *image.RGBA, w, h uint32) *image.RGBA {
 	return scaled
 }
 
-func overlayIconShadowed(img, icon *image.RGBA, x, y int, shadow int) {
-	if icon == nil {
+// overlayIconShadowedInRect draws an icon (and its shadow) clipped to clip, so
+// an oversized logo is cut off at the rect's edges — inset from the badge
+// border by the content gap — instead of touching the badge border or spilling
+// into the neighbouring section.
+func overlayIconShadowedInRect(img, icon *image.RGBA, x, y int, shadow int, clip image.Rectangle) {
+	if icon == nil || clip.Dx() <= 0 || clip.Dy() <= 0 {
+		return
+	}
+	dst, ok := img.SubImage(clip).(*image.RGBA)
+	if !ok {
 		return
 	}
 	if shadow > 0 {
-		overlay(img, iconShadow(icon), x+shadow, y+shadow)
+		overlay(dst, iconShadow(icon), x+shadow, y+shadow)
 	}
-	overlay(img, icon, x, y)
+	overlay(dst, icon, x, y)
 }
 
 func iconForBadge(badge *services.RatingBadge, labelStyle services.LabelStyle) *image.RGBA {
@@ -391,9 +488,24 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	// The badge is split at valueX into a left (logo/label) section and a right
 	// (value) section. The icon sits inset by an equal padding on the left, top
 	// and bottom; the value text is centred in the right section.
-	badgeH := int(dims.badgeHeight + pillPadV)
+	//
+	// Per-axis badge width/height (badge_width/badge_height) scale the badge
+	// box independently: the width applies to the section split and the total
+	// width, the height to the box height. The logo and text sizes are NOT
+	// affected (they scale only with logo_size/text_size).
+	wPct := appearance.Width.Percent()
+	hPct := appearance.Height.Percent()
+	if wPct <= 0 {
+		wPct = 1
+	}
+	if hPct <= 0 {
+		hPct = 1
+	}
+	badgeH := int(math.Round(float64(dims.badgeHeight+pillPadV) * float64(hPct)))
 
-	iconH := uint32(math.Round(float64(dims.iconHeight) * float64(logoScale)))
+	// The logo scales ONLY with logo_size (not badge_size): decoupled from the
+	// badge box so changing badge size never resizes the source logo.
+	iconH := uint32(math.Round(float64(baseIconHeight) * float64(logoScale)))
 	var iconW, iconH2 uint32
 	var scaledIcon *image.RGBA
 	if useIcon {
@@ -413,7 +525,11 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 
 	labelSectionW := int(pillPad) + int(maxLabelW) + 2*int(labelPad)
 	valueSectionW := int(maxValueW) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
-	totalW := labelSectionW + valueSectionW + int(pillPad)
+	// Per-axis width: scale the section split and the total badge width by the
+	// badge-width percentage (the content inside keeps its own size).
+	labelSectionW = int(math.Round(float64(labelSectionW) * float64(wPct)))
+	valueSectionW = int(math.Round(float64(valueSectionW) * float64(wPct)))
+	totalW := labelSectionW + valueSectionW + int(math.Round(float64(pillPad)*float64(wPct)))
 
 	// Sections split the badge: label/logo occupies labelSectionW, value text
 	// occupies valueSectionW. For mirrored styles the value section is on the
@@ -460,23 +576,46 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	ascentVal := fontFace.Metrics().Ascent.Ceil()
 	labelAscent := labelFontFace.Metrics().Ascent.Ceil()
 
+	// The minimum gap between content ink and the badge border. At 100% the
+	// section padding already keeps the text and logo well off the border; the
+	// clip rects below only matter for oversized content, cutting it off
+	// BEFORE it reaches the border (content that already sits ≥ gap from the
+	// border is never clipped).
+	contentGap := int(dims.contentGap)
+	labelClip := image.Rect(labelSectionX+contentGap, contentGap, labelSectionX+labelSectionW-contentGap, badgeH-contentGap)
+	valueClip := image.Rect(valueSectionX+contentGap, contentGap, valueSectionX+valueSectionW-contentGap, badgeH-contentGap)
+
 	// Logo / label, centred in its section (inset equally on left/top/bottom).
 	if useIcon && scaledIcon != nil {
 		ix := labelSectionX + (labelSectionW-int(iconW))/2
 		iy := iconPad
-		overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
+		overlayIconShadowedInRect(img, scaledIcon, ix, iy, shadowPx, labelClip)
 	} else {
 		actualLabelW := textWidth(label, labelFontFace)
 		labelX := labelSectionX + (labelSectionW-actualLabelW)/2
 		labelY := badgeH/2 + labelAscent/2 - 2
-		drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
+		// Clip the label to its section (inset from the badge border by the
+		// content gap) so oversized label text is cut off before touching the
+		// badge border and never spills into the value section.
+		drawTextShadowedInRect(img, textCol, labelX, labelY, labelFontFace, label, shadowPx, labelClip)
 	}
 
-	// Value text, centred in its section.
-	actualValueW := textWidth(value, fontFace)
-	valueTextX := valueSectionX + (valueSectionW-actualValueW)/2
-	valueY := badgeH/2 + ascentVal/2 - 2
-	drawTextShadowed(img, textCol, valueTextX, valueY, fontFace, value, shadowPx)
+	// Value text, centred in its section. The text is centred by its ink
+	// bounding box (not the advance width) so glyph side bearings don't shift
+	// the visible centre horizontally, and the baseline is derived from the ink
+	// extent (not the "-2" ascent hack) so the ink is vertically centred too.
+	// Oversized text is clipped at the value section edges inset by the content
+	// gap, so it cuts off evenly on both sides without touching the badge border.
+	if inkX0, inkY0, inkX1, inkY1, ok := textInkBBox(fontFace, value); ok {
+		valueTextX := valueSectionX + (valueSectionW-(inkX0+inkX1))/2
+		valueY := badgeH/2 - (inkY0+inkY1)/2
+		drawTextShadowedInRect(img, textCol, valueTextX, valueY, fontFace, value, shadowPx, valueClip)
+	} else {
+		actualValueW := textWidth(value, fontFace)
+		valueTextX := valueSectionX + (valueSectionW-actualValueW)/2
+		valueY := badgeH/2 + ascentVal/2 - 2
+		drawTextShadowed(img, textCol, valueTextX, valueY, fontFace, value, shadowPx)
+	}
 
 	return img
 }
@@ -554,34 +693,108 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 		}
 	}
 	vertBadgeW := int(math.Round(float64(baseVertBadgeWidth) * float64(badgeScale)))
+	// Per-axis width/height: scale the vertical badge box independently.
+	// The logo and text sizes are NOT affected (logo_size/text_size only).
+	wPct := appearance.Width.Percent()
+	hPct := appearance.Height.Percent()
+	if wPct <= 0 {
+		wPct = 1
+	}
+	if hPct <= 0 {
+		hPct = 1
+	}
+	vertBadgeW = int(math.Round(float64(vertBadgeW) * float64(wPct)))
 	var pillPad uint32
 	if appearance.Shape == services.BadgeShapePill {
 		pillPad = uint32(math.Round(float64(basePillPadding) * float64(badgeScale)))
 	}
 	dims := newScaledDims(badgeScale)
 	vertPadV := uint32(math.Round(float64(baseVertBadgePaddingV)*float64(badgeScale))) + pillPad
+	// Minimum gap between content ink and the badge border (see badgeContentGapBase).
+	contentGap := int(dims.contentGap)
 
-	// The stacked label/value regions are fixed by badge_size (not text/logo
-	// size), so oversized text or logos truncate at the badge edges.
-	labelH := uint32(math.Round(float64(baseVertLabelFontSize) * float64(badgeScale)))
-	valueH := uint32(math.Round(float64(baseVertValueFontSize) * float64(badgeScale)))
-	iconHeight := uint32(math.Round(float64(baseIconHeight) * float64(badgeScale) * float64(logoScale)))
-	labelAreaH := labelH
-	if useIcon {
-		labelAreaH = iconHeight
+	// Each stacked section mirrors the horizontal badge box: it is as tall as
+	// the horizontal badge height (badgeHeight + pill vertical padding) and is
+	// fixed by badge_size — it does NOT grow with text_size. At the same 100%
+	// badge/text settings the value text and the label/icon therefore occupy
+	// exactly the same relative space as in the lr/rl badges. Enlarged text is
+	// clipped at the section edges (cut off evenly on both sides), exactly like
+	// the fixed horizontal badge box.
+	//
+	// For logo badges (icon label styles) the label section is instead a square
+	// matching the badge width, so the source logo can be sized with the same
+	// outer margins as the horizontal (lr/rl) badge: a wider section needs a
+	// larger logo for the same ~5-6px margin, and the square section gives that
+	// logo room to fit (a 48x48 logo with 6px margins needs ~76x76, which does
+	// not fit a 58px-tall section).
+	sectionH := int(math.Round(float64(dims.badgeHeight) * float64(hPct)))
+	if appearance.Shape == services.BadgeShapePill {
+		sectionH += int(math.Round(float64(dims.pillPaddingV) * float64(hPct)))
 	}
-	gap := uint32(math.Round(4.0 * float64(badgeScale)))
-	totalH := int(vertPadV + labelAreaH + gap + valueH + vertPadV)
+	// The INWARD side of the logo (facing the value text) keeps only a tiny gap
+	// from the seam, so the value text sits as close to the badge centre as the
+	// geometry allows; the OUTER margins (top/bottom + sides) match the
+	// horizontal (lr/rl) badge's logo margins.
+	inwardGap := 2
+	// The logo scales ONLY with logo_size (not badge_size): decoupled from the
+	// badge box so changing badge size never resizes the source logo.
+	iconHeight := uint32(math.Round(float64(baseIconHeight) * float64(logoScale)))
+	// The inter-section gap mirrors the logo's inward gap: barely any margin
+	// between the label content and the value text.
+	gap := uint32(inwardGap)
+	vertPadVSc := uint32(math.Round(float64(vertPadV) * float64(hPct)))
+
+	var vLogoW, vLogoH, hMarginV int
+	labelAreaH := sectionH
+	if useIcon {
+		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			hIconW, hIconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
+			hMarginV = (sectionH - int(hIconH)) / 2 // horizontal top/bottom margin (iconPad)
+			if hMarginV < 0 {
+				hMarginV = 0
+			}
+			labelPad := int(dims.badgePaddingH)
+			hLabelSectionW := int(pillPad) + int(labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, logoScale)) + 2*labelPad
+			hMarginH := (hLabelSectionW - int(hIconW)) / 2 // horizontal side margin
+			if hMarginH < 0 {
+				hMarginH = 0
+			}
+			vLogoW = vertBadgeW - 2*hMarginH
+			if icon.Bounds().Dx() > 0 && icon.Bounds().Dy() > 0 {
+				vLogoH = int(math.Round(float64(vLogoW) * float64(icon.Bounds().Dy()) / float64(icon.Bounds().Dx())))
+			}
+			if vLogoW < 1 {
+				vLogoW = 1
+			}
+			if vLogoH < 1 {
+				vLogoH = 1
+			}
+			// The label section hugs the logo: the logo starts at the outer
+			// margin (hMarginV) and its INWARD side keeps only a tiny gap from
+			// the seam, so no dead space sits between logo and value text. The
+			// logo is positioned at iy = hMarginV from the badge edge, while the
+			// section begins at vertPadVSc — so subtract that offset.
+			labelAreaH = hMarginV + vLogoH + inwardGap - int(vertPadVSc)
+			if labelAreaH < 1 {
+				labelAreaH = 1
+			}
+		}
+	}
+	valueH := sectionH
+	totalH := int(vertPadVSc + uint32(labelAreaH) + gap + uint32(valueH) + vertPadVSc)
 
 	img := image.NewRGBA(image.Rect(0, 0, vertBadgeW, totalH))
 	// For the mirrored vertical style (bt) the value sits on top and the
-	// logo/label on the bottom.
+	// logo/label on the bottom. Both styles share the same symmetric geometry:
+	// the top section starts after the vertPadV top padding and the bottom
+	// section starts after the top section plus the full gap, so tb and bt are
+	// exact mirror images (matching how the lr/rl horizontal pair is laid out).
 	labelTop := !appearance.Style.IsMirrored()
-	labelAreaY := 0
-	valueAreaY := int(vertPadV + labelAreaH + gap/2)
+	labelAreaY := int(vertPadVSc)
+	valueAreaY := int(vertPadVSc) + labelAreaH + int(gap)
 	if !labelTop {
-		labelAreaY = int(vertPadV + valueH + gap/2)
-		valueAreaY = int(vertPadV)
+		labelAreaY = int(vertPadVSc) + valueH + int(gap)
+		valueAreaY = int(vertPadVSc)
 	}
 
 	labelBG, valueBG, hasBG := sectionColors(appearance.Alpha, badge.Source, override)
@@ -619,35 +832,78 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 
 	shadowPx := shadowOffset(hasBG, uint32(vertBadgeW))
 	ascentVal := fontFace.Metrics().Ascent.Ceil()
-	labelAscent := labelFontFace.Metrics().Ascent.Ceil()
 
 	label := badge.Source.Label
 	value := badge.Value
 
 	if useIcon {
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
-			iconW, iconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
-			scaledIcon := scaleIcon(icon, iconW, iconH)
-			ix := (vertBadgeW - int(iconW)) / 2
-			iy := labelAreaY + (int(labelAreaH)-int(iconH))/2
-			overlayIconShadowed(img, scaledIcon, ix, iy, shadowPx)
+			scaledIcon := scaleIcon(icon, uint32(vLogoW), uint32(vLogoH))
+			ix := (vertBadgeW - vLogoW) / 2
+			var iy int
+			if labelTop {
+				iy = hMarginV
+			} else {
+				iy = totalH - hMarginV - vLogoH
+			}
+			// Clip the logo so it is always at least contentGap from the badge's
+			// outer borders (and never spills past the label section's inner
+			// seam). At 100% the logo's margins already exceed the gap, so this
+			// only cuts oversized logos.
+			var logoClip image.Rectangle
+			if labelTop {
+				logoClip = image.Rect(contentGap, contentGap, vertBadgeW-contentGap, labelAreaY+labelAreaH-contentGap)
+			} else {
+				logoClip = image.Rect(contentGap, labelAreaY+contentGap, vertBadgeW-contentGap, totalH-contentGap)
+			}
+			overlayIconShadowedInRect(img, scaledIcon, ix, iy, shadowPx, logoClip)
 		} else {
-			labelW := textWidth(label, labelFontFace)
-			labelX := (vertBadgeW - labelW) / 2
-			labelY := labelAreaY + int(labelH)/2 + labelAscent/2
-			drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
+			drawVerticalLabel(img, textCol, label, labelFontFace, labelAreaY, labelAreaH, vertBadgeW, shadowPx, contentGap)
 		}
 	} else {
-		labelW := textWidth(label, labelFontFace)
-		labelX := (vertBadgeW - labelW) / 2
-		labelY := labelAreaY + int(labelH)/2 + labelAscent/2
-		drawTextShadowed(img, textCol, labelX, labelY, labelFontFace, label, shadowPx)
+		drawVerticalLabel(img, textCol, label, labelFontFace, labelAreaY, labelAreaH, vertBadgeW, shadowPx, contentGap)
 	}
 
-	valueW := textWidth(value, fontFace)
-	valueX := (vertBadgeW - valueW) / 2
-	valueTextY := valueAreaY + int(valueH)/2 + ascentVal/2
-	drawTextShadowed(img, textCol, valueX, valueTextY, fontFace, value, shadowPx)
+	// Value text. For tb (label on top) the text hugs the TOP of its section so
+	// the logo's inward side keeps barely any margin from the text; for bt
+	// (label on bottom) it hugs the BOTTOM of its section (the seam side). It
+	// stays horizontally centred and is clipped to the section inset by the
+	// content gap, so oversized text cuts off evenly without touching the
+	// badge border.
+	if inkX0, inkY0, inkX1, inkY1, ok := textInkBBox(fontFace, value); ok {
+		valueX := (vertBadgeW - (inkX0 + inkX1)) / 2
+		var valueTextY int
+		if labelTop {
+			// tb: text top at valueAreaY + contentGap (hugs the seam).
+			valueTextY = valueAreaY + contentGap - inkY0
+		} else {
+			// bt: text bottom at valueAreaY + valueH - contentGap (hugs the seam).
+			valueTextY = valueAreaY + valueH - contentGap - inkY1
+		}
+		drawTextShadowedInRect(img, textCol, valueX, valueTextY, fontFace, value, shadowPx, image.Rect(contentGap, valueAreaY+contentGap, vertBadgeW-contentGap, valueAreaY+valueH-contentGap))
+	} else {
+		valueW := textWidth(value, fontFace)
+		valueX := (vertBadgeW - valueW) / 2
+		valueTextY := valueAreaY + int(valueH)/2 + ascentVal/2 - 2
+		drawTextShadowed(img, textCol, valueX, valueTextY, fontFace, value, shadowPx)
+	}
 
 	return img
+}
+
+// drawVerticalLabel draws the source label centred in a vertical badge's label
+// section: ink-based centring on both axes, clipped to the section inset by the
+// content gap so oversized text cuts off evenly without touching the badge
+// border.
+func drawVerticalLabel(img *image.RGBA, col color.RGBA, label string, labelFontFace font.Face, labelAreaY, labelAreaH, vertBadgeW, shadowPx, contentGap int) {
+	if inkX0, inkY0, inkX1, inkY1, ok := textInkBBox(labelFontFace, label); ok {
+		labelX := (vertBadgeW - (inkX0 + inkX1)) / 2
+		labelY := labelAreaY + labelAreaH/2 - (inkY0+inkY1)/2
+		drawTextShadowedInRect(img, col, labelX, labelY, labelFontFace, label, shadowPx, image.Rect(contentGap, labelAreaY+contentGap, vertBadgeW-contentGap, labelAreaY+labelAreaH-contentGap))
+		return
+	}
+	labelW := textWidth(label, labelFontFace)
+	labelX := (vertBadgeW - labelW) / 2
+	labelY := labelAreaY + labelAreaH/2 + labelFontFace.Metrics().Ascent.Ceil()/2 - 2
+	drawTextShadowed(img, col, labelX, labelY, labelFontFace, label, shadowPx)
 }

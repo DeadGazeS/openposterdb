@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
-import { shadcnStubs } from '@/__tests__/stubs'
+import { shadcnStubs, SelectStub } from '@/__tests__/stubs'
 
 vi.mock('@/lib/api', () => ({}))
 
@@ -30,8 +30,14 @@ const defaultSettings: RenderSettings = {
   logo_text_size: 100,
   backdrop_text_size: 100,
   poster_badge_size: 100,
+  poster_badge_width: 100,
+  poster_badge_height: 100,
   logo_badge_size: 100,
+  logo_badge_width: 100,
+  logo_badge_height: 100,
   backdrop_badge_size: 100,
+  backdrop_badge_width: 100,
+  backdrop_badge_height: 100,
   poster_logo_size: 100,
   logo_logo_size: 100,
   backdrop_logo_size: 100,
@@ -45,6 +51,8 @@ const defaultSettings: RenderSettings = {
   episode_label_style: 'o',
   episode_text_size: 100,
   episode_badge_size: 100,
+  episode_badge_width: 100,
+  episode_badge_height: 100,
   episode_logo_size: 100,
   episode_layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 1, rows: 1, start: 't' }, bottom: { per_row: 0, rows: 0, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
   episode_badge_direction: 'v',
@@ -103,7 +111,7 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'h', 'i', 'd', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'lr', 'i', 'd', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', undefined, 100, {}, 100, 100)
   })
 
   it('calls fetchPreview with correct params for custom settings', async () => {
@@ -112,7 +120,7 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_layout: layout, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), 100, '', layout, 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), 100, '', layout, 'r', 80, 'native', undefined, 100, {}, 100, 100)
   })
 
   it('sets preview src from blob after fetch', async () => {
@@ -139,7 +147,7 @@ describe('RenderSettingsForm', () => {
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"per_row":5'), expect.any(String), expect.any(Number), expect.any(String), expect.any(Number), expect.any(Number), {})
+    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"per_row":5'), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 100, 100)
   })
 
   it('shows loading state while preview loads', async () => {
@@ -172,6 +180,27 @@ describe('RenderSettingsForm', () => {
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
   })
 
+  it('shows no aspect ratio readout until the poster image loads', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="poster-aspect-ratio"]').exists()).toBe(false)
+  })
+
+  it('shows simplified aspect ratio and dimensions after the poster image loads', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+
+    const img = wrapper.find('img[alt="Poster preview"]')
+    Object.defineProperty(img.element, 'naturalWidth', { value: 500, configurable: true })
+    Object.defineProperty(img.element, 'naturalHeight', { value: 750, configurable: true })
+    await img.trigger('load')
+    await flushPromises()
+
+    const readout = wrapper.find('[data-testid="poster-aspect-ratio"]')
+    expect(readout.exists()).toBe(true)
+    expect(readout.text()).toBe('2:3 · 500×750')
+  })
+
   it('shows error message when preview fetch fails', async () => {
     const fetchPreview = vi.fn().mockResolvedValue({ ok: false })
     const wrapper = mountForm({}, fetchPreview)
@@ -199,7 +228,7 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"bottom"'), expect.any(String), expect.any(Number), expect.any(String), expect.any(Number), expect.any(Number), {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"bottom"'), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 100, 100)
   })
 
   it('hides fanart checkbox when fanart_available is false', () => {
@@ -251,28 +280,22 @@ describe('RenderSettingsForm', () => {
     )
   })
 
-  it('renders badge direction dropdown', () => {
-    const wrapper = mountForm()
-    const select = wrapper.find('[data-testid="poster-badge-direction-select"]')
-    expect(select.exists()).toBe(true)
-  })
+  // --- Exclude ratings (via the eye toggle in the rating order list) ---
 
-  // --- Exclude ratings ---
-
-  it('renders an exclude checkbox for every rating source', () => {
+  it('renders an eye toggle for every rating source', () => {
     const wrapper = mountForm()
     for (const key of ['imdb', 'tmdb', 'rt', 'rta', 'mc', 'trakt', 'lb', 'mal', 'mdblist', 'ebert']) {
-      expect(wrapper.find(`[data-testid="exclude-${key}-checkbox"]`).exists()).toBe(true)
+      expect(wrapper.find(`[data-testid="exclude-${key}-eye"]`).exists()).toBe(true)
     }
   })
 
-  it('initializes exclude checkboxes from ratings_exclude', () => {
+  it('initializes eye toggles from ratings_exclude', () => {
     const wrapper = mountForm({ ratings_exclude: 'rt' })
-    expect((wrapper.find('[data-testid="exclude-rt-checkbox"]').element as HTMLInputElement).checked).toBe(true)
-    expect((wrapper.find('[data-testid="exclude-imdb-checkbox"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-testid="exclude-rt-eye"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('[data-testid="exclude-imdb-eye"]').attributes('aria-pressed')).toBe('false')
   })
 
-  it('toggling an exclude checkbox auto-saves ratings_exclude', async () => {
+  it('toggling an eye saves ratings_exclude', async () => {
     const saveSettings = vi.fn().mockResolvedValue(null)
     const settings = { ...defaultSettings, ratings_exclude: '' }
     const wrapper = mount(RenderSettingsForm, {
@@ -288,7 +311,7 @@ describe('RenderSettingsForm', () => {
       },
     })
 
-    await wrapper.find('[data-testid="exclude-rt-checkbox"]').setValue(true)
+    await wrapper.find('[data-testid="exclude-rt-eye"]').trigger('click')
     await flushPromises()
     await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
@@ -298,12 +321,29 @@ describe('RenderSettingsForm', () => {
     )
   })
 
-  it('calls fetchPreview with badge direction', async () => {
+  it('always passes auto badge direction to fetchPreview (direction no longer configurable)', async () => {
     const fetchPreview = makeFetchPreview()
     mountForm({ poster_badge_direction: 'v' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'h', 'i', 'v', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', 100, 100, {})
+    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'lr', 'i', 'd', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', undefined, 100, {}, 100, 100)
+  })
+
+  it('normalizes the auto/legacy poster badge style to a valid select value', async () => {
+    const fetchPreview = makeFetchPreview()
+    const wrapper = mountForm({ poster_badge_style: 'd' }, fetchPreview)
+    await flushPromises()
+
+    // 'd' (Auto) isn't among the four select options (no Auto option is offered),
+    // so it must load as 'lr' (horizontal) to keep the select from rendering blank
+    // on a fresh install. Legacy 'h' normalizes the same way. The native <select>
+    // stub reads its value from the Select stub's modelValue prop.
+    const posterSelect = wrapper.findAllComponents(SelectStub).find(c => c.find('[data-testid="poster-badge-style-select"]').exists())
+    expect(posterSelect?.props('modelValue')).toBe('lr')
+
+    expect(fetchPreview).toHaveBeenCalledWith(
+      3, expect.any(String), 'lr', expect.any(String), expect.any(String), expect.any(Number), expect.any(String), expect.any(String), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 100, 100,
+    )
   })
 
   // --- Episode preview ---
@@ -357,15 +397,17 @@ describe('RenderSettingsForm', () => {
       'v', // episode_badge_style
       'o', // episode_label_style
       100, // episode_text_size
-      'v', // episode_badge_direction
+      'd', // badge direction (no longer configurable)
       false, // episode_blur
       expect.stringContaining('"right"'), // episode_layout
       '', // ratings_exclude
        'r', // episode_badge_shape
        80, // episode_badge_alpha
-       100, // episode_badge_size
+       undefined, // badge_size (legacy — the form no longer sends it)
        100, // episode_logo_size
        {},
+       100, // episode_badge_width
+       100, // episode_badge_height
     )
   })
 
@@ -387,7 +429,6 @@ describe('RenderSettingsForm', () => {
     })
     expect(wrapper.find('[data-testid="episode-layout-editor"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="episode-badge-style-select"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="episode-badge-direction-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="episode-blur-checkbox"]').exists()).toBe(true)
   })
 
@@ -431,16 +472,51 @@ describe('RenderSettingsForm', () => {
       'v', // backdrop_badge_style
       'i', // backdrop_label_style
       100, // backdrop_text_size
-      'v', // backdrop_badge_direction
+      'd', // badge direction (no longer configurable)
       '', // ratings_exclude
        'r', // backdrop_badge_shape
        80, // backdrop_badge_alpha
        12, // backdrop_edge_inset_x
        7, // backdrop_edge_inset_y
        expect.stringContaining('"top"'), // backdrop_layout
-       100, // backdrop_badge_size
+       undefined, // badge_size (legacy — the form no longer sends it)
        100, // backdrop_logo_size
        {},
+       100, // backdrop_badge_width
+       100, // backdrop_badge_height
+    )
+  })
+
+  it('coerces a cleared edge-inset input to 0 in the preview fetch', async () => {
+    const fetchBackdropPreview = makeFetchPreview()
+    const wrapper = mountWithBackdrop({ backdrop_edge_inset_x: 10, backdrop_edge_inset_y: 10 }, fetchBackdropPreview)
+    await flushPromises()
+    fetchBackdropPreview.mockClear()
+
+    // Clearing a v-model.number input emits '' (not 0). The preview fetch must
+    // send the same clamped integer the save path sends via coerceInset.
+    await wrapper.find('[data-testid="backdrop-edge-inset-x"]').setValue('')
+    vi.advanceTimersByTime(500)
+    await flushPromises()
+
+    expect(fetchBackdropPreview).toHaveBeenCalledWith(
+      5, // backdrop layout total (top 5x1)
+      expect.any(String), // ratings_order
+      'v', // backdrop_badge_style
+      'i', // backdrop_label_style
+      100, // backdrop_text_size
+      'd', // badge direction (no longer configurable)
+      '', // ratings_exclude
+      'r', // backdrop_badge_shape
+      80, // backdrop_badge_alpha
+      0, // edge_inset_x coerced from '' -> 0
+      10, // edge_inset_y unchanged
+       expect.stringContaining('"top"'), // backdrop_layout
+       undefined, // badge_size (legacy — the form no longer sends it)
+       100, // backdrop_logo_size
+       {},
+       100, // backdrop_badge_width
+       100, // backdrop_badge_height
     )
   })
 
@@ -500,5 +576,85 @@ describe('RenderSettingsForm', () => {
     await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(false)
+  })
+
+  // --- Badge width / height (per-axis badge scaling) ---
+
+  it('renders badge width and height sliders (no single badge-size slider) for every kind', () => {
+    const wrapper = mount(RenderSettingsForm, {
+      props: {
+        settings: { ...defaultSettings },
+        loadSettings: vi.fn().mockResolvedValue(defaultSettings),
+        saveSettings: vi.fn().mockResolvedValue(null),
+        fetchPreview: makeFetchPreview(),
+        fetchLogoPreview: makeFetchPreview(),
+        fetchBackdropPreview: makeFetchPreview(),
+        fetchEpisodePreview: makeFetchPreview(),
+      },
+      global: {
+        plugins: [createPinia()],
+        stubs: shadcnStubs,
+      },
+    })
+    for (const kind of ['poster', 'logo', 'backdrop', 'episode']) {
+      expect(wrapper.find(`[data-testid="${kind}-badge-width-slider"]`).exists()).toBe(true)
+      expect(wrapper.find(`[data-testid="${kind}-badge-height-slider"]`).exists()).toBe(true)
+      expect(wrapper.find(`[data-testid="${kind}-badge-size-slider"]`).exists()).toBe(false)
+    }
+  })
+
+  it('saves badge width and height and omits the legacy badge size', async () => {
+    const saveSettings = vi.fn().mockResolvedValue(null)
+    const settings = { ...defaultSettings }
+    const wrapper = mount(RenderSettingsForm, {
+      props: {
+        settings,
+        loadSettings: vi.fn().mockResolvedValue(settings),
+        saveSettings,
+        fetchPreview: makeFetchPreview(),
+      },
+      global: {
+        plugins: [createPinia()],
+        stubs: shadcnStubs,
+      },
+    })
+
+    await wrapper.find('[data-testid="poster-badge-width-slider"]').setValue(130)
+    await wrapper.find('[data-testid="poster-badge-height-slider"]').setValue(85)
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
+    await flushPromises()
+
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        poster_badge_width: 130,
+        poster_badge_height: 85,
+      }),
+    )
+    const payload = saveSettings.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(payload.poster_badge_size).toBeUndefined()
+    expect(payload.episode_badge_size).toBeUndefined()
+  })
+
+  it('passes badge width and height to the preview fetch', async () => {
+    const fetchPreview = makeFetchPreview()
+    const settings = { ...defaultSettings, poster_badge_width: 120, poster_badge_height: 90 }
+    mount(RenderSettingsForm, {
+      props: {
+        settings,
+        loadSettings: vi.fn().mockResolvedValue(settings),
+        saveSettings: vi.fn().mockResolvedValue(null),
+        fetchPreview,
+      },
+      global: {
+        plugins: [createPinia()],
+        stubs: shadcnStubs,
+      },
+    })
+    await flushPromises()
+
+    expect(fetchPreview).toHaveBeenCalledWith(
+      3, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(Number), expect.any(String), expect.any(String), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 120, 90,
+    )
   })
 })

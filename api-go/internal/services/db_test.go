@@ -46,6 +46,21 @@ func TestBadgeStyleIsVertical(t *testing.T) {
 	}
 }
 
+func TestBadgeStyleIsMirrored(t *testing.T) {
+	if BadgeStyleLogoLeftValueRight.IsMirrored() {
+		t.Error("LogoLeftValueRight.IsMirrored should be false")
+	}
+	if !BadgeStyleValueLeftLogoRight.IsMirrored() {
+		t.Error("ValueLeftLogoRight.IsMirrored should be true")
+	}
+	if BadgeStyleLogoTB.IsMirrored() {
+		t.Error("LogoTB.IsMirrored should be false")
+	}
+	if !BadgeStyleValueTB.IsMirrored() {
+		t.Error("ValueTB.IsMirrored should be true")
+	}
+}
+
 func TestBadgeStyleResolveDefault(t *testing.T) {
 	if s := BadgeStyleDefault.ResolveDefault(); s != BadgeStyleLogoLeftValueRight {
 		t.Error("Default → LogoLeftValueRight")
@@ -293,6 +308,8 @@ func TestParseGlobalRenderSettings(t *testing.T) {
 		"lang":               "de",
 		"ratings_limit":      "5",
 		"poster_fit":         "pad",
+		"poster_badge_width":  "150",
+		"poster_badge_height": "80",
 	}
 	s := ParseGlobalRenderSettings(globals)
 	if s.ImageSource != ImageSourceFanart {
@@ -309,6 +326,16 @@ func TestParseGlobalRenderSettings(t *testing.T) {
 	}
 	if s.PosterFit != PosterFitPad {
 		t.Error("poster_fit should be Pad")
+	}
+	if s.PosterBadgeWidth != 150 || s.PosterBadgeHeight != 80 {
+		t.Errorf("poster badge width/height: got %d/%d want 150/80", s.PosterBadgeWidth, s.PosterBadgeHeight)
+	}
+	if s.LogoBadgeWidth != 100 || s.LogoBadgeHeight != 100 {
+		t.Errorf("logo badge width/height default: got %d/%d want 100/100", s.LogoBadgeWidth, s.LogoBadgeHeight)
+	}
+	m := RenderSettingsToMap(&s)
+	if m["poster_badge_width"] != "150" || m["poster_badge_height"] != "80" {
+		t.Errorf("toMap poster width/height: %q/%q", m["poster_badge_width"], m["poster_badge_height"])
 	}
 }
 

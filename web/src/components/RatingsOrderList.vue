@@ -1,12 +1,26 @@
 <script setup lang="ts">
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { ALL_RATING_SOURCES } from '@/lib/constants'
 
 const model = defineModel<string[]>({ required: true })
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   compact?: boolean
-  /** Source keys the server excludes — shown dimmed/struck-through, not removed. */
+  /** Source keys the user has excluded — shown dimmed/struck-through, not removed. */
   excluded?: string[]
+  /**
+   * Renders a per-row show/hide eye. When enabled, clicking a row's eye emits
+   * `toggle-exclude` with the source key and the parent is expected to update
+   * `excluded` accordingly. Left off by consumers that manage exclusion
+   * through their own controls.
+   */
+  toggleable?: boolean
+}>(), {
+  toggleable: false,
+})
+
+const emit = defineEmits<{
+  'toggle-exclude': [key: string]
 }>()
 
 function isExcluded(key: string) {
@@ -42,8 +56,21 @@ function getRatingSource(key: string) {
       <span
         class="text-sm flex-1"
         :class="{ 'line-through': isExcluded(key) }"
-        :title="isExcluded(key) ? 'Excluded by the server\'s default settings' : undefined"
       >{{ getRatingSource(key)?.label || key }}</span>
+      <button
+        v-if="toggleable"
+        type="button"
+        :data-testid="`exclude-${key}-eye`"
+        :title="isExcluded(key) ? 'Show rating' : 'Hide rating'"
+        :aria-label="`${isExcluded(key) ? 'Show' : 'Hide'} ${getRatingSource(key)?.label || key}`"
+        :aria-pressed="isExcluded(key)"
+        class="inline-flex items-center justify-center rounded border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        :class="compact ? 'w-6 h-6 text-xs' : 'w-8 h-8'"
+        @click="emit('toggle-exclude', key)"
+      >
+        <Eye v-if="!isExcluded(key)" class="size-4" aria-hidden="true" />
+        <EyeOff v-else class="size-4" aria-hidden="true" />
+      </button>
       <button
         type="button"
         class="inline-flex items-center justify-center rounded border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none"

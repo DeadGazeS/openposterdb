@@ -114,8 +114,24 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
-		rendered := appimg.RenderBadgesUniform(row, valueFace, labelFace, labelStyle, appearance, 1.0, 1.0, 1.0, colors)
+		// The gallery mirrors the poster preview, so the badge must use the
+		// resolved poster badge style (vertical tb/bt stack logo and value;
+		// lr/rl lay them side by side). RenderBadgesUniform only renders the
+		// horizontal layouts, so vertical styles go through RenderVerticalBadge
+		// exactly as the preview does.
+		dir := settings.PosterBadgeDirection.ResolveDefault()
+		style := settings.PosterBadgeStyle.Resolve(dir)
+		appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: style}
+
+		var rendered []*image.RGBA
+		if style.IsVertical() {
+			rendered = make([]*image.RGBA, len(row))
+			for i := range row {
+				rendered[i] = appimg.RenderVerticalBadge(&row[i], valueFace, labelFace, labelStyle, appearance, 1.0, 1.0, 1.0, colors)
+			}
+		} else {
+			rendered = appimg.RenderBadgesUniform(row, valueFace, labelFace, labelStyle, appearance, 1.0, 1.0, 1.0, colors)
+		}
 
 		var target *image.RGBA
 		for i, b := range row {

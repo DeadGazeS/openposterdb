@@ -62,50 +62,50 @@ function sideLabel(side: string): string {
 </script>
 
 <template>
-  <div class="space-y-3" :data-testid="testPrefix ? `${testPrefix}-layout-editor` : undefined">
+  <div class="max-w-sm space-y-2" :data-testid="testPrefix ? `${testPrefix}-layout-editor` : undefined">
     <p class="text-xs text-muted-foreground">
       {{ total }} ratings shown. Set badges-per-row and row count for each side.
     </p>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div class="grid grid-cols-2 gap-2">
       <template v-for="side in ['top', 'bottom', 'left', 'right'] as const" :key="side">
-        <div class="rounded-md border p-3 space-y-2">
-          <p class="text-sm font-medium">{{ sideLabel(side) }}</p>
-          <div class="grid grid-cols-2 gap-2">
-            <div class="space-y-1">
-              <Label :for="`${side}-per-row`">Badges per row</Label>
+        <div class="rounded-md border p-2 space-y-1.5">
+          <p class="text-xs font-semibold">{{ sideLabel(side) }}</p>
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <Label :for="`${side}-per-row`" class="text-xs text-muted-foreground">Badges per row</Label>
               <Input
                 :id="`${side}-per-row`"
                 :model-value="slotValue(side).per_row"
                 type="number"
                 min="0"
                 max="10"
-                class="w-full"
+                class="h-8 w-14 px-2 text-xs text-right"
                 :data-testid="`${testPrefix}-${side}-per-row`"
                 @update:model-value="(v) => setField(side, 'per_row', v)"
               />
             </div>
-            <div class="space-y-1">
-              <Label :for="`${side}-rows`">Rows</Label>
+            <div class="flex items-center justify-between gap-2">
+              <Label :for="`${side}-rows`" class="text-xs text-muted-foreground">Rows</Label>
               <Input
                 :id="`${side}-rows`"
                 :model-value="slotValue(side).rows"
                 type="number"
                 min="0"
                 max="10"
-                class="w-full"
+                class="h-8 w-14 px-2 text-xs text-right"
                 :data-testid="`${testPrefix}-${side}-rows`"
                 @update:model-value="(v) => setField(side, 'rows', v)"
               />
             </div>
           </div>
           <div class="space-y-1">
-            <Label :for="`${side}-start`">{{ startLabel(side) }}</Label>
+            <Label :for="`${side}-start`" class="text-xs">{{ startLabel(side) }}</Label>
             <Select
               :model-value="slotValue(side).start"
               @update:model-value="(v) => setField(side, 'start', String(v))"
             >
-              <SelectTrigger :id="`${side}-start`" class="w-full max-w-xs" :data-testid="`${testPrefix}-${side}-start`">
+              <SelectTrigger :id="`${side}-start`" size="sm" class="w-full" :data-testid="`${testPrefix}-${side}-start`">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

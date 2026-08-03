@@ -50,10 +50,10 @@ export interface FreeKeyDefaults {
   logo_badge_shape: string
   backdrop_badge_shape: string
   episode_badge_shape: string
-  poster_badge_background: string
-  logo_badge_background: string
-  backdrop_badge_background: string
-  episode_badge_background: string
+  poster_badge_alpha: number
+  logo_badge_alpha: number
+  backdrop_badge_alpha: number
+  episode_badge_alpha: number
 }
 
 export const authApi = {

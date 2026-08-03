@@ -1,10 +1,10 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { selectOption } from './helpers'
 
 const TEST_IMDB_ID = 'tt0111161'
 
 /** Get admin JWT via API. */
-async function getAdminToken(request: any): Promise<string> {
+async function getAdminToken(request: APIRequestContext): Promise<string> {
   await request.post('/api/auth/setup', {
     data: { username: 'admin', password: 'testpassword123' },
   })
@@ -15,23 +15,26 @@ async function getAdminToken(request: any): Promise<string> {
   return token
 }
 
-/** Set (or clear) the free API key flag without resetting other settings. */
-async function setFreeApiKey(request: any, enabled: boolean): Promise<string> {
+/**
+ * Set (or clear) the free API key flag without resetting other settings.
+ *
+ * Sends a minimal partial payload: the admin PUT accepts free_api_key_enabled
+ * directly and treats the other fields as optional. Do NOT echo the GET payload
+ * back — its layout fields arrive as JSON strings, which the PUT's object-typed
+ * fields reject with a 400 (which silently left the flag untouched before).
+ */
+async function setFreeApiKey(request: APIRequestContext, enabled: boolean): Promise<string> {
   const token = await getAdminToken(request)
-  const settingsRes = await request.get('/api/admin/settings', {
+  const res = await request.put('/api/admin/settings', {
     headers: { Authorization: `Bearer ${token}` },
+    data: { free_api_key_enabled: enabled },
   })
-  const settings = await settingsRes.json()
-  settings.free_api_key_enabled = enabled
-  await request.put('/api/admin/settings', {
-    headers: { Authorization: `Bearer ${token}` },
-    data: settings,
-  })
+  expect(res.status()).toBe(200)
   return token
 }
 
 /** Check if real API keys are configured by attempting a poster fetch. */
-async function hasRealKeys(request: any, token: string): Promise<boolean> {
+async function hasRealKeys(request: APIRequestContext, token: string): Promise<boolean> {
   const keyRes = await request.post('/api/keys', {
     headers: { Authorization: `Bearer ${token}` },
     data: { name: 'key-check' },
@@ -43,8 +46,8 @@ async function hasRealKeys(request: any, token: string): Promise<boolean> {
   return res.status() === 200
 }
 
-/** Login as admin and navigate to settings. */
-async function loginAndGoToSettings(page: any, request: any) {
+/** Login as admin and navigate to the General settings section. */
+async function loginAndGoToSettings(page: Page, request: APIRequestContext) {
   await request.post('/api/auth/setup', {
     data: { username: 'admin', password: 'testpassword123' },
   })
@@ -56,7 +59,8 @@ async function loginAndGoToSettings(page: any, request: any) {
   await expect(page).toHaveURL(/\/admin/)
 
   await page.click('text=Settings')
-  await expect(page).toHaveURL(/\/admin\/settings/)
+  await page.click('text=General')
+  await expect(page).toHaveURL(/\/admin\/settings\/general/)
 }
 
 test.describe('free API key', () => {
@@ -82,14 +86,23 @@ test.describe('free API key', () => {
     await loginAndGoToSettings(page, request)
 
     const toggle = page.locator('button[role="switch"]')
-    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
 
-    // Wait for the API call to complete
+    // The switch only flips local state — persistence happens via the Save button.
+    await toggle.click()
     await expect(toggle).toHaveAttribute('aria-checked', 'true')
 
-    // Reload and verify
+    const putResponse = page.waitForResponse(
+      (res) => res.url().includes('/api/admin/settings') && res.request().method() === 'PUT',
+    )
+    await page.getByTestId('save-settings-button').click()
+    const response = await putResponse
+    expect(response.status()).toBe(200)
+    await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
+
+    // UI state has settled — reload and verify the flag persisted.
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Settings')
+    await expect(page.locator('h1')).toContainText('General')
     await expect(page.locator('button[role="switch"]')).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -106,7 +119,7 @@ test.describe('free API key', () => {
     await setFreeApiKey(request, false)
 
     await page.goto('/login')
-    await expect(page.locator('text=Free API Key Available')).not.toBeVisible()
+    await expect(page.locator('text=Free API Key Available')).toBeHidden()
   })
 
   test('key-login with free API key returns 401', async ({ request }) => {
@@ -140,10 +153,10 @@ test.describe('free API key card', () => {
     await setFreeApiKey(request, false)
 
     await page.goto('/')
-    await expect(page.locator('text=Free API Key Available')).not.toBeVisible()
+    await expect(page.locator('text=Free API Key Available')).toBeHidden()
 
     await page.goto('/login')
-    await expect(page.locator('text=Free API Key Available')).not.toBeVisible()
+    await expect(page.locator('text=Free API Key Available')).toBeHidden()
   })
 
   test('card is visible on landing page when enabled', async ({ page, request }) => {
@@ -233,7 +246,6 @@ test.describe('free API key card', () => {
     // Set language
     await selectOption(page, page.locator('#free-lang'), 'en - English')
     await expect(curlBlock).toContainText('lang=en')
-
   })
 
   test('fetch poster shows image result', async ({ page, request }) => {
@@ -334,16 +346,13 @@ test.describe('free API key card', () => {
 
   test('card reflects the server ratings order and exposes the settings endpoint', async ({ page, request }) => {
     const token = await getAdminToken(request)
-    const settingsRes = await request.get('/api/admin/settings', {
+    // Minimal partial update — do not echo the GET payload back (layout fields
+    // are JSON strings there but the PUT expects objects, which would 400).
+    const updateRes = await request.put('/api/admin/settings', {
       headers: { Authorization: `Bearer ${token}` },
+      data: { free_api_key_enabled: true, ratings_order: 'tmdb,imdb,rt' },
     })
-    const settings = await settingsRes.json()
-    settings.free_api_key_enabled = true
-    settings.ratings_order = 'tmdb,imdb,rt'
-    await request.put('/api/admin/settings', {
-      headers: { Authorization: `Bearer ${token}` },
-      data: settings,
-    })
+    expect(updateRes.status()).toBe(200)
 
     // The public endpoint returns the operator's configured defaults.
     const pub = await request.get('/api/free-key/settings')
@@ -366,16 +375,11 @@ test.describe('free API key card', () => {
 
   test('excluding a rating source adds ratings_exclude to the curl example', async ({ page, request }) => {
     const token = await getAdminToken(request)
-    const settingsRes = await request.get('/api/admin/settings', {
+    const updateRes = await request.put('/api/admin/settings', {
       headers: { Authorization: `Bearer ${token}` },
+      data: { free_api_key_enabled: true, ratings_exclude: '' },
     })
-    const settings = await settingsRes.json()
-    settings.free_api_key_enabled = true
-    settings.ratings_exclude = '' // start with nothing excluded
-    await request.put('/api/admin/settings', {
-      headers: { Authorization: `Bearer ${token}` },
-      data: settings,
-    })
+    expect(updateRes.status()).toBe(200)
 
     await page.goto('/')
     await page.locator('text=Try it out').click()

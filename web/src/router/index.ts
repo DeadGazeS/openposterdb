@@ -117,9 +117,19 @@ const router = createRouter({
         },
         {
           path: 'settings',
-          name: 'settings',
+          redirect: { name: 'settings-general' },
+        },
+        {
+          path: 'settings/general',
+          name: 'settings-general',
           component: () => import('@/views/SettingsView.vue'),
-          meta: { title: 'Settings' },
+          meta: { title: 'General' },
+        },
+        {
+          path: 'settings/image',
+          name: 'settings-image',
+          component: () => import('@/views/SettingsView.vue'),
+          meta: { title: 'Image' },
         },
       ],
     },

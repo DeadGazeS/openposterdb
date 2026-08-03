@@ -24,6 +24,52 @@ func loadTestFont(t *testing.T) {
 	}
 }
 
+// TestRatingsLimitForKindOverride guards the serve path's ratings limit: an
+// explicit ?ratings_limit override beats the per-kind layout total, and the
+// stored (legacy) ratings_limit settings fields are never consulted — so a
+// stored 0 for a per-key row can't wrongly suppress all ratings.
+func TestRatingsLimitForKindOverride(t *testing.T) {
+	s := services.DefaultRenderSettings()
+	// Simulate a legacy per-key row whose stored ratings_limit fields are 0
+	// while the layouts fit 3/5/5/1 badges.
+	s.RatingsLimit = 0
+	s.LogoRatingsLimit = 0
+	s.BackdropRatingsLimit = 0
+	s.EpisodeRatingsLimit = 0
+
+	// No override: the layout total wins, never the stored (0) field.
+	if got := ratingsLimitForKind("poster", &s, nil); got != 3 {
+		t.Errorf("poster no-override limit=%d, want layout total 3", got)
+	}
+	if got := ratingsLimitForKind("logo", &s, nil); got != 5 {
+		t.Errorf("logo no-override limit=%d, want layout total 5", got)
+	}
+	if got := ratingsLimitForKind("backdrop", &s, nil); got != 5 {
+		t.Errorf("backdrop no-override limit=%d, want layout total 5", got)
+	}
+	if got := ratingsLimitForKind("episode", &s, nil); got != 1 {
+		t.Errorf("episode no-override limit=%d, want layout total 1", got)
+	}
+
+	// Explicit override beats the layout total.
+	eight := int32(8)
+	if got := ratingsLimitForKind("poster", &s, &eight); got != 8 {
+		t.Errorf("poster override limit=%d, want 8", got)
+	}
+
+	// An invalid (>10) override is ignored and falls back to the layout total.
+	big := int32(11)
+	if got := ratingsLimitForKind("poster", &s, &big); got != 3 {
+		t.Errorf("poster invalid override limit=%d, want layout total 3", got)
+	}
+
+	// Explicit 0 is honoured (a legit "no badges" value).
+	zero := int32(0)
+	if got := ratingsLimitForKind("poster", &s, &zero); got != 0 {
+		t.Errorf("poster zero override limit=%d, want 0", got)
+	}
+}
+
 // TestConcurrentRendering guards against the shared-opentype.Face data race
 // that crashed under parallel image requests (sfnt.LoadGlyph panic). opentype.Face
 // is not safe for concurrent use, so each caller must get its own face; the

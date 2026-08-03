@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { Check, Loader2, Download, Upload, SlidersHorizontal, Image as ImageIcon } from 'lucide-vue-next'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
+import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
 import { adminApi, type SaveSettingsPayload } from '@/lib/api'
 import { FREE_API_KEY } from '@/lib/constants'
@@ -22,6 +23,29 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
+
+const route = useRoute()
+
+// The active section is derived from the route — each section is its own page
+// (/admin/settings/general and /admin/settings/image).
+const section = computed(() => (route.name === 'settings-image' ? 'image' : 'general'))
+
+const GENERAL_SUB_TAB_KEY = 'settings-general-subtab'
+const generalSubTab = ref(localStorage.getItem(GENERAL_SUB_TAB_KEY) || 'api')
+watch(generalSubTab, (v) => localStorage.setItem(GENERAL_SUB_TAB_KEY, v))
+
+const API_SUB_TAB_KEY = 'settings-api-subtab'
+const apiSubTab = ref(localStorage.getItem(API_SUB_TAB_KEY) || 'free-api-key')
+watch(apiSubTab, (v) => localStorage.setItem(API_SUB_TAB_KEY, v))
+
+// Leaving the settings page resets the General section's tabs to their first
+// category on return, matching the Image section's behaviour (the form clears
+// its own tab key on unmount). A hard refresh does NOT run this hook, so the
+// tabs still persist there.
+onBeforeUnmount(() => {
+  localStorage.removeItem(GENERAL_SUB_TAB_KEY)
+  localStorage.removeItem(API_SUB_TAB_KEY)
+})
 
 type SettingsResponse = RenderSettings & { free_api_key_enabled: boolean; free_api_key_locked: boolean }
 
@@ -200,7 +224,7 @@ async function onImportFile(e: Event) {
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">Settings</h1>
+      <h1 class="text-2xl font-bold">{{ section === 'general' ? 'General' : 'Image' }}</h1>
       <div class="flex items-center gap-2">
         <Button
           v-if="formRef?.dirty"
@@ -224,41 +248,17 @@ async function onImportFile(e: Event) {
       </div>
     </div>
 
-    <Tabs default-value="general" :unmount-on-hide="false" class="grid w-full grid-cols-1 gap-4 lg:grid-cols-[300px,1fr]">
-      <!-- Settings section nav (sidebar on desktop, horizontal strip on mobile) -->
-      <div class="pb-4">
-        <div class="relative group/settings-nav lg:block lg:rounded-lg lg:border lg:bg-card/50 lg:p-2">
-          <div class="flex flex-col items-center justify-between gap-4 md:flex-row">
-            <div class="my-2 space-y-1 px-2">
-              <div class="flex items-center justify-center gap-2 md:justify-start">
-                <h4 class="text-sm font-semibold">Sections</h4>
-              </div>
-            </div>
-          </div>
-          <TabsList class="flex h-fit w-full flex-wrap items-center justify-center gap-1 p-0 lg:h-auto lg:flex-col lg:items-stretch lg:space-y-1 lg:bg-transparent">
-            <TabsTrigger value="general" class="h-10 w-fit gap-3 px-3 lg:w-full lg:justify-start">
-              <SlidersHorizontal class="size-4 shrink-0" />
-              <span>General</span>
-            </TabsTrigger>
-            <TabsTrigger value="image" class="h-10 w-fit gap-3 px-3 lg:w-full lg:justify-start">
-              <ImageIcon class="size-4 shrink-0" />
-              <span>Image</span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
-      </div>
-
-      <div class="relative space-y-4">
-        <!-- General -->
+    <Tabs :model-value="section" :unmount-on-hide="false">
+      <!-- General -->
         <TabsContent value="general">
-          <Tabs default-value="api" :unmount-on-hide="false">
+          <Tabs :model-value="generalSubTab" @update:model-value="generalSubTab = String($event)" :unmount-on-hide="false">
             <TabsList class="h-auto flex-wrap">
               <TabsTrigger value="api">API</TabsTrigger>
               <TabsTrigger value="cache">Cache</TabsTrigger>
               <TabsTrigger value="backup">Backup</TabsTrigger>
             </TabsList>
             <TabsContent value="api" class="mt-3">
-              <Tabs default-value="free-api-key" :unmount-on-hide="false">
+              <Tabs :model-value="apiSubTab" @update:model-value="apiSubTab = String($event)" :unmount-on-hide="false">
             <TabsList class="h-auto flex-wrap">
               <TabsTrigger value="free-api-key">Free API Key</TabsTrigger>
               <TabsTrigger value="api-keys">API Keys</TabsTrigger>
@@ -473,7 +473,6 @@ async function onImportFile(e: Event) {
             />
           </div>
         </TabsContent>
-      </div>
     </Tabs>
   </div>
 </template>

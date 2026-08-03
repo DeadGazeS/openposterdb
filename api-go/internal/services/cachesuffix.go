@@ -124,22 +124,26 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		ly := LayoutCacheSuffix(&settings.PosterLayout, "poster")
 		ts := ScaleCacheSuffix("ts", settings.PosterTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.PosterBadgeSize)
+		bw := ScaleCacheSuffix("bw", settings.PosterBadgeWidth)
+		bh := ScaleCacheSuffix("bh", settings.PosterBadgeHeight)
 		lgs := ScaleCacheSuffix("ls", settings.PosterLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.PosterBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.PosterBadgeAlpha))
 		fit := settings.PosterFit.CacheSuffix()
-		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + lgs + shp + bgd + fit + isSuffix
+		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + bw + bh + lgs + shp + bgd + fit + isSuffix
 
 	case "logo":
 		bs := BadgeStyleCacheSuffix(string(settings.LogoBadgeStyle.ForShape(settings.LogoBadgeShape)))
 		ls := LabelStyleCacheSuffix(string(settings.LogoLabelStyle))
 		ts := ScaleCacheSuffix("ts", settings.LogoTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.LogoBadgeSize)
+		bw := ScaleCacheSuffix("bw", settings.LogoBadgeWidth)
+		bh := ScaleCacheSuffix("bh", settings.LogoBadgeHeight)
 		lgs := ScaleCacheSuffix("ls", settings.LogoLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.LogoBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.LogoBadgeAlpha))
 		ly := LayoutCacheSuffix(&settings.LogoLayout, "logo")
-		result = ratingsSuffix + bs + ls + ly + ts + bsz + lgs + shp + bgd + isSuffix
+		result = ratingsSuffix + bs + ls + ly + ts + bsz + bw + bh + lgs + shp + bgd + isSuffix
 
 	case "backdrop":
 		bs := BadgeStyleCacheSuffix(string(settings.BackdropBadgeStyle.ForShape(settings.BackdropBadgeShape)))
@@ -148,11 +152,13 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		ly := LayoutCacheSuffix(&settings.BackdropLayout, "backdrop")
 		ts := ScaleCacheSuffix("ts", settings.BackdropTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.BackdropBadgeSize)
+		bw := ScaleCacheSuffix("bw", settings.BackdropBadgeWidth)
+		bh := ScaleCacheSuffix("bh", settings.BackdropBadgeHeight)
 		lgs := ScaleCacheSuffix("ls", settings.BackdropLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.BackdropBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.BackdropBadgeAlpha))
 		ei := EdgeInsetCacheSuffix(settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY)
-		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + lgs + shp + bgd + ei + isSuffix
+		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + bw + bh + lgs + shp + bgd + ei + isSuffix
 
 	case "episode":
 		bs := BadgeStyleCacheSuffix(string(settings.EpisodeBadgeStyle.ForShape(settings.EpisodeBadgeShape)))
@@ -161,6 +167,8 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		ly := LayoutCacheSuffix(&settings.EpisodeLayout, "episode")
 		ts := ScaleCacheSuffix("ts", settings.EpisodeTextSize)
 		bsz := ScaleCacheSuffix("bz", settings.EpisodeBadgeSize)
+		bw := ScaleCacheSuffix("bw", settings.EpisodeBadgeWidth)
+		bh := ScaleCacheSuffix("bh", settings.EpisodeBadgeHeight)
 		lgs := ScaleCacheSuffix("ls", settings.EpisodeLogoSize)
 		shp := BadgeShapeCacheSuffix(string(settings.EpisodeBadgeShape))
 		bgd := BadgeAlphaCacheSuffix(int32(settings.EpisodeBadgeAlpha))
@@ -168,7 +176,7 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		if settings.EpisodeBlur {
 			blur = ".blur"
 		}
-		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + lgs + shp + bgd + blur + isSuffix
+		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + bw + bh + lgs + shp + bgd + blur + isSuffix
 	}
 
 	// Recolored sources affect the rendered image, so fold them into the cache

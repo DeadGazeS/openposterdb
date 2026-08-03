@@ -45,6 +45,8 @@ type ImageQuery struct {
 	LabelStyle     *string `json:"label_style"`
 	TextSize       *int32  `json:"text_size"`
 	BadgeSize      *int32  `json:"badge_size"`
+	BadgeWidth     *int32  `json:"badge_width"`
+	BadgeHeight    *int32  `json:"badge_height"`
 	LogoSize       *int32  `json:"logo_size"`
 	BadgeDirection *string `json:"badge_direction"`
 	BadgeShape     *string `json:"badge_shape"`
@@ -520,7 +522,7 @@ func HandleImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClient, o
 
 		bytes, contentType, err := image.ServeImage(
 			db, tmdb, omdb, mdblist, trakt, fanart,
-			idTypeStr, idValue, kind, settings,
+			idTypeStr, idValue, kind, settings, query.RatingsLimit,
 			cfg.CacheDir, cfg.ExternalCacheOnly,
 			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
 			cfg.ImageQuality, query.ImageSize,

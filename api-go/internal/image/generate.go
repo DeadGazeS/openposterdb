@@ -100,7 +100,7 @@ func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFac
 
 	if len(badges) > 0 && !layout.IsEmpty() {
 		var badgeImages []*image.RGBA
-		if badgeStyle.IsVertical() {
+		if appearance.Style.IsVertical() {
 			for _, b := range badges {
 				badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
 			}
@@ -257,7 +257,7 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 	}
 
 	var badgeImages []*image.RGBA
-	if badgeStyle.IsVertical() {
+	if appearance.Style.IsVertical() {
 		for _, b := range badges {
 			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
 		}
@@ -451,7 +451,7 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 	}
 
 	var badgeImages []*image.RGBA
-	if badgeStyle.IsVertical() {
+	if appearance.Style.IsVertical() {
 		for _, b := range badges {
 			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
 		}
@@ -518,7 +518,7 @@ func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFac
 	}
 
 	var badgeImages []*image.RGBA
-	if badgeStyle.IsVertical() {
+	if appearance.Style.IsVertical() {
 		for _, b := range badges {
 			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
 		}

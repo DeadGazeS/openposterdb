@@ -12,7 +12,6 @@ import {
   BADGE_DIRECTION_LABELS,
   LABEL_STYLE_LABELS,
   BADGE_SHAPE_LABELS,
-  BADGE_BACKGROUND_LABELS,
   IMAGE_SOURCE_LABELS,
   POSTER_FIT_LABELS,
 } from '@/lib/constants'
@@ -56,7 +55,11 @@ const textSize = ref('')
 const badgeSizePct = ref('')
 const logoSizePct = ref('')
 const badgeShape = ref('default')
-const badgeBackground = ref('default')
+// Background opacity override for the badge (0-100%). Empty = use the loaded
+// server default for the current image type; any entered value (including 0)
+// is sent as an explicit `badge_alpha` override. Like the size-percent fields,
+// a number-typed v-model may coerce the value, so the ref is string | number.
+const badgeAlpha = ref<string | number>('')
 const ratingsLimit = ref('default')
 const badgeDirection = ref('default')
 const imageSource = ref('default')
@@ -139,13 +142,13 @@ const typeDefaults = computed(() => {
   if (!d) return null
   switch (imageType.value) {
     case 'logo':
-      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_background: d.logo_badge_background }
+      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_alpha: d.logo_badge_alpha }
     case 'backdrop':
-      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_background: d.backdrop_badge_background }
+      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_alpha: d.backdrop_badge_alpha }
     case 'episode':
-      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_background: d.episode_badge_background }
+      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_alpha: d.episode_badge_alpha }
     default: // poster
-      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_background: d.poster_badge_background }
+      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_alpha: d.poster_badge_alpha }
   }
 })
 
@@ -182,7 +185,12 @@ const badgeShapeDefaultLabel = computed(() => annotate('Badge shape', typeDefaul
 const badgeShapeIsPill = computed(() =>
   badgeShape.value === 'p' || (badgeShape.value === 'default' && typeDefaults.value?.badge_shape === 'p'),
 )
-const badgeBackgroundDefaultLabel = computed(() => annotate('Background', typeDefaults.value?.badge_background, BADGE_BACKGROUND_LABELS))
+// Placeholder for the opacity input: the loaded per-type server default, or the
+// server's built-in 80% when the settings aren't available yet.
+const badgeAlphaDefaultLabel = computed(() => {
+  const a = typeDefaults.value?.badge_alpha
+  return a == null ? 'default (80%)' : `default (${a}%)`
+})
 const imageSourceDefaultLabel = computed(() => annotate('Source', defaults.value?.image_source, IMAGE_SOURCE_LABELS))
 const badgeDirectionDefaultLabel = computed(() => annotate('Direction', typeDefaults.value?.badge_direction, BADGE_DIRECTION_LABELS))
 const textlessDefaultLabel = computed(() =>
@@ -211,6 +219,7 @@ watch(imageType, (newType) => {
   logoSizePct.value = ''
   ratingsLimit.value = 'default'
   badgeDirection.value = 'default'
+  badgeAlpha.value = ''
   // Controls that only exist for one type; clearing them keeps the query string
   // free of params the new type would ignore.
   textless.value = 'default'
@@ -275,7 +284,11 @@ const queryString = computed(() => {
     if (Number.isFinite(n)) params.set('logo_size', String(Math.min(400, Math.max(50, n))))
   }
   if (badgeShape.value !== 'default') params.set('badge_shape', badgeShape.value)
-  if (badgeBackground.value !== 'default') params.set('badge_background', badgeBackground.value)
+  const badgeAlphaVal = String(badgeAlpha.value).trim()
+  if (badgeAlphaVal !== '') {
+    const n = Math.round(Number(badgeAlphaVal))
+    if (Number.isFinite(n)) params.set('badge_alpha', String(Math.min(100, Math.max(0, n))))
+  }
   if (ratingsLimit.value !== 'default') params.set('ratings_limit', ratingsLimit.value)
   if (imageType.value !== 'logo' && badgeDirection.value !== 'default') params.set('badge_direction', badgeDirection.value)
   if (imageType.value !== 'episode' && imageSource.value !== 'default') params.set('image_source', imageSource.value)
@@ -463,18 +476,19 @@ async function handleFetch() {
               <SelectItem value="p">Pill</SelectItem>
             </SelectContent>
           </Select>
-          <Select v-model="badgeBackground">
-            <SelectTrigger id="free-badge-background" aria-label="Badge background" class="bg-background">
-              <SelectValue placeholder="Background: default" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">{{ badgeBackgroundDefaultLabel }}</SelectItem>
-              <SelectItem value="d">Default</SelectItem>
-              <SelectItem value="k">Dark</SelectItem>
-              <SelectItem value="t">Transparent</SelectItem>
-              <SelectItem value="n">None</SelectItem>
-            </SelectContent>
-          </Select>
+          <div class="flex items-center gap-2">
+            <Label for="free-badge-alpha" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Background opacity %</Label>
+            <Input
+              id="free-badge-alpha"
+              v-model="badgeAlpha"
+              type="number"
+              min="0"
+              max="100"
+              :placeholder="badgeAlphaDefaultLabel"
+              aria-label="Badge background opacity (percent, 0-100)"
+              class="bg-background min-w-0"
+            />
+          </div>
           <Select v-if="imageType !== 'episode'" v-model="imageSource">
             <SelectTrigger id="free-image-source" aria-label="Image source" class="bg-background">
               <SelectValue placeholder="Source: default" />

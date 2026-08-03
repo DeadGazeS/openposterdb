@@ -276,10 +276,13 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewPosterRatingsLimit)
-	if query.RatingsLimit != nil {
+	// An explicit ?ratings_limit beats the layout total only when valid; an
+	// absent or invalid override falls back to the layout total (matching the
+	// serve path's override ?? layout.Total() semantics).
+	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
+	if overrideValid {
 		ratingsLimit = *query.RatingsLimit
 	}
-	services.ValidateRatingsLimit(ratingsLimit)
 
 	defaultOrder := services.DefaultRatingsOrder()
 	ratingsOrder := defaultOrder
@@ -293,7 +296,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	layout := previewLayout(query, "poster")
-	if query.RatingsLimit == nil {
+	if !overrideValid {
 		ratingsLimit = layout.Total()
 	}
 
@@ -325,7 +328,13 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	if query.BadgeAlpha != nil {
 		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
+	if query.BadgeWidth != nil {
+		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
+	}
+	if query.BadgeHeight != nil {
+		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
+	}
 
 	posterFit := services.PosterFitNative
 	if query.Fit != nil {
@@ -346,6 +355,19 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	colors := parsePreviewColors(r)
 
 	posterBytes, err := p.demoArtworkBytes("poster")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Shape the demo artwork so the fit modes (native/cover/pad/blur) are
+	// visibly different in the preview while the output canvas always stays a
+	// 2:3 portrait (the web preview box is sized from the rendered image's
+	// natural dimensions): a genuine 2:3 poster renders identically under every
+	// fit, so 2:3 artwork is centre-cropped to a wide 3:2 box first, and native
+	// is composed onto a 2:3 canvas so the preview box never changes shape.
+	// Non-2:3 artwork passes through unchanged.
+	posterBytes, err = image.PosterPreviewArtwork(posterBytes, posterFit, targetWidth)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -387,10 +409,13 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
-	if query.RatingsLimit != nil {
+	// An explicit ?ratings_limit beats the layout total only when valid; an
+	// absent or invalid override falls back to the layout total (matching the
+	// serve path's override ?? layout.Total() semantics).
+	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
+	if overrideValid {
 		ratingsLimit = *query.RatingsLimit
 	}
-	services.ValidateRatingsLimit(ratingsLimit)
 
 	defaultOrder := services.DefaultRatingsOrder()
 	ratingsOrder := defaultOrder
@@ -403,7 +428,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 		ratingsExclude = *query.RatingsExclude
 	}
 
-	rawBadgeStyle := services.BadgeStyleLogoLeftValueRight
+	rawBadgeStyle := services.BadgeStyleLogoTB
 	if query.BadgeStyle != nil {
 		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
 	}
@@ -423,10 +448,16 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	if query.BadgeAlpha != nil {
 		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
+	if query.BadgeWidth != nil {
+		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
+	}
+	if query.BadgeHeight != nil {
+		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
+	}
 
 	layout := previewLayout(query, "logo")
-	if query.RatingsLimit == nil {
+	if !overrideValid {
 		ratingsLimit = layout.Total()
 	}
 
@@ -482,10 +513,13 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
-	if query.RatingsLimit != nil {
+	// An explicit ?ratings_limit beats the layout total only when valid; an
+	// absent or invalid override falls back to the layout total (matching the
+	// serve path's override ?? layout.Total() semantics).
+	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
+	if overrideValid {
 		ratingsLimit = *query.RatingsLimit
 	}
-	services.ValidateRatingsLimit(ratingsLimit)
 
 	defaultOrder := services.DefaultRatingsOrder()
 	ratingsOrder := defaultOrder
@@ -499,7 +533,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	}
 
 	layout := previewLayout(query, "backdrop")
-	if query.RatingsLimit == nil {
+	if !overrideValid {
 		ratingsLimit = layout.Total()
 	}
 
@@ -526,7 +560,13 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	if query.BadgeAlpha != nil {
 		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
+	if query.BadgeWidth != nil {
+		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
+	}
+	if query.BadgeHeight != nil {
+		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
+	}
 
 	edgeInsetX := int32(0)
 	if query.EdgeInsetX != nil {
@@ -588,10 +628,13 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	textScale := textSize.Percent()
 
 	ratingsLimit := int32(previewPosterRatingsLimit)
-	if query.RatingsLimit != nil {
+	// An explicit ?ratings_limit beats the layout total only when valid; an
+	// absent or invalid override falls back to the layout total (matching the
+	// serve path's override ?? layout.Total() semantics).
+	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
+	if overrideValid {
 		ratingsLimit = *query.RatingsLimit
 	}
-	services.ValidateRatingsLimit(ratingsLimit)
 
 	defaultOrder := services.DefaultRatingsOrder()
 	ratingsOrder := defaultOrder
@@ -605,7 +648,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	layout := previewLayout(query, "episode")
-	if query.RatingsLimit == nil {
+	if !overrideValid {
 		ratingsLimit = layout.Total()
 	}
 
@@ -632,7 +675,13 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	if query.BadgeAlpha != nil {
 		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle}
+	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
+	if query.BadgeWidth != nil {
+		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
+	}
+	if query.BadgeHeight != nil {
+		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
+	}
 
 	blur := false
 	if query.Blur != nil {
@@ -737,7 +786,7 @@ func HandleFetchImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClie
 
 		bytes, contentType, err := image.ServeImage(
 			db, tmdb, omdb, mdblist, trakt, fanart,
-			idType, idValue, kind, &settings,
+			idType, idValue, kind, &settings, nil,
 			cfg.CacheDir, cfg.ExternalCacheOnly,
 			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
 			cfg.ImageQuality, nil,

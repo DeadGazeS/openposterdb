@@ -341,10 +341,35 @@ func newFontFace(data []byte) font.Face {
 	return face
 }
 
+// ratingsLimitForKind returns the number of ratings to fetch for a kind: the
+// explicit ?ratings_limit override when provided and valid, otherwise the
+// per-kind layout's total badge capacity. The stored ratings_limit settings
+// fields (settings.RatingsLimit etc.) are legacy and are never consulted, so a
+// stored 0 for a per-key row can't wrongly suppress all ratings.
+func ratingsLimitForKind(kind string, settings *services.RenderSettings, override *int32) int32 {
+	limit := settings.PosterLayout.Total()
+	switch kind {
+	case "logo":
+		limit = settings.LogoLayout.Total()
+	case "backdrop":
+		limit = settings.BackdropLayout.Total()
+	case "episode":
+		limit = settings.EpisodeLayout.Total()
+	}
+	if override != nil && services.ValidateRatingsLimit(*override) == nil {
+		return *override
+	}
+	return limit
+}
+
 // ServeImage is the full image-generation pipeline shared by the public image
 // endpoint and the admin fetch endpoint. It resolves the ID, fetches ratings,
 // downloads the base artwork, renders badges, and caches the result to the
 // filesystem and the image_meta table.
+//
+// ratingsLimit is the explicit ?ratings_limit override from the public image
+// query (nil when absent). The stored ratings_limit settings fields are legacy
+// and are never consulted for the limit decision.
 //
 // Returns (image bytes, content type, error).
 func ServeImage(
@@ -357,6 +382,7 @@ func ServeImage(
 	idTypeStr, idValue string,
 	kind string,
 	settings *services.RenderSettings,
+	ratingsLimit *int32,
 	cacheDir string,
 	externalCacheOnly bool,
 	ratingsMinStaleSecs uint64,
@@ -421,17 +447,11 @@ func ServeImage(
 		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
 	}
 
-	// Fetch ratings. The number of ratings shown is the layout's total badge
-	// capacity, so that's the limit used to fetch badges.
-	limit := settings.PosterLayout.Total()
-	switch kind {
-	case "logo":
-		limit = settings.LogoLayout.Total()
-	case "backdrop":
-		limit = settings.BackdropLayout.Total()
-	case "episode":
-		limit = settings.EpisodeLayout.Total()
-	}
+	// Fetch ratings. The number of ratings shown is the explicit ?ratings_limit
+	// override when provided (and valid), otherwise the layout's total badge
+	// capacity. The stored ratings_limit settings fields are legacy and are
+	// never read here.
+	limit := ratingsLimitForKind(kind, settings, ratingsLimit)
 
 	var rawBadges []services.RatingBadge
 	if limit > 0 {
