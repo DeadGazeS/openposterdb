@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import LayoutEditor from '@/components/LayoutEditor.vue'
 import type { SaveSettingsPayload, SourceColors } from '@/lib/api'
-import { LANGUAGES, ALL_RATING_SOURCES, RATING_COLOR_ROWS, SOURCE_BADGE_SAMPLES, parseRatingsOrder, parseRatingsExclude } from '@/lib/constants'
+import { LANGUAGES, ALL_RATING_SOURCES, RATING_COLOR_ROWS, SOURCE_BADGE_SAMPLES, POSTER_FIT_DESCRIPTIONS, parseRatingsOrder, parseRatingsExclude } from '@/lib/constants'
 import type { ImageLayout } from '@/lib/layout'
 import { parseLayout, layoutToJSON, layoutTotal } from '@/lib/layout'
 
@@ -965,10 +965,10 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lr">Logo left · value right</SelectItem>
-                  <SelectItem value="rl">Value left · logo right</SelectItem>
-                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
-                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
+                  <SelectItem value="lr">Logo left · Number right</SelectItem>
+                  <SelectItem value="rl">Number left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · Number bottom</SelectItem>
+                  <SelectItem value="bt">Number top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editPosterBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
@@ -1092,7 +1092,7 @@ function toggleExclude(key: string, checked: boolean) {
               <p class="text-xs text-muted-foreground">0% = no background, 100% = opaque black</p>
             </div>
             <div class="space-y-2">
-              <Label :for="inputId('poster-fit')">Aspect ratio</Label>
+              <Label :for="inputId('poster-fit')">Fit</Label>
               <Select
                 :model-value="editPosterFit"
                 @update:model-value="editPosterFit = $event as string"
@@ -1107,8 +1107,8 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectItem value="pad">Letterbox to 2:3</SelectItem>
                 </SelectContent>
               </Select>
-              <p class="text-xs text-muted-foreground">
-                How non-2:3 posters are fit to the standard 2:3 frame so clients don't crop them.
+              <p class="text-xs text-muted-foreground" data-testid="poster-fit-description">
+                {{ POSTER_FIT_DESCRIPTIONS[editPosterFit] ?? 'How non-2:3 posters are fit to the standard 2:3 frame so clients don\'t crop them.' }}
               </p>
             </div>
             <div class="flex items-center gap-2">
@@ -1157,10 +1157,10 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lr">Logo left · value right</SelectItem>
-                  <SelectItem value="rl">Value left · logo right</SelectItem>
-                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
-                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
+                  <SelectItem value="lr">Logo left · Number right</SelectItem>
+                  <SelectItem value="rl">Number left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · Number bottom</SelectItem>
+                  <SelectItem value="bt">Number top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editLogoBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
@@ -1320,10 +1320,10 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lr">Logo left · value right</SelectItem>
-                  <SelectItem value="rl">Value left · logo right</SelectItem>
-                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
-                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
+                  <SelectItem value="lr">Logo left · Number right</SelectItem>
+                  <SelectItem value="rl">Number left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · Number bottom</SelectItem>
+                  <SelectItem value="bt">Number top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editBackdropBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>
@@ -1519,10 +1519,10 @@ function toggleExclude(key: string, checked: boolean) {
                   <SelectValue placeholder="Select style" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lr">Logo left · value right</SelectItem>
-                  <SelectItem value="rl">Value left · logo right</SelectItem>
-                  <SelectItem value="tb">Logo top · value bottom</SelectItem>
-                  <SelectItem value="bt">Value top · logo bottom</SelectItem>
+                  <SelectItem value="lr">Logo left · Number right</SelectItem>
+                  <SelectItem value="rl">Number left · logo right</SelectItem>
+                  <SelectItem value="tb">Logo top · Number bottom</SelectItem>
+                  <SelectItem value="bt">Number top · logo bottom</SelectItem>
                 </SelectContent>
               </Select>
               <p v-if="editEpisodeBadgeShape === 'p'" class="text-xs text-muted-foreground">Pills always render horizontally.</p>

@@ -76,18 +76,22 @@ func cornerRadius(shape services.BadgeShape, shortAxis, base uint32) uint32 {
 }
 
 const (
-	baseBadgeHeight       = 58
-	baseBadgePaddingH     = 6
-	baseTextLabelPadH     = 4
-	baseBadgeValuePad     = 5
-	baseBadgeRadius       = 10
-	baseBadgeBorder       = 3
+	baseBadgeHeight   = 58
+	baseBadgePaddingH = 6
+	baseTextLabelPadH = 4
+	baseBadgeValuePad = 5
+	baseBadgeRadius   = 10
+	baseBadgeBorder   = 3
 	// badgeContentGapBase is the minimum distance between content ink (value
 	// text, label text, source logo) and the badge's outer border. Oversized
 	// content is clipped at (border − gap) instead of AT the border, so scaled-up
 	// text/logos are cut off before touching the badge edge. It is derived from
 	// the border width so content never sits on the border itself.
-	badgeContentGapBase   = baseBadgeBorder
+	badgeContentGapBase = baseBadgeBorder
+	// badgeInwardGap is the tiny gap between the source logo's INWARD side
+	// (facing the value text) and the section seam at 100%, so the text box
+	// owns the remaining space and centres the text.
+	badgeInwardGap        = 2
 	basePillPadding       = 10
 	basePillPaddingV      = 6
 	baseFontSize          = 34.0
@@ -96,13 +100,13 @@ const (
 	baseVertBadgeWidth    = 88
 	baseVertBadgePaddingV = 8
 
-	badgeSpacing        = 10
-	badgeBottomMargin   = 10
-	badgeTopMargin      = 20
-	badgeSideMargin     = 15
-	badgeRowSpacing     = 7
-	badgeVertSpacing    = 7
-	backdropSideMargin  = 20
+	badgeSpacing       = 10
+	badgeBottomMargin  = 10
+	badgeTopMargin     = 20
+	badgeSideMargin    = 15
+	badgeRowSpacing    = 7
+	badgeVertSpacing   = 7
+	backdropSideMargin = 20
 )
 
 type scaledDims struct {
@@ -485,9 +489,11 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	// The badge box is sized purely by badge_size (via dims) and the default
 	// (100%) content layout — it does NOT grow with text_size/logo_size. Text or
 	// logos larger than the box are truncated (clipped) at the badge edges.
-	// The badge is split at valueX into a left (logo/label) section and a right
-	// (value) section. The icon sits inset by an equal padding on the left, top
-	// and bottom; the value text is centred in the right section.
+	// The badge is split at the section boundary into a left (logo/label)
+	// section and a right (value) section. The icon is pinned against the seam
+	// (its inward side keeps barely any margin) with equal outer margins on
+	// the remaining three sides; the value text is centred in the right
+	// section.
 	//
 	// Per-axis badge width/height (badge_width/badge_height) scale the badge
 	// box independently: the width applies to the section split and the total
@@ -515,30 +521,48 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 		}
 	}
 
-	// Equal inset around the icon on the left, top and bottom. The icon's x and
-	// y both use the same vertical centring inset so the logo has identical
-	// outer padding on three sides.
-	iconPad := (badgeH - int(iconH2)) / 2
-	if iconPad < 0 {
-		iconPad = 0
-	}
-
 	labelSectionW := int(pillPad) + int(maxLabelW) + 2*int(labelPad)
+	// Icon badges: size the label section from the BASE logo (100% logo_size,
+	// badge-scaled) so the badge box stays fixed — base logo width + the equal
+	// outer margin (iconPad) + the tiny inward gap — so the logo hugs the seam
+	// instead of being centred, and its three OUTER margins are equal at 100%.
+	var iconPad int
+	if useIcon {
+		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			baseIconW, baseIconH2 := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
+			// The outer margin is fixed by the 100%-height reference so the
+			// badge width never tracks badge_height (per-axis); the drawn logo
+			// is vertically centred by the ACTUAL badge height (see iy below),
+			// so extra height becomes padding, not a wider section.
+			refBadgeH := int(dims.badgeHeight)
+			if appearance.Shape == services.BadgeShapePill {
+				refBadgeH += int(dims.pillPaddingV)
+			}
+			iconPad = (refBadgeH - int(baseIconH2)) / 2
+			if iconPad < 0 {
+				iconPad = 0
+			}
+			labelSectionW = int(baseIconW) + iconPad + badgeInwardGap
+		}
+	}
 	valueSectionW := int(maxValueW) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
 	// Per-axis width: scale the section split and the total badge width by the
 	// badge-width percentage (the content inside keeps its own size).
 	labelSectionW = int(math.Round(float64(labelSectionW) * float64(wPct)))
 	valueSectionW = int(math.Round(float64(valueSectionW) * float64(wPct)))
-	totalW := labelSectionW + valueSectionW + int(math.Round(float64(pillPad)*float64(wPct)))
+	scaledPillPad := int(math.Round(float64(pillPad) * float64(wPct)))
+	totalW := labelSectionW + valueSectionW + scaledPillPad
 
 	// Sections split the badge: label/logo occupies labelSectionW, value text
 	// occupies valueSectionW. For mirrored styles the value section is on the
-	// left and the logo/label on the right.
+	// left and the logo/label on the right. The pill cap padding (pillPad)
+	// always lands on the VALUE section's outer end, so the logo's outer
+	// margin stays equal for both lr and rl (true mirror images).
 	valueSectionX := labelSectionW
 	labelSectionX := 0
 	if mirrored {
-		labelSectionX = valueSectionW
-		valueSectionX = 0
+		labelSectionX = scaledPillPad + valueSectionW
+		valueSectionX = scaledPillPad
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, totalW, badgeH))
@@ -559,7 +583,14 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 			valueCorners = cornerTL | cornerBL
 		}
 		fillRoundedRect(img, labelSectionX, 0, labelSectionX+labelSectionW, badgeH, radius, labelCorners, labelBG)
-		fillRoundedRect(img, valueSectionX, 0, valueSectionX+valueSectionW, badgeH, radius, valueCorners, valueBG)
+		// The value section's outer tile extends to the badge edge so the pill
+		// cap padding (pillPad) is filled instead of left transparent (the
+		// seam between the two tiles stays non-overlapping).
+		if mirrored {
+			fillRoundedRect(img, 0, 0, valueSectionX+valueSectionW, badgeH, radius, valueCorners, valueBG)
+		} else {
+			fillRoundedRect(img, valueSectionX, 0, totalW, badgeH, radius, valueCorners, valueBG)
+		}
 		if dims.badgeBorder > 0 && borderCol != nil {
 			inset := int(dims.badgeBorder)
 			innerR := radius - float32(inset)
@@ -582,13 +613,40 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	// BEFORE it reaches the border (content that already sits ≥ gap from the
 	// border is never clipped).
 	contentGap := int(dims.contentGap)
+	// The logo's INWARD side may reach the section seam when it fits (its tiny
+	// inward gap keeps it off at 100%); oversized logos keep the content-gap
+	// inset on both sides so they clip evenly and never touch the badge border.
+	iconFitsSeam := useIcon && scaledIcon != nil && int(iconW) <= labelSectionW-badgeInwardGap
 	labelClip := image.Rect(labelSectionX+contentGap, contentGap, labelSectionX+labelSectionW-contentGap, badgeH-contentGap)
+	if iconFitsSeam {
+		if mirrored {
+			labelClip = image.Rect(labelSectionX, contentGap, labelSectionX+labelSectionW-contentGap, badgeH-contentGap)
+		} else {
+			labelClip = image.Rect(labelSectionX+contentGap, contentGap, labelSectionX+labelSectionW, badgeH-contentGap)
+		}
+	}
 	valueClip := image.Rect(valueSectionX+contentGap, contentGap, valueSectionX+valueSectionW-contentGap, badgeH-contentGap)
 
-	// Logo / label, centred in its section (inset equally on left/top/bottom).
+	// Logo / label. At 100% the icon's INWARD side (facing the value text)
+	// keeps only badgeInwardGap from the seam, and the three OUTER margins
+	// (lr: left/top/bottom; rl: right/top/bottom) are equal. Logos wider than
+	// the section minus the inward gap are centred so they clip at the content
+	// gap on both sides.
 	if useIcon && scaledIcon != nil {
-		ix := labelSectionX + (labelSectionW-int(iconW))/2
-		iy := iconPad
+		var ix int
+		if int(iconW) <= labelSectionW-badgeInwardGap {
+			if mirrored {
+				ix = labelSectionX + badgeInwardGap
+			} else {
+				ix = labelSectionX + labelSectionW - badgeInwardGap - int(iconW)
+			}
+		} else {
+			ix = labelSectionX + (labelSectionW-int(iconW))/2
+		}
+		iy := (badgeH - int(iconH2)) / 2
+		if iy < 0 {
+			iy = 0
+		}
 		overlayIconShadowedInRect(img, scaledIcon, ix, iy, shadowPx, labelClip)
 	} else {
 		actualLabelW := textWidth(label, labelFontFace)
@@ -721,45 +779,52 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	// clipped at the section edges (cut off evenly on both sides), exactly like
 	// the fixed horizontal badge box.
 	//
-	// For logo badges (icon label styles) the label section is instead a square
-	// matching the badge width, so the source logo can be sized with the same
-	// outer margins as the horizontal (lr/rl) badge: a wider section needs a
-	// larger logo for the same ~5-6px margin, and the square section gives that
-	// logo room to fit (a 48x48 logo with 6px margins needs ~76x76, which does
-	// not fit a 58px-tall section).
+	// For logo badges (icon label styles) the label section HUGS the logo
+	// instead: the logo starts at the outer margin and its inward side keeps
+	// only badgeInwardGap from the seam, so the section grows to fit the logo
+	// (a wider logo needs a taller section) and no dead space sits between the
+	// logo and the value text.
 	sectionH := int(math.Round(float64(dims.badgeHeight) * float64(hPct)))
 	if appearance.Shape == services.BadgeShapePill {
 		sectionH += int(math.Round(float64(dims.pillPaddingV) * float64(hPct)))
 	}
-	// The INWARD side of the logo (facing the value text) keeps only a tiny gap
-	// from the seam, so the value text sits as close to the badge centre as the
-	// geometry allows; the OUTER margins (top/bottom + sides) match the
-	// horizontal (lr/rl) badge's logo margins.
-	inwardGap := 2
-	// The logo scales ONLY with logo_size (not badge_size): decoupled from the
-	// badge box so changing badge size never resizes the source logo.
+	// The INWARD side of the logo (facing the value text) keeps only
+	// badgeInwardGap from the seam, so the text box owns the remaining space
+	// and centres the text; the OUTER margins (top/bottom + sides) are equal.
+	// The logo's HEIGHT scales only with logo_size (not badge_size); its
+	// vertical width then fills the badge minus the equal outer margins.
 	iconHeight := uint32(math.Round(float64(baseIconHeight) * float64(logoScale)))
 	// The inter-section gap mirrors the logo's inward gap: barely any margin
 	// between the label content and the value text.
-	gap := uint32(inwardGap)
+	gap := uint32(badgeInwardGap)
 	vertPadVSc := uint32(math.Round(float64(vertPadV) * float64(hPct)))
 
 	var vLogoW, vLogoH, hMarginV int
 	labelAreaH := sectionH
 	if useIcon {
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
-			hIconW, hIconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
-			hMarginV = (sectionH - int(hIconH)) / 2 // horizontal top/bottom margin (iconPad)
+			_, hIconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
+			hMarginV = (sectionH - int(hIconH)) / 2 // top/bottom margin at this badge height
 			if hMarginV < 0 {
 				hMarginV = 0
 			}
-			labelPad := int(dims.badgePaddingH)
-			hLabelSectionW := int(pillPad) + int(labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, logoScale)) + 2*labelPad
-			hMarginH := (hLabelSectionW - int(hIconW)) / 2 // horizontal side margin
-			if hMarginH < 0 {
-				hMarginH = 0
+			// The logo WIDTH margin is fixed by the 100%-height reference so
+			// the logo size never tracks badge_height (per-axis): extra height
+			// becomes padding (hMarginV), exactly like the horizontal badge
+			// keeps its logo at logo_size. At 100% hMarginVRef == hMarginV.
+			refSectionH := int(dims.badgeHeight)
+			if appearance.Shape == services.BadgeShapePill {
+				refSectionH += int(dims.pillPaddingV)
 			}
-			vLogoW = vertBadgeW - 2*hMarginH
+			hMarginVRef := (refSectionH - int(hIconH)) / 2
+			if hMarginVRef < 0 {
+				hMarginVRef = 0
+			}
+			// The logo fills the badge width minus the equal outer margin on
+			// each side, so at 100% the three OUTER margins are equal (tb:
+			// left/top/right; bt: left/bottom/right) and the INWARD side keeps
+			// only badgeInwardGap from the seam.
+			vLogoW = vertBadgeW - 2*hMarginVRef
 			if icon.Bounds().Dx() > 0 && icon.Bounds().Dy() > 0 {
 				vLogoH = int(math.Round(float64(vLogoW) * float64(icon.Bounds().Dy()) / float64(icon.Bounds().Dx())))
 			}
@@ -774,7 +839,7 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 			// the seam, so no dead space sits between logo and value text. The
 			// logo is positioned at iy = hMarginV from the badge edge, while the
 			// section begins at vertPadVSc — so subtract that offset.
-			labelAreaH = hMarginV + vLogoH + inwardGap - int(vertPadVSc)
+			labelAreaH = hMarginV + vLogoH + badgeInwardGap - int(vertPadVSc)
 			if labelAreaH < 1 {
 				labelAreaH = 1
 			}
@@ -848,13 +913,14 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 			}
 			// Clip the logo so it is always at least contentGap from the badge's
 			// outer borders (and never spills past the label section's inner
-			// seam). At 100% the logo's margins already exceed the gap, so this
-			// only cuts oversized logos.
+			// seam). The logo's INWARD side may reach the seam (its tiny
+			// badgeInwardGap keeps it off at 100%), so that side of the clip is
+			// not inset; oversized logos are cut at the seam instead.
 			var logoClip image.Rectangle
 			if labelTop {
-				logoClip = image.Rect(contentGap, contentGap, vertBadgeW-contentGap, labelAreaY+labelAreaH-contentGap)
+				logoClip = image.Rect(contentGap, contentGap, vertBadgeW-contentGap, labelAreaY+labelAreaH)
 			} else {
-				logoClip = image.Rect(contentGap, labelAreaY+contentGap, vertBadgeW-contentGap, totalH-contentGap)
+				logoClip = image.Rect(contentGap, labelAreaY, vertBadgeW-contentGap, totalH-contentGap)
 			}
 			overlayIconShadowedInRect(img, scaledIcon, ix, iy, shadowPx, logoClip)
 		} else {
@@ -864,22 +930,14 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 		drawVerticalLabel(img, textCol, label, labelFontFace, labelAreaY, labelAreaH, vertBadgeW, shadowPx, contentGap)
 	}
 
-	// Value text. For tb (label on top) the text hugs the TOP of its section so
-	// the logo's inward side keeps barely any margin from the text; for bt
-	// (label on bottom) it hugs the BOTTOM of its section (the seam side). It
-	// stays horizontally centred and is clipped to the section inset by the
+	// Value text, centred in its (fixed) value section — ink-based centring on
+	// both axes, exactly like the horizontal (lr/rl) badge — so the text box
+	// owns the remaining space. It is clipped to the section inset by the
 	// content gap, so oversized text cuts off evenly without touching the
 	// badge border.
 	if inkX0, inkY0, inkX1, inkY1, ok := textInkBBox(fontFace, value); ok {
 		valueX := (vertBadgeW - (inkX0 + inkX1)) / 2
-		var valueTextY int
-		if labelTop {
-			// tb: text top at valueAreaY + contentGap (hugs the seam).
-			valueTextY = valueAreaY + contentGap - inkY0
-		} else {
-			// bt: text bottom at valueAreaY + valueH - contentGap (hugs the seam).
-			valueTextY = valueAreaY + valueH - contentGap - inkY1
-		}
+		valueTextY := valueAreaY + valueH/2 - (inkY0+inkY1)/2
 		drawTextShadowedInRect(img, textCol, valueX, valueTextY, fontFace, value, shadowPx, image.Rect(contentGap, valueAreaY+contentGap, vertBadgeW-contentGap, valueAreaY+valueH-contentGap))
 	} else {
 		valueW := textWidth(value, fontFace)

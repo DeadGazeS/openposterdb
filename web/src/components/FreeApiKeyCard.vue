@@ -409,10 +409,10 @@ async function handleFetch() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="default" :key="badgeStyleDefaultLabel">{{ badgeStyleDefaultLabel }}</SelectItem>
-              <SelectItem value="lr">Logo left · value right</SelectItem>
-              <SelectItem value="rl">Value left · logo right</SelectItem>
-              <SelectItem value="tb">Logo top · value bottom</SelectItem>
-              <SelectItem value="bt">Value top · logo bottom</SelectItem>
+              <SelectItem value="lr">Logo left · Number right</SelectItem>
+              <SelectItem value="rl">Number left · logo right</SelectItem>
+              <SelectItem value="tb">Logo top · Number bottom</SelectItem>
+              <SelectItem value="bt">Number top · logo bottom</SelectItem>
             </SelectContent>
           </Select>
           <Select v-model="labelStyle">

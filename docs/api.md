@@ -73,6 +73,7 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `?label_style={t|i|o|h}`: label rendering — `t` (text), `i` (white icons), `o` (official provider logos), `h` (high-resolution provider logos rasterized from the `highRes` SVGs)
 - `?text_size={50-400}`: rating text font size as a percentage of the default (100 = default)
 - `?badge_size={50-400}`: overall badge size as a percentage of the default (100 = default). Scales the badge frame (padding, spacing, borders); the badge always auto-sizes to fit its content so text/logos never overflow
+- `?badge_width={50-400}` / `?badge_height={50-400}`: scale the badge frame on a single axis as a percentage of the default (100 = default). The width applies to the badge's total width and section split, the height to the box height; text and logo sizes are unaffected (they scale only with `text_size`/`logo_size`)
 - `?logo_size={50-400}`: rating source logo size as a percentage of the default (100 = default)
 - `?badge_shape={r|p}`: badge corner shape — `r` (rounded, default), `p` (pill, fully rounded ends). Pills always render as a horizontal icon/label-left, value-right lozenge, even on image types whose default style is vertical (logos, backdrops, episodes)
 - `?badge_background={d|k|t|n}`: badge background — `d` (default: source-coloured label + dark value), `k` (dark: uniformly dark), `t` (transparent: semi-transparent so the artwork shows through), `n` (none: no background, label/value drawn directly on the image with a drop shadow)
@@ -87,7 +88,7 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 
 Old RPDB parameter names `?poster_source=` and `?fanart_textless=` are accepted as aliases.
 
-**Scope notes:** `textless`, `fit`, and `layout` (poster) are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `text_size`, `badge_size`, `logo_size`, `badge_shape`, `badge_background`, `image_source`, `layout`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
+**Scope notes:** `textless`, `fit`, and `layout` (poster) are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `text_size`, `badge_size`, `badge_width`, `badge_height`, `logo_size`, `badge_shape`, `badge_background`, `image_source`, `layout`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
 
 ## Image sizes
 

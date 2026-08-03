@@ -15,11 +15,21 @@ import (
 func horizontalValueSection(badge *services.RatingBadge, style services.BadgeStyle, labelFontFace, valueFontFace font.Face, labelStyle services.LabelStyle, dims scaledDims, textScale float32) (x0, x1 int) {
 	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, 1.0)
 	maxValueW := baseTextWidth(badge.Value, valueFontFace, textScale)
-	labelPad := int(dims.badgePaddingH)
-	if !labelStyle.UsesIcon() {
-		labelPad = int(dims.textLabelPadH)
+	labelSectionW := 0
+	if labelStyle.UsesIcon() {
+		// Icon badges: the label section hugs the base logo (base width +
+		// equal outer margin + tiny inward gap), mirroring renderBadgeInner.
+		if icon := iconForBadge(badge, labelStyle); icon != nil {
+			baseIconW, baseIconH2 := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
+			iconPad := (int(dims.badgeHeight) - int(baseIconH2)) / 2 // pillPad = 0 for rounded
+			if iconPad < 0 {
+				iconPad = 0
+			}
+			labelSectionW = int(baseIconW) + iconPad + badgeInwardGap
+		}
+	} else {
+		labelSectionW = maxLabelW + 2*int(dims.textLabelPadH) // pillPad = 0 for rounded
 	}
-	labelSectionW := maxLabelW + 2*labelPad // pillPad = 0 for rounded
 	valueSectionW := maxValueW + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
 	if style.IsMirrored() {
 		return 0, valueSectionW
@@ -466,10 +476,10 @@ func TestContentNeverTouchesBadgeBorder(t *testing.T) {
 		{"tb-pill", services.BadgeStyleLogoTB, services.BadgeShapePill},
 	}
 	scales := []struct {
-		name       string
-		textScale  float32
-		logoScale  float32
-		facePct    int
+		name      string
+		textScale float32
+		logoScale float32
+		facePct   int
 	}{
 		{"s1", 1.0, 1.0, 100},
 		{"s2", 2.0, 2.0, 200},
@@ -647,10 +657,12 @@ func TestBadgeBoxScalesPerAxis(t *testing.T) {
 	}
 }
 
-// TestVerticalLogoInwardMarginMinimal guards the inward-margin requirement:
-// in tb/bt badges the logo's INWARD side (facing the value text) keeps only a
-// tiny gap from the seam between the label and value sections.
-func TestVerticalLogoInwardMarginMinimal(t *testing.T) {
+// TestLogoUniformOuterMarginsAndInwardMinimal guards the user requirement:
+// at 100% the source logo's three OUTER margins (facing the badge frame) are
+// EQUAL for every style (lr/rl/tb/bt, rounded + pill), and the INWARD side
+// (facing the value text) keeps barely any margin (~2px) so the text box owns
+// the remaining space and centres the text.
+func TestLogoUniformOuterMarginsAndInwardMinimal(t *testing.T) {
 	loadTestFont(t)
 	vf := GetValueFontFace()
 	lf := GetFontFace()
@@ -660,6 +672,7 @@ func TestVerticalLogoInwardMarginMinimal(t *testing.T) {
 	defer vf.Close()
 	defer lf.Close()
 
+	// A synthetic 48x48 square icon matches every real default source icon.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
 	for y := 0; y < 48; y++ {
 		for x := 0; x < 48; x++ {
@@ -679,38 +692,108 @@ func TestVerticalLogoInwardMarginMinimal(t *testing.T) {
 		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
 	}
 	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
-	styles := []services.BadgeStyle{services.BadgeStyleLogoTB, services.BadgeStyleValueTB}
+	styles := []struct {
+		name  string
+		style services.BadgeStyle
+	}{
+		{"lr", services.BadgeStyleLogoLeftValueRight},
+		{"rl", services.BadgeStyleValueLeftLogoRight},
+		{"tb", services.BadgeStyleLogoTB},
+		{"bt", services.BadgeStyleValueTB},
+	}
+	shapes := []struct {
+		name  string
+		shape services.BadgeShape
+	}{
+		{"rounded", services.BadgeShapeRounded},
+		{"pill", services.BadgeShapePill},
+	}
 
-	for _, style := range styles {
-		appearance := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: style}
-		img := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, appearance, 1.0, 1.0, 1.0, colors)
-		b := img.Bounds()
-		// Locate the value-text ink (white) and the logo ink (cyan).
-		logoMaxY, valueMinY := 0, b.Max.Y
-		logoFound, valueFound := false, false
-		for y := b.Min.Y; y < b.Max.Y; y++ {
-			for x := b.Min.X; x < b.Max.X; x++ {
-				c := img.RGBAAt(x, y)
-				if c.A > 200 && c.B > 200 && c.R < 100 && c.G > 200 {
-					if y > logoMaxY {
-						logoMaxY = y
+	for _, sh := range shapes {
+		for _, tc := range styles {
+			appearance := services.BadgeAppearance{Shape: sh.shape, Alpha: services.BadgeAlpha(100), Style: tc.style}
+			var img *image.RGBA
+			if tc.style.IsVertical() {
+				img = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, appearance, 1.0, 1.0, 1.0, colors)
+			} else {
+				img = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, appearance, 1.0, 1.0, 1.0, colors)
+			}
+			b := img.Bounds()
+			lx0, ly0, lx1, ly1, found := cyanBounds(img)
+			if !found {
+				t.Fatalf("%s/%s: no logo ink found", sh.name, tc.name)
+			}
+			left, right := lx0-b.Min.X, b.Max.X-1-lx1
+			top, bottom := ly0-b.Min.Y, b.Max.Y-1-ly1
+
+			// Locate the value section (green background band) so the logo's
+			// inward gap to the text box can be measured directly (for lr/rl
+			// the band is vertical, for tb/bt horizontal).
+			gMinX, gMinY := b.Max.X, b.Max.Y
+			gMaxX, gMaxY := b.Min.X, b.Min.Y
+			gFound := false
+			for y := b.Min.Y; y < b.Max.Y; y++ {
+				for x := b.Min.X; x < b.Max.X; x++ {
+					c := img.RGBAAt(x, y)
+					if c.A > 200 && c.R < 100 && c.G > 200 && c.B < 100 {
+						if x < gMinX {
+							gMinX = x
+						}
+						if x > gMaxX {
+							gMaxX = x
+						}
+						if y < gMinY {
+							gMinY = y
+						}
+						if y > gMaxY {
+							gMaxY = y
+						}
+						gFound = true
 					}
-					logoFound = true
-				}
-				if c.A > 200 && c.R > 200 && c.G > 200 && c.B > 200 {
-					if y < valueMinY {
-						valueMinY = y
-					}
-					valueFound = true
 				}
 			}
-		}
-		if !logoFound || !valueFound {
-			t.Fatalf("%s: logo or value ink not found (logo=%v value=%v)", style, logoFound, valueFound)
-		}
-		inwardGap := valueMinY - logoMaxY - 1
-		if inwardGap > 10 {
-			t.Errorf("%s: inward gap logo->value = %dpx, want <= 10px (barely any margin)", style, inwardGap)
+			if !gFound {
+				t.Fatalf("%s/%s: no value-section background found", sh.name, tc.name)
+			}
+
+			var outer [3]int
+			var inward int
+			switch tc.style {
+			case services.BadgeStyleLogoLeftValueRight: // lr: outer L/T/B, inward R
+				outer = [3]int{left, top, bottom}
+				inward = gMinX - lx1 - 1
+			case services.BadgeStyleValueLeftLogoRight: // rl: outer R/T/B, inward L
+				outer = [3]int{right, top, bottom}
+				inward = lx0 - gMaxX - 1
+			case services.BadgeStyleLogoTB: // tb: outer L/T/R, inward B
+				outer = [3]int{left, top, right}
+				inward = gMinY - ly1 - 1
+			case services.BadgeStyleValueTB: // bt: outer L/B/R, inward T
+				outer = [3]int{left, bottom, right}
+				inward = ly0 - gMaxY - 1
+			}
+			for i := 1; i < len(outer); i++ {
+				if diff := abs(outer[i] - outer[0]); diff > 1 {
+					t.Errorf("%s/%s: logo outer margins %v not equal (base %d)", sh.name, tc.name, outer, outer[0])
+				}
+			}
+			if inward > 5 {
+				t.Errorf("%s/%s: logo inward margin=%d, want <= 5px (barely any margin)", sh.name, tc.name, inward)
+			}
+			// The pill cap padding on the value section's outer end must be
+			// filled (not transparent), so artwork never shows through the
+			// pill tip.
+			if sh.shape == services.BadgeShapePill && (tc.style == services.BadgeStyleLogoLeftValueRight || tc.style == services.BadgeStyleValueLeftLogoRight) {
+				probeX := b.Max.X - 2
+				if tc.style == services.BadgeStyleValueLeftLogoRight {
+					probeX = b.Min.X + 2
+				}
+				probeY := b.Min.Y + b.Dy()/2
+				if c := img.RGBAAt(probeX, probeY); c.A == 0 {
+					t.Errorf("%s/%s: pill tip at (%d,%d) is transparent (alpha 0)", sh.name, tc.name, probeX, probeY)
+				}
+			}
+			t.Logf("%s/%s: outer margins L=%d R=%d T=%d B=%d, inward=%d", sh.name, tc.name, left, right, top, bottom, inward)
 		}
 	}
 }

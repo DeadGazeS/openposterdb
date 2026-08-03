@@ -29,55 +29,42 @@ func gradientArtwork(w, h int) []byte {
 	return buf.Bytes()
 }
 
-// TestPosterPreviewArtworkShapes guards the settings preview's fit selector.
-// A genuine 2:3 poster renders identically under every fit, so the artwork
-// must be centre-cropped to a wide 3:2 box; artwork that is already non-2:3
-// must pass through unchanged. fit=native must additionally come back as a
-// 2:3 canvas so the preview box keeps its portrait shape.
-func TestPosterPreviewArtworkShapes(t *testing.T) {
-	const targetWidth = 300
+// TestPosterPreviewArtworkPassthrough guards the settings preview's fit
+// selector: the demo artwork must pass through unchanged for every fit so the
+// preview matches the real render. Previously 2:3 artwork was centre-cropped
+// to a wide 3:2 box to make the fit modes look artificially distinct — that
+// cut the top/bottom of the poster off under fit=native.
+func TestPosterPreviewArtworkPassthrough(t *testing.T) {
+	fits := []services.PosterFit{
+		services.PosterFitNative,
+		services.PosterFitCover,
+		services.PosterFitPad,
+		services.PosterFitBlur,
+	}
+	for _, fit := range fits {
+		portrait := gradientArtwork(300, 450) // 2:3, like the real demo poster
+		shaped, err := PosterPreviewArtwork(portrait, fit, 300)
+		if err != nil {
+			t.Fatalf("PosterPreviewArtwork(fit=%s): %v", fit, err)
+		}
+		if !bytes.Equal(portrait, shaped) {
+			t.Errorf("fit=%s: 2:3 artwork should pass through unchanged", fit)
+		}
 
-	// 2:3 portrait source, like the real demo poster / SamplePosterPNG.
-	shaped, err := PosterPreviewArtwork(gradientArtwork(300, 450), services.PosterFitCover, targetWidth)
-	if err != nil {
-		t.Fatalf("PosterPreviewArtwork(cover): %v", err)
-	}
-	img, _, err := image.Decode(bytes.NewReader(shaped))
-	if err != nil {
-		t.Fatalf("decode shaped artwork: %v", err)
-	}
-	if w, h := img.Bounds().Dx(), img.Bounds().Dy(); w != 300 || h != 200 {
-		t.Fatalf("2:3 source should be cropped to a 3:2 (300x200) box, got %dx%d", w, h)
-	}
-
-	// fit=native must be composed onto a 2:3 canvas (300x450) so the preview
-	// box does not change shape.
-	shapedNative, err := PosterPreviewArtwork(gradientArtwork(300, 450), services.PosterFitNative, targetWidth)
-	if err != nil {
-		t.Fatalf("PosterPreviewArtwork(native): %v", err)
-	}
-	nativeImg, _, err := image.Decode(bytes.NewReader(shapedNative))
-	if err != nil {
-		t.Fatalf("decode native artwork: %v", err)
-	}
-	if w, h := nativeImg.Bounds().Dx(), nativeImg.Bounds().Dy(); w != 300 || h != 450 {
-		t.Fatalf("native fit should stay a 2:3 (300x450) canvas, got %dx%d", w, h)
-	}
-
-	// Non-2:3 artwork (already wide) must pass through unchanged.
-	wide := gradientArtwork(400, 200)
-	shapedWide, err := PosterPreviewArtwork(wide, services.PosterFitCover, targetWidth)
-	if err != nil {
-		t.Fatalf("PosterPreviewArtwork(wide): %v", err)
-	}
-	if !bytes.Equal(wide, shapedWide) {
-		t.Fatal("non-2:3 artwork should pass through unchanged")
+		wide := gradientArtwork(400, 200) // already non-2:3
+		shapedWide, err := PosterPreviewArtwork(wide, fit, 300)
+		if err != nil {
+			t.Fatalf("PosterPreviewArtwork(wide, fit=%s): %v", fit, err)
+		}
+		if !bytes.Equal(wide, shapedWide) {
+			t.Errorf("fit=%s: non-2:3 artwork should pass through unchanged", fit)
+		}
 	}
 }
 
 // TestPosterPreviewArtworkDecodesJPEG guards the format registration: the real
 // demo artwork is a JPEG from the TMDB cache while the fallback sample is a
-// PNG, so PosterPreviewArtwork must decode both.
+// PNG, so PosterPreviewArtwork must accept both and hand them through.
 func TestPosterPreviewArtworkDecodesJPEG(t *testing.T) {
 	// Build a JPEG-encoded 2:3 source (what the TMDB cache serves).
 	img := image.NewRGBA(image.Rect(0, 0, 300, 450))
@@ -94,54 +81,114 @@ func TestPosterPreviewArtworkDecodesJPEG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PosterPreviewArtwork(jpeg): %v", err)
 	}
+	if !bytes.Equal(jpg.Bytes(), shaped) {
+		t.Fatal("jpeg artwork should pass through unchanged")
+	}
 	if _, _, err := image.Decode(bytes.NewReader(shaped)); err != nil {
 		t.Fatalf("shaped jpeg-derived artwork failed to decode: %v", err)
 	}
 }
 
-// TestPreviewFitModesDiffer reproduces the reported bug: with a 2:3 demo
-// poster, all four fit modes rendered byte-identical output, so changing the
-// aspect-ratio (fit) setting showed no visible change — and after cropping the
-// artwork to a wide ratio, fit=native rendered a wide box that collapsed the
-// preview container. Every mode must now render onto the same 2:3 canvas
-// (300x450) while the four outputs remain byte-distinct.
-func TestPreviewFitModesDiffer(t *testing.T) {
+// TestPreviewFitModesMatchRealRender reproduces the reported bug: the preview
+// centre-cropped the demo poster, cutting the top/bottom off under fit=native.
+// The preview must now equal the real render:
+//
+//   - For the 2:3 demo poster every fit renders the full poster onto the same
+//     2:3 canvas — the real pipeline does the same (a 2:3 source needs no
+//     crop, bars or fill), so all four being identical is honest, not a bug.
+//   - For non-2:3 artwork the fit logic must still visibly differ: native
+//     keeps the source aspect, cover/pad/blur fill the 2:3 canvas differently.
+func TestPreviewFitModesMatchRealRender(t *testing.T) {
 	const targetWidth = 300
-	rendered := make(map[services.PosterFit]*image.RGBA)
-	for _, fit := range []services.PosterFit{
+
+	fits := []services.PosterFit{
 		services.PosterFitNative,
 		services.PosterFitCover,
 		services.PosterFitPad,
 		services.PosterFitBlur,
-	} {
-		shaped, err := PosterPreviewArtwork(gradientArtwork(300, 450), fit, targetWidth)
-		if err != nil {
-			t.Fatalf("PosterPreviewArtwork(fit=%s): %v", fit, err)
-		}
-		img, _, err := image.Decode(bytes.NewReader(shaped))
-		if err != nil {
-			t.Fatalf("decode shaped artwork (fit=%s): %v", fit, err)
-		}
-		canvas := fitPoster(img, targetWidth, fit)
-		rendered[fit] = canvas
-		if w, h := canvas.Bounds().Dx(), canvas.Bounds().Dy(); w != 300 || h != 450 {
-			t.Errorf("fit=%s rendered %dx%d, want the 2:3 canvas 300x450", fit, w, h)
-		}
 	}
 
-	seen := make(map[string]services.PosterFit)
-	for fit, canvas := range rendered {
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, canvas); err != nil {
-			t.Fatalf("encode fit=%s: %v", fit, err)
+	// 2:3 portrait demo poster.
+	portrait := gradientArtwork(300, 450)
+	portraitRendered := make(map[services.PosterFit]*image.RGBA)
+	for _, fit := range fits {
+		canvas := renderPreviewFit(t, portrait, fit, targetWidth)
+		portraitRendered[fit] = canvas
+		if w, h := canvas.Bounds().Dx(), canvas.Bounds().Dy(); w != 300 || h != 450 {
+			t.Errorf("fit=%s (2:3 source) rendered %dx%d, want the 2:3 canvas 300x450", fit, w, h)
 		}
-		key := string(buf.Bytes())
+	}
+	base := portraitRendered[services.PosterFitNative]
+	for fit, canvas := range portraitRendered {
+		if !samePixels(base, canvas) {
+			t.Errorf("fit=%s (2:3 source) should render identically to native — the real pipeline does", fit)
+		}
+	}
+	// Faithfulness: the native preview equals a straight render of the
+	// unchanged artwork (no crop, no dimmed backdrop).
+	if !samePixels(base, fitPoster(mustDecode(t, portrait), targetWidth, services.PosterFitNative)) {
+		t.Error("native preview should match the real render of the unchanged artwork")
+	}
+
+	// Non-2:3 source: the four fits must stay visibly distinct.
+	wide := gradientArtwork(400, 200)
+	wideRendered := make(map[services.PosterFit]*image.RGBA)
+	for _, fit := range fits {
+		wideRendered[fit] = renderPreviewFit(t, wide, fit, targetWidth)
+	}
+	if samePixels(wideRendered[services.PosterFitNative], wideRendered[services.PosterFitCover]) {
+		t.Error("native should keep the wide source aspect (differ from cover's 2:3 crop)")
+	}
+	seen := make(map[string]services.PosterFit)
+	for fit, canvas := range wideRendered {
+		key := pngKey(t, canvas)
 		if prev, dup := seen[key]; dup {
-			t.Errorf("fit=%s rendered byte-identical to fit=%s", fit, prev)
+			t.Errorf("fit=%s rendered byte-identical to fit=%s for non-2:3 artwork", fit, prev)
 		}
 		seen[key] = fit
 	}
-	if len(seen) != 4 {
-		t.Fatalf("expected 4 distinct fit outputs, got %d", len(seen))
+	if len(seen) != len(fits) {
+		t.Fatalf("expected %d distinct fit outputs for non-2:3 artwork, got %d", len(fits), len(seen))
 	}
+}
+
+// renderPreviewFit runs the exact preview pipeline for a fit: artwork is
+// passed through PosterPreviewArtwork (unchanged) and then shaped by
+// fitPoster, mirroring the preview handler and the real image endpoint.
+func renderPreviewFit(t *testing.T, art []byte, fit services.PosterFit, targetWidth uint32) *image.RGBA {
+	t.Helper()
+	shaped, err := PosterPreviewArtwork(art, fit, targetWidth)
+	if err != nil {
+		t.Fatalf("PosterPreviewArtwork(fit=%s): %v", fit, err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(shaped))
+	if err != nil {
+		t.Fatalf("decode shaped artwork (fit=%s): %v", fit, err)
+	}
+	return fitPoster(img, targetWidth, fit)
+}
+
+func mustDecode(t *testing.T, data []byte) image.Image {
+	t.Helper()
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return img
+}
+
+func samePixels(a, b *image.RGBA) bool {
+	if a.Bounds() != b.Bounds() {
+		return false
+	}
+	return bytes.Equal(a.Pix, b.Pix)
+}
+
+func pngKey(t *testing.T, img image.Image) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	return string(buf.Bytes())
 }

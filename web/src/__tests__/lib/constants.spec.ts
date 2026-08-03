@@ -100,10 +100,10 @@ describe('parseRatingsExclude', () => {
 describe('enum code → label maps', () => {
   it('badge style maps the lr/rl/tb/bt/d codes', () => {
     expect(BADGE_STYLE_LABELS).toEqual({
-      lr: 'Logo left · value right',
-      rl: 'Value left · logo right',
-      tb: 'Logo top · value bottom',
-      bt: 'Value top · logo bottom',
+      lr: 'Logo left · Number right',
+      rl: 'Number left · logo right',
+      tb: 'Logo top · Number bottom',
+      bt: 'Number top · logo bottom',
       d: 'Auto',
     })
   })

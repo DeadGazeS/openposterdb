@@ -116,13 +116,19 @@ export const RATING_COLOR_ROWS = [
 // to human-readable labels. Used to show what a server "default" resolves to in
 // the free-key "Try it out" form. `d` (style/direction) means "auto" — resolved
 // at render time from the badge position/direction.
-export const BADGE_STYLE_LABELS: Record<string, string> = { lr: 'Logo left · value right', rl: 'Value left · logo right', tb: 'Logo top · value bottom', bt: 'Value top · logo bottom', d: 'Auto' }
+export const BADGE_STYLE_LABELS: Record<string, string> = { lr: 'Logo left · Number right', rl: 'Number left · logo right', tb: 'Logo top · Number bottom', bt: 'Number top · logo bottom', d: 'Auto' }
 export const BADGE_DIRECTION_LABELS: Record<string, string> = { h: 'Horizontal', v: 'Vertical', d: 'Auto' }
 export const LABEL_STYLE_LABELS: Record<string, string> = { t: 'Text', i: 'White', o: 'Official', h: 'High Res' }
 export const BADGE_SHAPE_LABELS: Record<string, string> = { r: 'Rounded', p: 'Pill' }
 export const BADGE_BACKGROUND_LABELS: Record<string, string> = { d: 'Default', k: 'Dark', t: 'Transparent', n: 'None' }
 export const IMAGE_SOURCE_LABELS: Record<string, string> = { t: 'TMDB', f: 'Fanart.tv' }
 export const POSTER_FIT_LABELS: Record<string, string> = { native: 'Native', cover: 'Crop to 2:3', blur: 'Blur fill', pad: 'Letterbox' }
+export const POSTER_FIT_DESCRIPTIONS: Record<string, string> = {
+  native: 'Keep the poster at its original shape, scaled to the target width. The whole image is always visible — nothing is cropped or padded.',
+  cover: 'Scale the poster to fill the entire 2:3 frame and crop the edges that overflow. No empty space, but parts of the image are cut off.',
+  blur: 'Fit the whole poster inside the 2:3 frame and fill the leftover bars with a blurred, zoomed copy of it.',
+  pad: 'Fit the whole poster inside the 2:3 frame and fill the leftover bars with solid black.',
+}
 export const POSITION_LABELS: Record<string, string> = {
   bc: 'Bottom Center', tc: 'Top Center', l: 'Left', r: 'Right',
   tl: 'Top Left', tr: 'Top Right', bl: 'Bottom Left', br: 'Bottom Right',
