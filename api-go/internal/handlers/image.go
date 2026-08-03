@@ -105,7 +105,7 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 	}
 
 	if query.BadgeStyle != nil {
-		style := services.BadgeStyle(*query.BadgeStyle)
+		style := services.ParseBadgeStyle(*query.BadgeStyle)
 		switch kind {
 		case "poster":
 			s.PosterBadgeStyle = style

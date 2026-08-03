@@ -5,11 +5,23 @@ import (
 )
 
 func TestBadgeStyleParse(t *testing.T) {
-	if ParseBadgeStyle("h") != BadgeStyleHorizontal {
-		t.Error("h should be Horizontal")
+	if ParseBadgeStyle("lr") != BadgeStyleLogoLeftValueRight {
+		t.Error("lr should be LogoLeftValueRight")
 	}
-	if ParseBadgeStyle("v") != BadgeStyleVertical {
-		t.Error("v should be Vertical")
+	if ParseBadgeStyle("rl") != BadgeStyleValueLeftLogoRight {
+		t.Error("rl should be ValueLeftLogoRight")
+	}
+	if ParseBadgeStyle("tb") != BadgeStyleLogoTB {
+		t.Error("tb should be LogoTB")
+	}
+	if ParseBadgeStyle("bt") != BadgeStyleValueTB {
+		t.Error("bt should be ValueTB")
+	}
+	if ParseBadgeStyle("h") != BadgeStyleLogoLeftValueRight {
+		t.Error("h should map to LogoLeftValueRight")
+	}
+	if ParseBadgeStyle("v") != BadgeStyleLogoTB {
+		t.Error("v should map to LogoTB")
 	}
 	if ParseBadgeStyle("d") != BadgeStyleDefault {
 		t.Error("d should be Default")
@@ -20,33 +32,47 @@ func TestBadgeStyleParse(t *testing.T) {
 }
 
 func TestBadgeStyleIsVertical(t *testing.T) {
-	if BadgeStyleHorizontal.IsVertical() {
-		t.Error("Horizontal.IsVertical should be false")
+	if BadgeStyleLogoLeftValueRight.IsVertical() {
+		t.Error("LogoLeftValueRight.IsVertical should be false")
 	}
-	if !BadgeStyleVertical.IsVertical() {
-		t.Error("Vertical.IsVertical should be true")
+	if BadgeStyleValueLeftLogoRight.IsVertical() {
+		t.Error("ValueLeftLogoRight.IsVertical should be false")
+	}
+	if !BadgeStyleLogoTB.IsVertical() {
+		t.Error("LogoTB.IsVertical should be true")
+	}
+	if !BadgeStyleValueTB.IsVertical() {
+		t.Error("ValueTB.IsVertical should be true")
+	}
+}
+
+func TestBadgeStyleResolveDefault(t *testing.T) {
+	if s := BadgeStyleDefault.ResolveDefault(); s != BadgeStyleLogoLeftValueRight {
+		t.Error("Default → LogoLeftValueRight")
+	}
+	if s := BadgeStyleLogoTB.ResolveDefault(); s != BadgeStyleLogoTB {
+		t.Error("explicit LogoTB stays LogoTB")
 	}
 }
 
 func TestBadgeStyleResolve(t *testing.T) {
-	def := BadgeStyleDefault
-	if s := def.Resolve(BadgeDirectionHorizontal); s != BadgeStyleHorizontal {
-		t.Error("Default+Horizontal → Horizontal")
+	if s := BadgeStyleDefault.Resolve(BadgeDirectionHorizontal); s != BadgeStyleLogoLeftValueRight {
+		t.Error("Default+Horizontal → LogoLeftValueRight")
 	}
-	if s := def.Resolve(BadgeDirectionVertical); s != BadgeStyleVertical {
-		t.Error("Default+Vertical → Vertical")
+	if s := BadgeStyleDefault.Resolve(BadgeDirectionVertical); s != BadgeStyleLogoTB {
+		t.Error("Default+Vertical → LogoTB")
 	}
-	if s := BadgeStyleVertical.Resolve(BadgeDirectionHorizontal); s != BadgeStyleVertical {
-		t.Error("explicit Vertical stays Vertical")
+	if s := BadgeStyleLogoTB.Resolve(BadgeDirectionHorizontal); s != BadgeStyleLogoTB {
+		t.Error("explicit LogoTB stays LogoTB")
 	}
-}
-
-func TestBadgeStyleForShape(t *testing.T) {
-	if s := BadgeStyleVertical.ForShape(BadgeShapePill); s != BadgeStyleHorizontal {
-		t.Error("Vertical+Pill → Horizontal")
+	if s := BadgeStyleValueTB.Resolve(BadgeDirectionHorizontal); s != BadgeStyleValueTB {
+		t.Error("explicit ValueTB stays ValueTB")
 	}
-	if s := BadgeStyleVertical.ForShape(BadgeShapeRounded); s != BadgeStyleVertical {
-		t.Error("Vertical+Rounded stays Vertical")
+	if s := BadgeStyle("h").Resolve(BadgeDirectionVertical); s != BadgeStyleLogoLeftValueRight {
+		t.Error("legacy h normalises to LogoLeftValueRight")
+	}
+	if s := BadgeStyle("v").Resolve(BadgeDirectionHorizontal); s != BadgeStyleLogoTB {
+		t.Error("legacy v normalises to LogoTB")
 	}
 }
 
@@ -60,6 +86,9 @@ func TestBadgeDirectionParse(t *testing.T) {
 	if ParseBadgeDirection("d") != BadgeDirectionDefault {
 		t.Error("d should be Default")
 	}
+	if ParseBadgeDirection("invalid") != BadgeDirectionDefault {
+		t.Error("invalid should be Default")
+	}
 }
 
 func TestBadgeDirectionResolve(t *testing.T) {
@@ -69,6 +98,18 @@ func TestBadgeDirectionResolve(t *testing.T) {
 	}
 	if d := BadgeDirectionVertical.ResolveDefault(); d != BadgeDirectionVertical {
 		t.Error("Vertical stays Vertical")
+	}
+	if d := BadgeDirectionHorizontal.ResolveDefault(); d != BadgeDirectionHorizontal {
+		t.Error("Horizontal stays Horizontal")
+	}
+}
+
+func TestBadgeStyleForShape(t *testing.T) {
+	if s := BadgeStyleLogoTB.ForShape(BadgeShapePill); s != BadgeStyleLogoLeftValueRight {
+		t.Error("LogoTB+Pill → LogoLeftValueRight")
+	}
+	if s := BadgeStyleLogoTB.ForShape(BadgeShapeRounded); s != BadgeStyleLogoTB {
+		t.Error("LogoTB+Rounded stays LogoTB")
 	}
 }
 
@@ -257,8 +298,8 @@ func TestParseGlobalRenderSettings(t *testing.T) {
 	if s.ImageSource != ImageSourceFanart {
 		t.Error("image_source should be Fanart")
 	}
-	if s.PosterBadgeStyle != BadgeStyleVertical {
-		t.Error("poster_badge_style should be Vertical")
+	if s.PosterBadgeStyle != BadgeStyleLogoTB {
+		t.Error("poster_badge_style should be LogoTB")
 	}
 	if s.Lang != "de" {
 		t.Error("lang should be de")

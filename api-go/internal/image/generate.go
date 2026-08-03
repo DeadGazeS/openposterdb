@@ -85,10 +85,11 @@ func posterTargetHeight(targetWidth uint32) uint32 {
 	return uint32(math.Round(float64(targetWidth) * 1.5))
 }
 
-func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
+	appearance.Style = badgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(posterBytes))
 	if err != nil {
@@ -228,6 +229,7 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
+	appearance.Style = badgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(logoBytes))
 	if err != nil {
@@ -305,6 +307,13 @@ func composeLogoLayout(logoImg *image.RGBA, blocks map[string]*layoutBlock, layo
 	if b, ok := blocks["right"]; ok {
 		rightW = b.w
 	}
+	topW, bottomW := 0, 0
+	if b, ok := blocks["top"]; ok {
+		topW = b.w
+	}
+	if b, ok := blocks["bottom"]; ok {
+		bottomW = b.w
+	}
 	topH, bottomH := 0, 0
 	if b, ok := blocks["top"]; ok {
 		topH = b.h
@@ -312,19 +321,46 @@ func composeLogoLayout(logoImg *image.RGBA, blocks map[string]*layoutBlock, layo
 	if b, ok := blocks["bottom"]; ok {
 		bottomH = b.h
 	}
-
-	cw := lw + leftW + rightW
-	if leftW > 0 && rightW > 0 {
-		cw += gap
-	} else if leftW > 0 || rightW > 0 {
-		cw += gap
+	leftH, rightH := 0, 0
+	if b, ok := blocks["left"]; ok {
+		leftH = b.h
 	}
-	ch := lh + topH + bottomH
+	if b, ok := blocks["right"]; ok {
+		rightH = b.h
+	}
+
+	// The canvas must be wide enough for the logo + side blocks, and tall enough
+	// for any block that is wider/taller than the logo zone so nothing clips.
+	// Each present side block keeps a gap between it and the logo, so the logo
+	// zone stays symmetric (left + gap + logo + gap + right).
+	contentW := lw + leftW + rightW
+	if leftW > 0 {
+		contentW += gap
+	}
+	if rightW > 0 {
+		contentW += gap
+	}
+	cw := contentW
+	if topW > cw {
+		cw = topW
+	}
+	if bottomW > cw {
+		cw = bottomW
+	}
+
+	contentH := lh + topH + bottomH
 	if topH > 0 {
-		ch += gap
+		contentH += gap
 	}
 	if bottomH > 0 {
-		ch += gap
+		contentH += gap
+	}
+	ch := contentH
+	if leftH > ch {
+		ch = leftH
+	}
+	if rightH > ch {
+		ch = rightH
 	}
 
 	canvas := image.NewRGBA(image.Rect(0, 0, cw, ch))
@@ -349,18 +385,27 @@ func composeLogoLayout(logoImg *image.RGBA, blocks map[string]*layoutBlock, layo
 		overlay(canvas, b.img, 0, y)
 	}
 
-	// The logo sits in the middle zone (below top block, above bottom block,
-	// between left and right blocks), centred.
-	logoX := leftW
-	if leftW == 0 {
-		logoX = 0
-	} else {
-		logoX = leftW + gap
+	// The logo sits in the middle zone: below the top block, above the bottom
+	// block, and between the left and right blocks. It is centred within that
+	// zone, so with no block on a given axis it centres in the free canvas
+	// space instead of hugging the edge, and when the zone exactly fits the
+	// logo it sits flush against the neighbouring blocks.
+	zoneX0, zoneX1 := 0, cw
+	if leftW > 0 {
+		zoneX0 = leftW + gap
 	}
-	logoY := topH
+	if rightW > 0 {
+		zoneX1 = cw - rightW - gap
+	}
+	logoX := zoneX0 + (zoneX1-zoneX0-lw)/2
+	zoneY0, zoneY1 := 0, ch
 	if topH > 0 {
-		logoY = topH + gap
+		zoneY0 = topH + gap
 	}
+	if bottomH > 0 {
+		zoneY1 = ch - bottomH - gap
+	}
+	logoY := zoneY0 + (zoneY1-zoneY0-lh)/2
 	overlay(canvas, logoImg, logoX, logoY)
 
 	if b, ok := blocks["right"]; ok {
@@ -374,10 +419,11 @@ func composeLogoLayout(logoImg *image.RGBA, blocks map[string]*layoutBlock, layo
 
 // --- Backdrop rendering ---
 
-func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
+	appearance.Style = badgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(backdropBytes))
 	if err != nil {
@@ -431,10 +477,11 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 
 // --- Episode rendering ---
 
-func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeDirection services.BadgeDirection, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
+func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
 	if appearance.Shape == services.BadgeShapePill {
 		badgeStyle = badgeStyle.ForShape(appearance.Shape)
 	}
+	appearance.Style = badgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(imageBytes))
 	if err != nil {

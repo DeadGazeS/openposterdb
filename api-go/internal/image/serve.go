@@ -147,7 +147,6 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 
 	var labelStyle services.LabelStyle
 	var badgeStyle services.BadgeStyle
-	var badgeDirection services.BadgeDirection
 	var appearance services.BadgeAppearance
 	var layout services.ImageLayout
 
@@ -155,25 +154,21 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	case "poster":
 		labelStyle = settings.PosterLabelStyle
 		badgeStyle = settings.PosterBadgeStyle
-		badgeDirection = settings.PosterBadgeDirection
 		appearance = settings.PosterAppearance()
 		layout = settings.PosterLayout
 	case "logo":
 		labelStyle = settings.LogoLabelStyle
 		badgeStyle = settings.LogoBadgeStyle
-		badgeDirection = services.BadgeDirectionHorizontal
 		appearance = settings.LogoAppearance()
 		layout = settings.LogoLayout
 	case "backdrop":
 		labelStyle = settings.BackdropLabelStyle
 		badgeStyle = settings.BackdropBadgeStyle
-		badgeDirection = settings.BackdropBadgeDirection
 		appearance = settings.BackdropAppearance()
 		layout = settings.BackdropLayout
 	case "episode":
 		labelStyle = settings.EpisodeLabelStyle
 		badgeStyle = settings.EpisodeBadgeStyle
-		badgeDirection = settings.EpisodeBadgeDirection
 		appearance = settings.EpisodeAppearance()
 		layout = settings.EpisodeLayout
 	}
@@ -187,7 +182,7 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 	switch kind {
 	case "poster":
 		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
-			layout, badgeStyle, labelStyle, appearance, badgeDirection,
+			layout, badgeStyle, labelStyle, appearance,
 			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
 			settings.PosterFit, settings.Colors)
 
@@ -198,13 +193,13 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 
 	case "backdrop":
 		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
-			layout, badgeStyle, labelStyle, appearance, badgeDirection,
+			layout, badgeStyle, labelStyle, appearance,
 			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
 			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY, settings.Colors)
 
 	case "episode":
 		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
-			layout, badgeStyle, labelStyle, appearance, badgeDirection,
+			layout, badgeStyle, labelStyle, appearance,
 			targetW, badgeScale, badgeMultiplier, textScale, logoScale, settings.EpisodeBlur, settings.Colors)
 	}
 

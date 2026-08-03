@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -121,6 +122,37 @@ func HandleGetKeySettings(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// validateKeySettingsLayouts validates the four per-key layout fields. Each
+// field is a JSON string (the DB stores layouts as text). ValidateLayout runs
+// on the parsed ImageLayout, but UnmarshalLayout silently falls back to an
+// empty layout on malformed JSON, so the raw string is checked with json.Valid
+// first to reject garbage that would otherwise sail through validation and
+// corrupt rendering.
+func validateKeySettingsLayouts(s *services.APIKeySettings) error {
+	fields := []struct {
+		name string
+		raw  string
+	}{
+		{"poster_layout", s.PosterLayout},
+		{"logo_layout", s.LogoLayout},
+		{"backdrop_layout", s.BackdropLayout},
+		{"episode_layout", s.EpisodeLayout},
+	}
+	for _, f := range fields {
+		if f.raw == "" {
+			continue
+		}
+		if !json.Valid([]byte(f.raw)) {
+			return fmt.Errorf("invalid %s: not valid JSON", f.name)
+		}
+		l := services.UnmarshalLayout(f.raw, nil)
+		if err := services.ValidateLayout(&l); err != nil {
+			return fmt.Errorf("invalid %s: %w", f.name, err)
+		}
+	}
+	return nil
+}
+
 func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
@@ -138,6 +170,10 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 		var body services.APIKeySettings
 		if err := decodeJSONBody(r, &body); err != nil {
 			writeError(w, 400, "invalid JSON")
+			return
+		}
+		if err := validateKeySettingsLayouts(&body); err != nil {
+			writeError(w, 400, err.Error())
 			return
 		}
 
@@ -235,6 +271,10 @@ func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 		var body services.APIKeySettings
 		if err := decodeJSONBody(r, &body); err != nil {
 			writeError(w, 400, "invalid JSON")
+			return
+		}
+		if err := validateKeySettingsLayouts(&body); err != nil {
+			writeError(w, 400, err.Error())
 			return
 		}
 
