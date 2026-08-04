@@ -10,9 +10,11 @@ import { Button } from '@/components/ui/button'
 import { BookOpen } from 'lucide-vue-next'
 import AppSidebar from '@/components/AppSidebar.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useIdleLogout } from '@/composables/useIdleLogout'
 
 const route = useRoute()
 const auth = useAuthStore()
+useIdleLogout()
 </script>
 
 <template>

@@ -16,7 +16,7 @@ interface Stats {
   image_mem_cache_mb: number
 }
 
-const { data: stats, isPending, isFetching, refetch } = useQuery<Stats>({
+const { data: stats, isPending, refetch } = useQuery<Stats>({
   queryKey: ['admin', 'stats'],
   queryFn: async () => {
     const res = await adminApi.getStats()
@@ -24,6 +24,19 @@ const { data: stats, isPending, isFetching, refetch } = useQuery<Stats>({
     return res.json()
   },
 })
+
+// True only while a user-initiated Refresh click is in flight — the query's
+// own isFetching also fires on initial load / background refetches.
+const userRefreshing = ref(false)
+
+async function handleRefresh() {
+  userRefreshing.value = true
+  try {
+    await refetch()
+  } finally {
+    userRefreshing.value = false
+  }
+}
 
 const cards = [
   { key: 'total_images', label: 'Total Images' },
@@ -45,7 +58,7 @@ function onCleared(message: string) {
   <div class="space-y-4">
     <div class="flex items-center justify-end gap-2">
       <ClearCacheButton @cleared="onCleared" />
-      <RefreshButton :fetching="isFetching" @refresh="refetch()" />
+      <RefreshButton :fetching="userRefreshing" @refresh="handleRefresh" />
     </div>
     <p v-if="clearMessage" class="text-sm text-muted-foreground text-right">{{ clearMessage }}</p>
     <div class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">

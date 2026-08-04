@@ -31,7 +31,7 @@ async function confirmClear() {
     const body = await res.json()
     const message = body.external_cache_only
       ? 'Cache metadata cleared. Images are served from an external CDN and could not be purged from here.'
-      : `Cache cleared — removed ${body.meta_deleted} cached image${body.meta_deleted === 1 ? '' : 's'}.`
+      : `Cache and images cleared — removed ${body.meta_deleted} cached image${body.meta_deleted === 1 ? '' : 's'}.`
     open.value = false
     emit('cleared', message)
   } catch (e) {
@@ -50,13 +50,13 @@ function openDialog() {
 <template>
   <Button variant="outline" :size="size" class="text-destructive hover:text-destructive" @click="openDialog">
     <Trash2 class="size-4 mr-1" />
-    Clear cache
+    Clear cache and images
   </Button>
 
   <Dialog :open="open" @update:open="(v: boolean) => { if (!v) open = false }">
     <DialogContent class="max-w-sm">
       <DialogHeader>
-        <DialogTitle>Clear cache</DialogTitle>
+        <DialogTitle>Clear cache and images</DialogTitle>
       </DialogHeader>
       <div class="space-y-4">
         <p class="text-sm text-muted-foreground">
@@ -69,7 +69,7 @@ function openDialog() {
           <Button variant="outline" :disabled="loading" @click="open = false">Cancel</Button>
           <Button variant="destructive" :disabled="loading" @click="confirmClear">
             <Loader2 v-if="loading" class="size-4 animate-spin mr-1" />
-            Clear cache
+            Clear cache and images
           </Button>
         </div>
       </div>

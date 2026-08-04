@@ -359,9 +359,11 @@ watch(() => props.settings, (s) => {
     // External settings updates (react-query refetch, post-save reload) are
     // applied while `syncing` blocks the edit watchers, so previews would
     // otherwise stay on their stale render. Refresh them when the applied
-    // values actually changed.
+    // values actually changed — including the Rating Colours badge gallery,
+    // whose debounced watcher also bails out during `syncing`.
     if (JSON.stringify(editsSnapshot()) !== before) {
       updateAllPreviews()
+      galleryParams.value = buildGalleryParams()
     }
   })
 })
@@ -377,6 +379,7 @@ function revertEdits() {
     // reverting actually changed the edited values (discard / save failure).
     if (JSON.stringify(editsSnapshot()) !== before) {
       updateAllPreviews()
+      galleryParams.value = buildGalleryParams()
     }
   })
 }
@@ -828,7 +831,6 @@ function toggleExclude(key: string, checked: boolean) {
             <p class="text-sm font-semibold">Rating Display</p>
 
       <div class="space-y-2">
-        <Label>Rating order</Label>
         <p class="text-xs text-muted-foreground">Use the arrows to reorder. Higher items have priority. Use the eye to hide or show a rating source.</p>
         <RatingsOrderList
           v-model="editRatingsOrder"
@@ -843,7 +845,7 @@ function toggleExclude(key: string, checked: boolean) {
     <template v-if="uid === 'global'">
       <div class="rounded-md border p-4 space-y-3">
         <p class="text-sm font-semibold">Rating Colours</p>
-        <p class="text-xs text-muted-foreground">Customize each rating source's badge colours. The badge background opacity is set by the background-opacity sliders above. Changes apply after saving.</p>
+        <p class="text-xs text-muted-foreground">Customize each rating source's badge colours. The badge background opacity is set by the background-opacity sliders above.</p>
         <div class="space-y-1 text-xs text-muted-foreground">
           <span class="flex items-center gap-2">
             <span aria-hidden="true">-</span>
