@@ -95,6 +95,22 @@ func main() {
 		SecureCookies: secureCookies,
 	}
 
+	// Process-wide in-memory caches (mirroring the Rust moka caches): rendered
+	// images capped by IMAGE_MEM_CACHE_MB (1h TTL, 30min idle), ID resolutions
+	// (50k entries, 1h TTL), and fetched ratings (50k entries, 30min TTL).
+	state.Caches = &services.MemCacheSet{
+		ImageMem: services.NewMemCache(
+			int64(cfg.ImageMemCacheMB)*1024*1024, 0,
+			1*time.Hour, 30*time.Minute,
+		),
+		IDs: services.NewMemCache(
+			0, 50_000, 1*time.Hour, 0,
+		),
+		Ratings: services.NewMemCache(
+			0, 50_000, 30*time.Minute, 0,
+		),
+	}
+
 	state.SetupOMDB(mgr.OMDBKeys())
 	state.SetupMDBList(mgr.MDBListKeys())
 	state.SetupFanart(mgr.FanartKeys())

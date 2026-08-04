@@ -787,7 +787,7 @@ func HandleFetchImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClie
 			idType, idValue, kind, &settings, nil,
 			cfg.CacheDir, cfg.ExternalCacheOnly,
 			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
-			cfg.ImageQuality, nil,
+			cfg.ImageQuality, nil, cfg.Caches,
 		)
 		if err != nil {
 			if appErr, ok := err.(*apperr.AppError); ok {
@@ -835,7 +835,7 @@ func parsePreviewColors(r *http.Request) map[string]services.SourceColorSet {
 	return colors
 }
 
-func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCacheOnly bool) http.HandlerFunc {
+func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			writeError(w, 405, "Method not allowed")
@@ -853,6 +853,12 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 
 		metaDeleted, _ := services.DeleteImageMetaByKind(db, imageType)
 
+		// The kind isn't recoverable from the mem cache keys cheaply, so a
+		// per-kind purge drops the whole image mem cache (rare admin action).
+		if caches != nil && caches.ImageMem != nil {
+			caches.ImageMem.Clear()
+		}
+
 		writeJSON(w, 200, map[string]interface{}{
 			"ok":                  true,
 			"external_cache_only": externalCacheOnly,
@@ -862,7 +868,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 	}
 }
 
-func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue string, externalCacheOnly bool) http.HandlerFunc {
+func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			writeError(w, 405, "Method not allowed")
@@ -897,6 +903,17 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 		idKey := idType + "/" + idValue
 		if scope != "variant" {
 			services.DeleteAvailableRatings(db, idKey)
+		}
+
+		// Invalidate the matching in-memory entries so the purge is visible
+		// immediately (image mem keys are "idType/cacheValue").
+		if caches != nil {
+			if caches.ImageMem != nil {
+				caches.ImageMem.DeletePrefix(idType + "/" + idValue)
+			}
+			if caches.IDs != nil {
+				caches.IDs.DeletePrefix(idType + "/" + idValue)
+			}
 		}
 
 		writeJSON(w, 200, map[string]interface{}{

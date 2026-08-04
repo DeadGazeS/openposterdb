@@ -31,6 +31,7 @@ type ImageServeConfig struct {
 	RatingsMaxAgeSecs   uint64
 	ImageStaleSecs      uint64
 	ImageQuality        uint8
+	Caches              *services.MemCacheSet
 }
 
 // ImageQuery represents all query parameters for image endpoints.
@@ -554,7 +555,7 @@ func HandleImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClient, o
 			idTypeStr, idValue, kind, settings, query.RatingsLimit,
 			cfg.CacheDir, cfg.ExternalCacheOnly,
 			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
-			cfg.ImageQuality, query.ImageSize,
+			cfg.ImageQuality, query.ImageSize, cfg.Caches,
 		)
 		if err != nil {
 			if appErr, ok := err.(*errors.AppError); ok {
