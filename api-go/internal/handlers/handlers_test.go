@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -219,5 +221,129 @@ func TestFreeKeySettingsFromRender(t *testing.T) {
 	}
 	if resp.RatingsLimit != 3 {
 		t.Error("wrong ratings_limit")
+	}
+}
+
+// TestGlobalSettingsBadgeWidthHeightRoundTrip guards the global settings
+// save/load path for the per-kind badge width/height fields: a PUT must persist
+// them and a subsequent GET must return the saved values (regression: the
+// admin handler dropped the fields, so slider changes never survived reload).
+func TestGlobalSettingsBadgeWidthHeightRoundTrip(t *testing.T) {
+	db := newHandlersTestDB(t)
+
+	payload := `{
+		"poster_badge_width": 150,
+		"poster_badge_height": 80,
+		"logo_badge_width": 120,
+		"logo_badge_height": 90,
+		"backdrop_badge_width": 110,
+		"backdrop_badge_height": 70,
+		"episode_badge_width": 130,
+		"episode_badge_height": 60
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	HandleUpdateSettings(db, false)(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	HandleGetSettings(db, false, false, false)(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != 200 {
+		t.Fatalf("GET failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := map[string]float64{
+		"poster_badge_width":    150,
+		"poster_badge_height":   80,
+		"logo_badge_width":      120,
+		"logo_badge_height":     90,
+		"backdrop_badge_width":  110,
+		"backdrop_badge_height": 70,
+		"episode_badge_width":   130,
+		"episode_badge_height":  60,
+	}
+	for key, want := range checks {
+		got, ok := resp[key].(float64)
+		if !ok {
+			t.Errorf("%s missing from GET response", key)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s: got %v want %v", key, got, want)
+		}
+	}
+}
+
+// TestUserPrefsRoundTrip guards per-user UI preference persistence: a PUT with
+// an authenticated admin user stores prefs (merging with existing), a GET
+// returns them, and the value survives across requests (login sessions).
+func TestUserPrefsRoundTrip(t *testing.T) {
+	db := newHandlersTestDB(t)
+
+	// Seed an admin user (the prefs row is keyed by username).
+	if _, err := db.Exec("INSERT INTO admin_users (username, password_hash) VALUES ('admin', 'x')"); err != nil {
+		t.Fatal(err)
+	}
+
+	withUser := func(method, body string) *httptest.ResponseRecorder {
+		var req *http.Request
+		if body != "" {
+			req = httptest.NewRequest(method, "/", bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req = httptest.NewRequest(method, "/", nil)
+		}
+		req = WithAuthUser(req, "admin")
+		rec := httptest.NewRecorder()
+		HandleUserPrefs(db)(rec, req)
+		return rec
+	}
+
+	// Initial GET: empty prefs.
+	rec := withUser(http.MethodGet, "")
+	if rec.Code != 200 {
+		t.Fatalf("initial GET failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var prefs map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &prefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := prefs["disclaimer_minimised"]; ok {
+		t.Error("prefs should start empty")
+	}
+
+	// PUT stores the disclaimer state.
+	rec = withUser(http.MethodPut, `{"disclaimer_minimised": "minimised"}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// GET returns it.
+	rec = withUser(http.MethodGet, "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &prefs); err != nil {
+		t.Fatal(err)
+	}
+	if prefs["disclaimer_minimised"] != "minimised" {
+		t.Errorf("disclaimer_minimised = %q, want minimised", prefs["disclaimer_minimised"])
+	}
+
+	// PUT merges: a second key doesn't clobber the first.
+	rec = withUser(http.MethodPut, `{"other": "x"}`)
+	if rec.Code != 200 {
+		t.Fatalf("second PUT failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = withUser(http.MethodGet, "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &prefs); err != nil {
+		t.Fatal(err)
+	}
+	if prefs["disclaimer_minimised"] != "minimised" || prefs["other"] != "x" {
+		t.Errorf("merge failed: %v", prefs)
 	}
 }
