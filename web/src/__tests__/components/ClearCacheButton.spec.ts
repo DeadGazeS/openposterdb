@@ -29,7 +29,7 @@ async function openAndConfirm(wrapper: ReturnType<typeof mountButton>) {
   // Only the trigger is shown until clicked (dialog is closed).
   await wrapper.find('button').trigger('click')
   await flushPromises()
-  const clearButtons = wrapper.findAll('button').filter((b) => b.text().trim() === 'Clear cache')
+  const clearButtons = wrapper.findAll('button').filter((b) => b.text().trim() === 'Clear cache and images')
   await clearButtons[clearButtons.length - 1]!.trigger('click') // the dialog confirm
   await flushPromises()
 }
@@ -55,7 +55,7 @@ describe('ClearCacheButton', () => {
     expect(mockAdminApi.purgeAll).toHaveBeenCalledTimes(1)
     const cleared = wrapper.emitted('cleared')
     expect(cleared).toBeTruthy()
-    expect(cleared![0]![0]).toContain('Cache cleared')
+    expect(cleared![0]![0]).toContain('Cache and images cleared')
     expect(cleared![0]![0]).toContain('42')
   })
 

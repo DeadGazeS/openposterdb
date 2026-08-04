@@ -1,11 +1,13 @@
 # OpenPosterDB
 
+[![GitHub](https://img.shields.io/badge/GitHub-DeadGazeS%2Fopenposterdb-181717?logo=github&style=flat)](https://github.com/DeadGazeS/openposterdb)
+
 OpenPosterDB is a self-hosted service that generates custom movie and TV posters, logos, backdrops, and episode stills with rating overlays. It's designed as a drop-in replacement for RPDB (Rating Poster Database) and plugs directly into your media server.
 
 Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings from IMDb, Rotten Tomatoes, Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert — all rendered into clean, branded image overlays you control.
 
 - [Website](https://openposterdb.com)
-- [GitHub](https://github.com/PNRxA/openposterdb)
+- [GitHub](https://github.com/DeadGazeS/openposterdb)
 - [Docker Hub](https://hub.docker.com/r/pnrxa/openposterdb)
 - [Documentation](docs/README.md)
 
@@ -79,6 +81,8 @@ Any client that fetches images by URL works — see the [API Reference](docs/api
 - [Architecture](docs/architecture.md) — caching internals
 
 ## Acknowledgments
+
+**Original project**: [PNRxA/openposterdb](https://github.com/PNRxA/openposterdb) — OpenPosterDB was originally developed in Rust by [PNRxA](https://github.com/PNRxA). This fork reimplements it in Go with a Vue web frontend; most of the code was AI-generated.
 
 **Data & image providers**: [TMDB](https://www.themoviedb.org/) (this product uses the TMDB API but is not endorsed or certified by TMDB), [MDBList](https://mdblist.com/), [OMDb](https://www.omdbapi.com/), [Fanart.tv](https://fanart.tv/), [RPDB](https://ratingposterdb.com/) (API design inspiration), [Simple Icons](https://simpleicons.org/).
 

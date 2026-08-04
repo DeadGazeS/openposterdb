@@ -97,7 +97,7 @@ describe('ApiKeysView', () => {
     expect(wrapper.text()).toContain('No API keys yet.')
   })
 
-  it('has a refresh button that triggers refetch', async () => {
+  it('exposes per-key save/discard/refresh actions for the settings header', async () => {
     mockKeysApi.list.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(sampleKeys),
@@ -106,19 +106,18 @@ describe('ApiKeysView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    mockKeysApi.list.mockClear()
-    mockKeysApi.list.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([sampleKeys[0]]),
-    })
-
-    const refreshButton = wrapper.findAll('button').find((b) => b.text().includes('Refresh'))
-    expect(refreshButton).toBeDefined()
-
-    await refreshButton!.trigger('click')
-    await flushPromises()
-
-    expect(mockKeysApi.list).toHaveBeenCalled()
+    // The header-driven API must exist (no inline refresh button anymore —
+    // the settings page header owns Save/Discard/Refresh).
+    const vm = wrapper.vm as unknown as {
+      saveExpanded?: () => unknown
+      discardExpanded?: () => unknown
+      refreshExpanded?: () => Promise<unknown>
+      expandedDirty?: boolean
+    }
+    expect(typeof vm.saveExpanded).toBe('function')
+    expect(typeof vm.discardExpanded).toBe('function')
+    expect(typeof vm.refreshExpanded).toBe('function')
+    expect(vm.expandedDirty).toBe(false)
   })
 
   it('shows settings button for each key', async () => {
