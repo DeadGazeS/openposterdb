@@ -40,7 +40,7 @@ function mountView() {
         Skeleton: { template: '<div data-testid="skeleton" />' },
         RefreshCw: { template: '<span />' },
         ClearCacheButton: {
-          template: '<button @click="$emit(\'cleared\', \'Cache cleared — removed 42 cached images.\')">Clear cache</button>',
+          template: '<button @click="$emit(\'cleared\', \'Cache and images cleared — removed 42 cached images.\')">Clear cache and images</button>',
           emits: ['cleared'],
         },
       },
@@ -72,6 +72,8 @@ describe('DashboardView', () => {
     expect(wrapper.text()).toContain('42')
     expect(wrapper.text()).toContain('3')
     expect(wrapper.text()).toContain('100')
+    expect(wrapper.text()).toContain('50')
+    expect(wrapper.text()).toContain('25')
     expect(wrapper.text()).toContain('128')
   })
 
@@ -128,7 +130,7 @@ describe('DashboardView', () => {
     await clearButton!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Cache cleared')
+    expect(wrapper.text()).toContain('Cache and images cleared')
     expect(mockAdminApi.getStats).toHaveBeenCalled() // refetched after clear
   })
 })

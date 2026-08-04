@@ -103,33 +103,36 @@ describe('SettingsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
-    mockRoute.name = 'settings-general'
-    mockRoute.path = '/admin/settings/general'
+    mockRoute.name = 'settings-api'
+    mockRoute.path = '/admin/settings/api'
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(defaultSettings),
     })
   })
 
-  it('renders the General headline with the general section by default', async () => {
+  it('renders the API box with the API section by default', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.find('h1').text()).toBe('General')
-    expect(wrapper.text()).toContain('Global Image Settings')
+    expect(wrapper.text()).toContain('Free API Key')
+    expect(wrapper.text()).toContain('Source API Keys')
+    expect(wrapper.find('[data-testid="save-settings-button"]').exists()).toBe(true)
   })
 
-  it('renders the Image headline on the image route', async () => {
+  it('renders the Global Image box on the image route', async () => {
     mockRoute.name = 'settings-image'
     mockRoute.path = '/admin/settings/image'
 
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.find('h1').text()).toBe('Image')
     expect(wrapper.text()).toContain('Global Image Settings')
+    expect(wrapper.find('[data-testid="save-settings-button"]').exists()).toBe(true)
   })
 
   it('loads and displays current settings with fanart enabled', async () => {
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () =>
@@ -151,6 +154,8 @@ describe('SettingsView', () => {
   })
 
   it('shows fanart checkbox when fanart is available', async () => {
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     const wrapper = mountView()
     await flushPromises()
 
@@ -158,6 +163,8 @@ describe('SettingsView', () => {
   })
 
   it('hides fanart options when not available', async () => {
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () =>
@@ -175,6 +182,8 @@ describe('SettingsView', () => {
 
   it('auto-saves when fanart checkbox is toggled', async () => {
     vi.useFakeTimers()
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.updateSettings.mockResolvedValue({ ok: true })
 
     const wrapper = mountView()
@@ -197,6 +206,8 @@ describe('SettingsView', () => {
 
   it('shows saved indicator after auto-save', async () => {
     vi.useFakeTimers()
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.updateSettings.mockResolvedValue({ ok: true })
 
     const wrapper = mountView()
@@ -213,6 +224,8 @@ describe('SettingsView', () => {
 
   it('shows error message on auto-save failure', async () => {
     vi.useFakeTimers()
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.updateSettings.mockResolvedValue({
       ok: false,
       json: () => Promise.resolve({ error: 'Invalid language' }),
@@ -232,6 +245,8 @@ describe('SettingsView', () => {
 
   it('includes ratings fields in auto-save payload', async () => {
     vi.useFakeTimers()
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () =>
@@ -262,6 +277,8 @@ describe('SettingsView', () => {
 
   it('shows generic error on network failure', async () => {
     vi.useFakeTimers()
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.updateSettings.mockRejectedValue(new Error('Network error'))
 
     const wrapper = mountView()
@@ -361,6 +378,8 @@ describe('SettingsView', () => {
 
   it('save button payload includes episode settings', async () => {
     vi.useFakeTimers()
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () =>
@@ -395,7 +414,7 @@ describe('SettingsView', () => {
     vi.useRealTimers()
   })
 
-  it('toggleFreeApiKey payload includes episode fields', async () => {
+  it('toggleFreeApiKey save sends only the toggle payload', async () => {
     mockAdminApi.updateSettings.mockResolvedValue({ ok: true })
 
     const wrapper = mountView()
@@ -406,19 +425,21 @@ describe('SettingsView', () => {
 
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        episode_badge_style: 'v',
-        episode_label_style: 'o',
-        episode_text_size: 100,
-        episode_layout: expect.objectContaining({ right: expect.objectContaining({ per_row: 1 }) }),
-        episode_blur: false,
+        free_api_key_enabled: false,
       }),
     )
+    // The minimal API-page payload must NOT contain settings fields — the
+    // backend keeps omitted fields, so toggling the free key can't clobber
+    // unrelated settings (episode/backdrop etc.).
+    const call = mockAdminApi.updateSettings.mock.calls[0]![0] as Record<string, unknown>
+    expect('episode_badge_style' in call).toBe(false)
+    expect('backdrop_edge_inset_x' in call).toBe(false)
   })
 
   it('toggleFreeApiKey payload preserves backdrop position and edge insets', async () => {
-    // Regression guard: the toggle must forward the full settings, not a curated
-    // subset. A previous payload omitted these backdrop fields, so flipping the
-    // free-key switch silently reset them to their serde defaults on the server.
+    // Regression guard: the free-key toggle save must stay minimal — the
+    // backend keeps omitted fields, so flipping the switch can't silently
+    // reset backdrop settings to their serde defaults.
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () =>
@@ -443,24 +464,50 @@ describe('SettingsView', () => {
     expect(mockAdminApi.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         free_api_key_enabled: true,
-        backdrop_layout: expect.objectContaining({ top: expect.objectContaining({ per_row: 5 }) }),
-        backdrop_edge_inset_x: 12,
-        backdrop_edge_inset_y: 7,
       }),
     )
+    const call = mockAdminApi.updateSettings.mock.calls[0]![0] as Record<string, unknown>
+    expect('backdrop_layout' in call).toBe(false)
+    expect('backdrop_edge_inset_x' in call).toBe(false)
   })
 
-  it('has a Cache section that shows a message after clearing', async () => {
+  it('Refresh pulls the last saved config and overrides unsaved edits', async () => {
+    mockRoute.name = 'settings-image'
+    mockRoute.path = '/admin/settings/image'
+    // The saved config has a non-default badge width; the mock must return a
+    // FRESH object per call (like the real res.json()) so the refetch delivers
+    // a new reference and the form's settings watcher re-applies it.
+    mockAdminApi.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ...defaultSettings, poster_badge_width: 120 }),
+      }),
+    )
+
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Cache')
-    const clearButton = wrapper.findAll('button').find((b) => b.text().includes('Clear cache'))
-    expect(clearButton).toBeDefined()
-
-    await clearButton!.trigger('click')
+    // Activate the Poster tab so the badge width slider is rendered.
+    await wrapper.find('[data-testid="form-tab-poster"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Cache cleared')
+    const slider = wrapper.find('[data-testid="poster-badge-width-slider"]')
+    expect((slider.element as HTMLInputElement).value).toBe('120')
+
+    // Make an unsaved edit: 120 -> 150; the Discard button appears (dirty).
+    await slider.setValue('150')
+    await flushPromises()
+    expect((slider.element as HTMLInputElement).value).toBe('150')
+    expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(true)
+
+    // Refresh must pull the saved config (120) and override the edit.
+    const refreshButton = wrapper.findAll('button').find((b) => b.text() === 'Refresh')
+    expect(refreshButton).toBeDefined()
+    await refreshButton!.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect((slider.element as HTMLInputElement).value).toBe('120')
+    expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(false)
   })
 })
