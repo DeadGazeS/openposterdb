@@ -10,7 +10,51 @@ import (
 	"openposterdb/internal/services"
 )
 
-func HandleStats(db *sql.DB) http.HandlerFunc {
+// HandleUserPrefs reads (GET) or updates (PUT, partial merge) the
+// authenticated admin user's UI preferences (e.g. the sidebar disclaimer
+// minimised state), persisted per-user so they survive login sessions.
+func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := GetAuthUser(r)
+		if user == nil {
+			writeError(w, 401, "Unauthorized")
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			prefs, err := services.GetUserPrefs(db, user.Username)
+			if err != nil {
+				writeError(w, 500, "Failed to load preferences")
+				return
+			}
+			writeJSON(w, 200, prefs)
+		case http.MethodPut:
+			var updates map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+				writeError(w, 400, "Invalid JSON")
+				return
+			}
+			prefs, err := services.GetUserPrefs(db, user.Username)
+			if err != nil {
+				writeError(w, 500, "Failed to load preferences")
+				return
+			}
+			for k, v := range updates {
+				prefs[k] = v
+			}
+			if err := services.SetUserPrefs(db, user.Username, prefs); err != nil {
+				writeError(w, 500, "Failed to save preferences")
+				return
+			}
+			writeJSON(w, 200, prefs)
+		default:
+			writeError(w, 405, "Method not allowed")
+		}
+	}
+}
+
+func HandleStats(db *sql.DB, cacheDir string, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "Method not allowed")
@@ -23,14 +67,33 @@ func HandleStats(db *sql.DB) http.HandlerFunc {
 		episodeCount, _ := services.CountImageMeta(db, "e")
 		apiKeyCount, _ := services.CountAPIKeys(db)
 
+		var memCacheEntries, idCacheEntries, ratingsCacheEntries int64
+		var imageMemCacheMB float64
+		if caches != nil {
+			if caches.ImageMem != nil {
+				memCacheEntries = caches.ImageMem.Len()
+				imageMemCacheMB = float64(caches.ImageMem.WeightedBytes()) / (1024 * 1024)
+			}
+			if caches.IDs != nil {
+				idCacheEntries = caches.IDs.Len()
+			}
+			if caches.Ratings != nil {
+				ratingsCacheEntries = caches.Ratings.Len()
+			}
+		}
+
 		writeJSON(w, 200, map[string]interface{}{
-			"total_images":     posterCount + logoCount + backdropCount + episodeCount,
-			"total_api_keys":   apiKeyCount,
-			"cached_posters":   posterCount,
-			"cached_logos":     logoCount,
-			"cached_backdrops": backdropCount,
-			"cached_episodes":  episodeCount,
-			"api_key_count":    apiKeyCount,
+			"total_images":          posterCount + logoCount + backdropCount + episodeCount,
+			"total_api_keys":        apiKeyCount,
+			"cached_posters":        posterCount,
+			"cached_logos":          logoCount,
+			"cached_backdrops":      backdropCount,
+			"cached_episodes":       episodeCount,
+			"api_key_count":         apiKeyCount,
+			"mem_cache_entries":     memCacheEntries,
+			"id_cache_entries":      idCacheEntries,
+			"ratings_cache_entries": ratingsCacheEntries,
+			"image_mem_cache_mb":    imageMemCacheMB,
 		})
 	}
 }
@@ -74,8 +137,14 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"logo_text_size":           int32(s.LogoTextSize),
 			"backdrop_text_size":       int32(s.BackdropTextSize),
 			"poster_badge_size":        int32(s.PosterBadgeSize),
+			"poster_badge_width":       int32(s.PosterBadgeWidth),
+			"poster_badge_height":      int32(s.PosterBadgeHeight),
 			"logo_badge_size":          int32(s.LogoBadgeSize),
+			"logo_badge_width":         int32(s.LogoBadgeWidth),
+			"logo_badge_height":        int32(s.LogoBadgeHeight),
 			"backdrop_badge_size":      int32(s.BackdropBadgeSize),
+			"backdrop_badge_width":     int32(s.BackdropBadgeWidth),
+			"backdrop_badge_height":    int32(s.BackdropBadgeHeight),
 			"poster_logo_size":         int32(s.PosterLogoSize),
 			"logo_logo_size":           int32(s.LogoLogoSize),
 			"backdrop_logo_size":       int32(s.BackdropLogoSize),
@@ -89,6 +158,8 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			"episode_label_style":      string(s.EpisodeLabelStyle),
 			"episode_text_size":        int32(s.EpisodeTextSize),
 			"episode_badge_size":       int32(s.EpisodeBadgeSize),
+			"episode_badge_width":      int32(s.EpisodeBadgeWidth),
+			"episode_badge_height":     int32(s.EpisodeBadgeHeight),
 			"episode_logo_size":        int32(s.EpisodeLogoSize),
 			"episode_layout":           marshalLayoutResponse(s.EpisodeLayout),
 			"episode_badge_direction":  string(s.EpisodeBadgeDirection),
@@ -129,8 +200,14 @@ type updateSettingsRequest struct {
 	LogoTextSize           *int32                              `json:"logo_text_size"`
 	BackdropTextSize       *int32                              `json:"backdrop_text_size"`
 	PosterBadgeSize        *int32                              `json:"poster_badge_size"`
+	PosterBadgeWidth       *int32                              `json:"poster_badge_width"`
+	PosterBadgeHeight      *int32                              `json:"poster_badge_height"`
 	LogoBadgeSize          *int32                              `json:"logo_badge_size"`
+	LogoBadgeWidth         *int32                              `json:"logo_badge_width"`
+	LogoBadgeHeight        *int32                              `json:"logo_badge_height"`
 	BackdropBadgeSize      *int32                              `json:"backdrop_badge_size"`
+	BackdropBadgeWidth     *int32                              `json:"backdrop_badge_width"`
+	BackdropBadgeHeight    *int32                              `json:"backdrop_badge_height"`
 	PosterLogoSize         *int32                              `json:"poster_logo_size"`
 	LogoLogoSize           *int32                              `json:"logo_logo_size"`
 	BackdropLogoSize       *int32                              `json:"backdrop_logo_size"`
@@ -144,6 +221,8 @@ type updateSettingsRequest struct {
 	EpisodeLabelStyle      *string                             `json:"episode_label_style"`
 	EpisodeTextSize        *int32                              `json:"episode_text_size"`
 	EpisodeBadgeSize       *int32                              `json:"episode_badge_size"`
+	EpisodeBadgeWidth      *int32                              `json:"episode_badge_width"`
+	EpisodeBadgeHeight     *int32                              `json:"episode_badge_height"`
 	EpisodeLogoSize        *int32                              `json:"episode_logo_size"`
 	EpisodeLayout          *services.ImageLayout               `json:"episode_layout"`
 	EpisodeBadgeDirection  *string                             `json:"episode_badge_direction"`
@@ -242,11 +321,29 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		if req.PosterBadgeSize != nil {
 			s.PosterBadgeSize = services.ClampScalePercent(*req.PosterBadgeSize)
 		}
+		if req.PosterBadgeWidth != nil {
+			s.PosterBadgeWidth = services.ClampScalePercent(*req.PosterBadgeWidth)
+		}
+		if req.PosterBadgeHeight != nil {
+			s.PosterBadgeHeight = services.ClampScalePercent(*req.PosterBadgeHeight)
+		}
 		if req.LogoBadgeSize != nil {
 			s.LogoBadgeSize = services.ClampScalePercent(*req.LogoBadgeSize)
 		}
+		if req.LogoBadgeWidth != nil {
+			s.LogoBadgeWidth = services.ClampScalePercent(*req.LogoBadgeWidth)
+		}
+		if req.LogoBadgeHeight != nil {
+			s.LogoBadgeHeight = services.ClampScalePercent(*req.LogoBadgeHeight)
+		}
 		if req.BackdropBadgeSize != nil {
 			s.BackdropBadgeSize = services.ClampScalePercent(*req.BackdropBadgeSize)
+		}
+		if req.BackdropBadgeWidth != nil {
+			s.BackdropBadgeWidth = services.ClampScalePercent(*req.BackdropBadgeWidth)
+		}
+		if req.BackdropBadgeHeight != nil {
+			s.BackdropBadgeHeight = services.ClampScalePercent(*req.BackdropBadgeHeight)
 		}
 		if req.PosterLogoSize != nil {
 			s.PosterLogoSize = services.ClampScalePercent(*req.PosterLogoSize)
@@ -286,6 +383,12 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 		if req.EpisodeBadgeSize != nil {
 			s.EpisodeBadgeSize = services.ClampScalePercent(*req.EpisodeBadgeSize)
+		}
+		if req.EpisodeBadgeWidth != nil {
+			s.EpisodeBadgeWidth = services.ClampScalePercent(*req.EpisodeBadgeWidth)
+		}
+		if req.EpisodeBadgeHeight != nil {
+			s.EpisodeBadgeHeight = services.ClampScalePercent(*req.EpisodeBadgeHeight)
 		}
 		if req.EpisodeLogoSize != nil {
 			s.EpisodeLogoSize = services.ClampScalePercent(*req.EpisodeLogoSize)
@@ -383,7 +486,7 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 	}
 }
 
-func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool) http.HandlerFunc {
+func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, 405, "Method not allowed")
@@ -399,6 +502,19 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool) http.Ha
 
 		metaDeleted, _ := services.DeleteAllImageMeta(db)
 		ratingsDeleted, _ := services.DeleteAllAvailableRatings(db)
+
+		// Drop every in-memory entry so a purge is immediately visible.
+		if caches != nil {
+			if caches.ImageMem != nil {
+				caches.ImageMem.Clear()
+			}
+			if caches.IDs != nil {
+				caches.IDs.Clear()
+			}
+			if caches.Ratings != nil {
+				caches.Ratings.Clear()
+			}
+		}
 
 		writeJSON(w, 200, map[string]interface{}{
 			"ok":                  true,
