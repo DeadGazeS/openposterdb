@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { keysApi, adminApi, type SaveSettingsPayload } from '@/lib/api'
-import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
 import { Button } from '@/components/ui/button'
@@ -19,7 +18,7 @@ interface ApiKey {
 
 const queryClient = useQueryClient()
 
-const { data: keys = ref([]), isFetching, refetch } = useQuery<ApiKey[]>({
+const { data: keys = ref([]) } = useQuery<ApiKey[]>({
   queryKey: ['api-keys'],
   queryFn: async () => {
     const res = await keysApi.list()
@@ -131,18 +130,40 @@ async function deleteKey(id: number) {
     error.value = 'Failed to delete key'
   }
 }
+
+// --- Header-driven actions (the settings page header owns Save/Discard/Refresh) ---
+
+const expandedFormRef = ref<{
+  save: () => Promise<void>
+  discard: () => void
+  dirty: boolean
+} | null>(null)
+
+function saveExpanded() {
+  return expandedFormRef.value?.save()
+}
+
+function discardExpanded() {
+  expandedFormRef.value?.discard()
+}
+
+// Refresh pulls the last saved per-key config and overrides unsaved edits:
+// replacing the settings object re-triggers the form's props.settings watcher.
+async function refreshExpanded() {
+  if (expandedKey.value == null) return
+  await fetchSettings(expandedKey.value)
+}
+
+const expandedDirty = computed(() => expandedFormRef.value?.dirty ?? false)
+
+defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
 </script>
 
 <template>
-  <div class="space-y-8">
-    <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">API Keys</h1>
-      <RefreshButton :fetching="isFetching" @refresh="refetch()" />
-    </div>
-
+  <div class="space-y-4">
     <!-- Create new key -->
     <div class="space-y-3">
-      <h2 class="text-lg font-semibold">Create new key</h2>
+      <h4 class="text-sm font-semibold">Create new key</h4>
       <form class="flex gap-2" @submit.prevent="createKey">
         <Input
           v-model="newKeyName"
@@ -181,7 +202,7 @@ async function deleteKey(id: number) {
 
     <!-- Key list -->
     <div class="space-y-3">
-      <h2 class="text-lg font-semibold">Existing keys</h2>
+      <h4 class="text-sm font-semibold">Existing keys</h4>
       <p v-if="keys.length === 0" class="text-sm text-muted-foreground">No API keys yet.</p>
       <div v-for="key in keys" :key="key.id" class="rounded-md border">
         <div class="flex items-center justify-between p-3">
@@ -206,8 +227,10 @@ async function deleteKey(id: number) {
           <div v-if="settingsLoading[key.id]" class="text-sm text-muted-foreground">Loading settings...</div>
           <RenderSettingsForm
             v-else-if="keySettings[key.id]"
+            ref="expandedFormRef"
             :settings="keySettings[key.id]!"
             :uid="String(key.id)"
+            :show-actions="false"
             :load-settings="makeLoadSettings(key.id)"
             :save-settings="makeSaveSettings(key.id)"
             :reset-settings="makeResetSettings(key.id)"

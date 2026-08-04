@@ -185,6 +185,8 @@ export const adminApi = {
     get(`/api/admin/posters/${key}/image`),
   getSettings: (): Promise<Response> => get('/api/admin/settings'),
   updateSettings: (settings: Partial<SaveSettingsPayload> & { image_source: string; free_api_key_enabled?: boolean }): Promise<Response> => put('/api/admin/settings', settings),
+  getPrefs: (): Promise<Response> => get('/api/admin/prefs'),
+  updatePrefs: (prefs: Record<string, string>): Promise<Response> => put('/api/admin/prefs', prefs),
   exportSettings: (includeServiceKeys: boolean, includeAPIKeys: boolean): Promise<Response> =>
     get(`/api/admin/settings/export?include_service_keys=${includeServiceKeys ? '1' : '0'}&include_api_keys=${includeAPIKeys ? '1' : '0'}`),
   importSettings: (payload: unknown): Promise<Response> =>

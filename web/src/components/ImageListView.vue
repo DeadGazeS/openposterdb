@@ -68,7 +68,7 @@ const page = computed({
 })
 const pageSize = 50
 
-const { data, isPending, isFetching, refetch } = useQuery<ListResponse>({
+const { data, isPending, refetch } = useQuery<ListResponse>({
   queryKey: computed(() => ['admin', props.kind + 's', page.value]),
   queryFn: async () => {
     const res = await props.listFn(page.value, pageSize)
@@ -76,6 +76,19 @@ const { data, isPending, isFetching, refetch } = useQuery<ListResponse>({
     return res.json()
   },
 })
+
+// True only while a user-initiated Refresh click is in flight — the query's
+// own isFetching also fires on initial load / page changes.
+const userRefreshing = ref(false)
+
+async function handleRefresh() {
+  userRefreshing.value = true
+  try {
+    await refetch()
+  } finally {
+    userRefreshing.value = false
+  }
+}
 
 const previewOpen = ref(false)
 const previewKey = ref('')
@@ -283,7 +296,7 @@ const skeletonClass = computed(() => {
         <Trash2 class="size-4 mr-1" />
         Clear {{ kindLabelPlural }}
       </Button>
-      <RefreshButton :fetching="isFetching" @refresh="refetch()" />
+      <RefreshButton :fetching="userRefreshing" @refresh="handleRefresh" />
     </div>
     <p v-if="clearAllMessage" class="text-sm text-muted-foreground text-right">{{ clearAllMessage }}</p>
     <div v-if="isPending" class="space-y-3">
