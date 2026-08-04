@@ -616,6 +616,131 @@ func TestVerticalLogoSizeIndependentOfBadgeHeight(t *testing.T) {
 	}
 }
 
+// TestVerticalNumberSectionAbsorbsHeightGrowth guards that for tb/bt badge
+// height growth goes only to the number/value section: the label section stays
+// fixed and the total badge height grows by exactly the base value-section
+// height. The logo's anchor-side margin also stays constant.
+func TestVerticalNumberSectionAbsorbsHeightGrowth(t *testing.T) {
+	loadTestFont(t)
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	if vf == nil || lf == nil {
+		t.Skip("fonts not loaded")
+	}
+	defer vf.Close()
+	defer lf.Close()
+
+	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 48; x++ {
+			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+		}
+	}
+	iconCacheMu.Lock()
+	iconCache[*services.SourceImdb] = synthetic
+	iconCacheMu.Unlock()
+	defer func() {
+		iconCacheMu.Lock()
+		delete(iconCache, *services.SourceImdb)
+		iconCacheMu.Unlock()
+	}()
+
+	colors := map[string]services.SourceColorSet{
+		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
+	}
+	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
+
+	for _, style := range []services.BadgeStyle{services.BadgeStyleLogoTB, services.BadgeStyleValueTB} {
+		base := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: style, Width: 100, Height: 100}
+		tall := base
+		tall.Height = 200
+		img1 := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, base, 1.0, 1.0, 1.0, colors)
+		img2 := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, tall, 1.0, 1.0, 1.0, colors)
+
+		b1, b2 := img1.Bounds(), img2.Bounds()
+		if b2.Dy() <= b1.Dy() {
+			t.Errorf("%s: badge height did not grow: %d -> %d", style, b1.Dy(), b2.Dy())
+		}
+		if b1.Dx() != b2.Dx() {
+			t.Errorf("%s: badge width changed with height slider: %d -> %d", style, b1.Dx(), b2.Dx())
+		}
+
+		// Total growth equals the base value-section height.
+		baseValueH := int(newScaledDims(1.0).badgeHeight)
+		if got := b2.Dy() - b1.Dy(); got != baseValueH {
+			t.Errorf("%s: total height grew by %d, want %d (base value-section height)", style, got, baseValueH)
+		}
+
+		// The logo's anchor-side margin stays constant.
+		_, y0a, _, y1a, ok1 := cyanBounds(img1)
+		_, y0b, _, y1b, ok2 := cyanBounds(img2)
+		if !ok1 || !ok2 {
+			t.Fatalf("%s: logo not found (%v %v)", style, ok1, ok2)
+		}
+		var marginA, marginB int
+		if style == services.BadgeStyleLogoTB {
+			marginA, marginB = y0a-b1.Min.Y, y0b-b2.Min.Y
+		} else {
+			marginA, marginB = b1.Max.Y-1-y1a, b2.Max.Y-1-y1b
+		}
+		if diff := abs(marginA - marginB); diff > 1 {
+			t.Errorf("%s: anchor margin changed from %d to %d", style, marginA, marginB)
+		}
+	}
+}
+
+// TestVerticalLogoSizeIndependentOfBadgeWidth guards that for tb/bt badge
+// width growth does not resize the logo: the logo ink stays identical at
+// Width 100 and 200.
+func TestVerticalLogoSizeIndependentOfBadgeWidth(t *testing.T) {
+	loadTestFont(t)
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	if vf == nil || lf == nil {
+		t.Skip("fonts not loaded")
+	}
+	defer vf.Close()
+	defer lf.Close()
+
+	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 48; x++ {
+			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+		}
+	}
+	iconCacheMu.Lock()
+	iconCache[*services.SourceImdb] = synthetic
+	iconCacheMu.Unlock()
+	defer func() {
+		iconCacheMu.Lock()
+		delete(iconCache, *services.SourceImdb)
+		iconCacheMu.Unlock()
+	}()
+
+	colors := map[string]services.SourceColorSet{
+		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
+	}
+	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
+
+	for _, style := range []services.BadgeStyle{services.BadgeStyleLogoTB, services.BadgeStyleValueTB} {
+		base := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: style, Width: 100, Height: 100}
+		wide := base
+		wide.Width = 200
+		img1 := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, base, 1.0, 1.0, 1.0, colors)
+		img2 := RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, wide, 1.0, 1.0, 1.0, colors)
+		ax0, ay0, ax1, ay1, ok1 := cyanBounds(img1)
+		bx0, by0, bx1, by1, ok2 := cyanBounds(img2)
+		if !ok1 || !ok2 {
+			t.Fatalf("%s: logo ink not found at Width 100 (%v) or 200 (%v)", style, ok1, ok2)
+		}
+		w1, h1 := ax1-ax0+1, ay1-ay0+1
+		w2, h2 := bx1-bx0+1, by1-by0+1
+		if w1 != w2 || h1 != h2 {
+			t.Errorf("%s: logo size changes with badge_width: Width100 %dx%d vs Width200 %dx%d (must be identical)", style, w1, h1, w2, h2)
+		}
+	}
+}
+
 func abs(v int) int {
 	if v < 0 {
 		return -v

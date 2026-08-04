@@ -546,9 +546,9 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 		}
 	}
 	valueSectionW := int(maxValueW) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
-	// Per-axis width: scale the section split and the total badge width by the
-	// badge-width percentage (the content inside keeps its own size).
-	labelSectionW = int(math.Round(float64(labelSectionW) * float64(wPct)))
+	// Per-axis width: only the value section (plus the pill cap on its outer
+	// end) scales with badge_width. The label/logo block stays fixed at its
+	// 100% size so badge width growth goes entirely to the number side.
 	valueSectionW = int(math.Round(float64(valueSectionW) * float64(wPct)))
 	scaledPillPad := int(math.Round(float64(pillPad) * float64(wPct)))
 	totalW := labelSectionW + valueSectionW + scaledPillPad
@@ -613,35 +613,32 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 	// BEFORE it reaches the border (content that already sits ≥ gap from the
 	// border is never clipped).
 	contentGap := int(dims.contentGap)
-	// The logo's INWARD side may reach the section seam when it fits (its tiny
-	// inward gap keeps it off at 100%); oversized logos keep the content-gap
-	// inset on both sides so they clip evenly and never touch the badge border.
-	iconFitsSeam := useIcon && scaledIcon != nil && int(iconW) <= labelSectionW-badgeInwardGap
+	// The logo is anchored at its unique outer edge with a constant 100%
+	// margin (iconPad). The inward side may reach the section seam; oversized
+	// logos keep the content-gap inset on top/bottom and clip at the section
+	// edge on the inward side, never encroaching on the preserved outer margin.
 	labelClip := image.Rect(labelSectionX+contentGap, contentGap, labelSectionX+labelSectionW-contentGap, badgeH-contentGap)
-	if iconFitsSeam {
+	if useIcon && scaledIcon != nil {
 		if mirrored {
-			labelClip = image.Rect(labelSectionX, contentGap, labelSectionX+labelSectionW-contentGap, badgeH-contentGap)
+			labelClip = image.Rect(labelSectionX, contentGap, labelSectionX+labelSectionW-iconPad, badgeH-contentGap)
 		} else {
-			labelClip = image.Rect(labelSectionX+contentGap, contentGap, labelSectionX+labelSectionW, badgeH-contentGap)
+			labelClip = image.Rect(labelSectionX+iconPad, contentGap, labelSectionX+labelSectionW, badgeH-contentGap)
 		}
 	}
 	valueClip := image.Rect(valueSectionX+contentGap, contentGap, valueSectionX+valueSectionW-contentGap, badgeH-contentGap)
 
 	// Logo / label. At 100% the icon's INWARD side (facing the value text)
 	// keeps only badgeInwardGap from the seam, and the three OUTER margins
-	// (lr: left/top/bottom; rl: right/top/bottom) are equal. Logos wider than
-	// the section minus the inward gap are centred so they clip at the content
-	// gap on both sides.
+	// (lr: left/top/bottom; rl: right/top/bottom) are equal. The icon is
+	// anchored at its unique outer edge with a constant 100% margin and grows
+	// inward when oversized, so the logo + label block never moves with
+	// badge_width.
 	if useIcon && scaledIcon != nil {
 		var ix int
-		if int(iconW) <= labelSectionW-badgeInwardGap {
-			if mirrored {
-				ix = labelSectionX + badgeInwardGap
-			} else {
-				ix = labelSectionX + labelSectionW - badgeInwardGap - int(iconW)
-			}
+		if mirrored {
+			ix = labelSectionX + labelSectionW - iconPad - int(iconW)
 		} else {
-			ix = labelSectionX + (labelSectionW-int(iconW))/2
+			ix = labelSectionX + iconPad
 		}
 		iy := (badgeH - int(iconH2)) / 2
 		if iy < 0 {
@@ -793,40 +790,39 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	// and centres the text; the OUTER margins (top/bottom + sides) are equal.
 	// The logo's HEIGHT scales only with logo_size (not badge_size); its
 	// vertical width then fills the badge minus the equal outer margins.
-	iconHeight := uint32(math.Round(float64(baseIconHeight) * float64(logoScale)))
 	// The inter-section gap mirrors the logo's inward gap: barely any margin
 	// between the label content and the value text.
 	gap := uint32(badgeInwardGap)
-	vertPadVSc := uint32(math.Round(float64(vertPadV) * float64(hPct)))
 
-	var vLogoW, vLogoH, hMarginV int
+	var vLogoW, vLogoH, anchorV int
 	labelAreaH := sectionH
 	if useIcon {
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
-			_, hIconH := badgeIconAndSize(badge, labelStyle, iconHeight, icon)
-			hMarginV = (sectionH - int(hIconH)) / 2 // top/bottom margin at this badge height
-			if hMarginV < 0 {
-				hMarginV = 0
-			}
-			// The logo WIDTH margin is fixed by the 100%-height reference so
-			// the logo size never tracks badge_height (per-axis): extra height
-			// becomes padding (hMarginV), exactly like the horizontal badge
-			// keeps its logo at logo_size. At 100% hMarginVRef == hMarginV.
+			// The unique outer-side margin (top for tb, bottom for bt) is fixed
+			// at its 100% value: the section height at 100% badge height minus
+			// the 100% logo height. It never shrinks as logo_size grows.
 			refSectionH := int(dims.badgeHeight)
 			if appearance.Shape == services.BadgeShapePill {
 				refSectionH += int(dims.pillPaddingV)
 			}
-			hMarginVRef := (refSectionH - int(hIconH)) / 2
-			if hMarginVRef < 0 {
-				hMarginVRef = 0
+			_, baseIconH := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
+			anchorV = (refSectionH - int(baseIconH)) / 2
+			if anchorV < 0 {
+				anchorV = 0
 			}
-			// The logo fills the badge width minus the equal outer margin on
-			// each side, so at 100% the three OUTER margins are equal (tb:
-			// left/top/right; bt: left/bottom/right) and the INWARD side keeps
-			// only badgeInwardGap from the seam.
-			vLogoW = vertBadgeW - 2*hMarginVRef
+			// The logo width at 100% logo_size fills the fixed badge width minus
+			// the equal outer margins, then scales linearly with logo_size only
+			// (independent of badge_width).
+			baseVertBadgeW := int(math.Round(float64(baseVertBadgeWidth) * float64(badgeScale)))
+			vLogoWAt100 := baseVertBadgeW - 2*anchorV
+			if vLogoWAt100 < 1 {
+				vLogoWAt100 = 1
+			}
+			vLogoW = int(math.Round(float64(vLogoWAt100) * float64(logoScale)))
+			var vLogoHAt100 int
 			if icon.Bounds().Dx() > 0 && icon.Bounds().Dy() > 0 {
-				vLogoH = int(math.Round(float64(vLogoW) * float64(icon.Bounds().Dy()) / float64(icon.Bounds().Dx())))
+				vLogoHAt100 = int(math.Round(float64(vLogoWAt100) * float64(icon.Bounds().Dy()) / float64(icon.Bounds().Dx())))
+				vLogoH = int(math.Round(float64(vLogoHAt100) * float64(logoScale)))
 			}
 			if vLogoW < 1 {
 				vLogoW = 1
@@ -834,19 +830,17 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 			if vLogoH < 1 {
 				vLogoH = 1
 			}
-			// The label section hugs the logo: the logo starts at the outer
-			// margin (hMarginV) and its INWARD side keeps only a tiny gap from
-			// the seam, so no dead space sits between logo and value text. The
-			// logo is positioned at iy = hMarginV from the badge edge, while the
-			// section begins at vertPadVSc — so subtract that offset.
-			labelAreaH = hMarginV + vLogoH + badgeInwardGap - int(vertPadVSc)
+			// The label section is fixed at its 100% content-fit height: anchor
+			// margin + 100% logo height + inward gap, minus the corner padding.
+			// Badge height growth goes to the number section only.
+			labelAreaH = anchorV + vLogoHAt100 + badgeInwardGap - int(vertPadV)
 			if labelAreaH < 1 {
 				labelAreaH = 1
 			}
 		}
 	}
 	valueH := sectionH
-	totalH := int(vertPadVSc + uint32(labelAreaH) + gap + uint32(valueH) + vertPadVSc)
+	totalH := int(vertPadV + uint32(labelAreaH) + gap + uint32(valueH) + vertPadV)
 
 	img := image.NewRGBA(image.Rect(0, 0, vertBadgeW, totalH))
 	// For the mirrored vertical style (bt) the value sits on top and the
@@ -855,11 +849,11 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 	// section starts after the top section plus the full gap, so tb and bt are
 	// exact mirror images (matching how the lr/rl horizontal pair is laid out).
 	labelTop := !appearance.Style.IsMirrored()
-	labelAreaY := int(vertPadVSc)
-	valueAreaY := int(vertPadVSc) + labelAreaH + int(gap)
+	labelAreaY := int(vertPadV)
+	valueAreaY := int(vertPadV) + labelAreaH + int(gap)
 	if !labelTop {
-		labelAreaY = int(vertPadVSc) + valueH + int(gap)
-		valueAreaY = int(vertPadVSc)
+		labelAreaY = int(vertPadV) + valueH + int(gap)
+		valueAreaY = int(vertPadV)
 	}
 
 	labelBG, valueBG, hasBG := sectionColors(appearance.Alpha, badge.Source, override)
@@ -907,9 +901,9 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 			ix := (vertBadgeW - vLogoW) / 2
 			var iy int
 			if labelTop {
-				iy = hMarginV
+				iy = anchorV
 			} else {
-				iy = totalH - hMarginV - vLogoH
+				iy = totalH - anchorV - vLogoH
 			}
 			// Clip the logo so it is always at least contentGap from the badge's
 			// outer borders (and never spills past the label section's inner
