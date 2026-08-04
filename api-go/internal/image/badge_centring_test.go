@@ -643,8 +643,15 @@ func TestBadgeBoxScalesPerAxis(t *testing.T) {
 	ww, wh := imgWide.Bounds().Dx(), imgWide.Bounds().Dy()
 	tw, th := imgTall.Bounds().Dx(), imgTall.Bounds().Dy()
 
-	if ww != bw*2 {
-		t.Errorf("badge_width=200: width %d, want %d (2x base %d)", ww, bw*2, bw)
+	// With text labels the label/logo block stays fixed at its 100% size and
+	// only the value section widens. Compute the fixed label and base value
+	// widths from the same layout math used by renderBadgeInner.
+	dims := newScaledDims(1.0)
+	labelSectionW := int(labelWidthForStyle(&badge, services.LabelStyleText, lf, dims, 1.0, 1.0)) + 2*int(dims.textLabelPadH)
+	valueSectionW := baseTextWidth(badge.Value, vf, 1.0) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
+
+	if expectedWideW := labelSectionW + 2*valueSectionW; ww != expectedWideW {
+		t.Errorf("badge_width=200: width %d, want %d (label %d + 2×value %d)", ww, expectedWideW, labelSectionW, valueSectionW)
 	}
 	if wh != bh {
 		t.Errorf("badge_width=200 changed height: %d, want %d", wh, bh)
@@ -794,6 +801,394 @@ func TestLogoUniformOuterMarginsAndInwardMinimal(t *testing.T) {
 				}
 			}
 			t.Logf("%s/%s: outer margins L=%d R=%d T=%d B=%d, inward=%d", sh.name, tc.name, left, right, top, bottom, inward)
+		}
+	}
+}
+
+// TestLogoAnchorMarginConstantAcrossBadgeSize guards the logo-anchor rule: the
+// unique outer-side margin (lr→left, rl→right, tb→top, bt→bottom) stays
+// constant when the badge grows on the axis that is supposed to feed the number
+// section. The non-anchor outer sides may change, but the anchor side must not.
+func TestLogoAnchorMarginConstantAcrossBadgeSize(t *testing.T) {
+	loadTestFont(t)
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	if vf == nil || lf == nil {
+		t.Skip("fonts not loaded")
+	}
+	defer vf.Close()
+	defer lf.Close()
+
+	// A synthetic square icon makes the margins predictable.
+	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 48; x++ {
+			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+		}
+	}
+	iconCacheMu.Lock()
+	iconCache[*services.SourceImdb] = synthetic
+	iconCacheMu.Unlock()
+	defer func() {
+		iconCacheMu.Lock()
+		delete(iconCache, *services.SourceImdb)
+		iconCacheMu.Unlock()
+	}()
+
+	colors := map[string]services.SourceColorSet{
+		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
+	}
+	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
+
+	cases := []struct {
+		name    string
+		style   services.BadgeStyle
+		axisPct int // which appearance axis to double: 100=Width, 101=Height
+	}{
+		{"lr", services.BadgeStyleLogoLeftValueRight, 100},
+		{"rl", services.BadgeStyleValueLeftLogoRight, 100},
+		{"tb", services.BadgeStyleLogoTB, 101},
+		{"bt", services.BadgeStyleValueTB, 101},
+	}
+	shapes := []struct {
+		name  string
+		shape services.BadgeShape
+	}{
+		{"rounded", services.BadgeShapeRounded},
+		{"pill", services.BadgeShapePill},
+	}
+
+	for _, sh := range shapes {
+		for _, tc := range cases {
+			baseAppearance := services.BadgeAppearance{Shape: sh.shape, Alpha: services.BadgeAlpha(100), Style: tc.style, Width: 100, Height: 100}
+			bigAppearance := baseAppearance
+			if tc.axisPct == 100 {
+				bigAppearance.Width = 200
+			} else {
+				bigAppearance.Height = 200
+			}
+
+			var img1, img2 *image.RGBA
+			if tc.style.IsVertical() {
+				img1 = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, baseAppearance, 1.0, 1.0, 1.0, colors)
+				img2 = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, bigAppearance, 1.0, 1.0, 1.0, colors)
+			} else {
+				img1 = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, baseAppearance, 1.0, 1.0, 1.0, colors)
+				img2 = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, bigAppearance, 1.0, 1.0, 1.0, colors)
+			}
+
+			x0a, y0a, x1a, y1a, ok1 := cyanBounds(img1)
+			x0b, y0b, x1b, y1b, ok2 := cyanBounds(img2)
+			if !ok1 || !ok2 {
+				t.Fatalf("%s/%s: logo not found (%v %v)", sh.name, tc.name, ok1, ok2)
+			}
+
+			ba, bb := img1.Bounds(), img2.Bounds()
+			var marginA, marginB int
+			switch tc.style {
+			case services.BadgeStyleLogoLeftValueRight:
+				marginA, marginB = x0a-ba.Min.X, x0b-bb.Min.X
+			case services.BadgeStyleValueLeftLogoRight:
+				marginA, marginB = ba.Max.X-1-x1a, bb.Max.X-1-x1b
+			case services.BadgeStyleLogoTB:
+				marginA, marginB = y0a-ba.Min.Y, y0b-bb.Min.Y
+			case services.BadgeStyleValueTB:
+				marginA, marginB = ba.Max.Y-1-y1a, bb.Max.Y-1-y1b
+			}
+			if diff := abs(marginA - marginB); diff > 1 {
+				t.Errorf("%s/%s: anchor margin changed from %d to %d when scaling %s",
+					sh.name, tc.name, marginA, marginB, map[int]string{100: "width", 101: "height"}[tc.axisPct])
+			}
+		}
+	}
+}
+
+// TestSliderOrthogonality guards the user rule "every size slider only changes
+// its own size": badge_width only changes badge width, badge_height only
+// changes badge height, text_size only changes text ink, logo_size only
+// changes logo ink. All other measured dimensions must stay identical.
+func TestSliderOrthogonality(t *testing.T) {
+	loadTestFont(t)
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	labelFace2, valueFace2 := GetFontFacesAt(200)
+	if vf == nil || lf == nil || labelFace2 == nil || valueFace2 == nil {
+		t.Skip("fonts not loaded")
+	}
+	defer vf.Close()
+	defer lf.Close()
+	defer labelFace2.Close()
+	defer valueFace2.Close()
+
+	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 48; x++ {
+			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+		}
+	}
+	iconCacheMu.Lock()
+	iconCache[*services.SourceImdb] = synthetic
+	iconCacheMu.Unlock()
+	defer func() {
+		iconCacheMu.Lock()
+		delete(iconCache, *services.SourceImdb)
+		iconCacheMu.Unlock()
+	}()
+
+	colors := map[string]services.SourceColorSet{
+		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
+	}
+	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
+
+	logoSize := func(img *image.RGBA) (w, h int) {
+		x0, y0, x1, y1, ok := cyanBounds(img)
+		if !ok {
+			return 0, 0
+		}
+		return x1 - x0 + 1, y1 - y0 + 1
+	}
+	textSize := func(img *image.RGBA) (w, h int) {
+		b := img.Bounds()
+		x0, y0, x1, y1, ok := whiteInkBBox(img, b.Min.X, b.Min.Y, b.Max.X, b.Max.Y)
+		if !ok {
+			return 0, 0
+		}
+		return x1 - x0 + 1, y1 - y0 + 1
+	}
+
+	cases := []struct {
+		name         string
+		style        services.BadgeStyle
+		vertical     bool
+		render       func(appearance services.BadgeAppearance, textScale, logoScale float32, labelFace, valueFace font.Face) *image.RGBA
+		dimension    string // "width" or "height"
+		expectedAxis int    // 0=none, 1=width, 2=height
+	}{
+		{"lr", services.BadgeStyleLogoLeftValueRight, false, func(app services.BadgeAppearance, ts, ls float32, lff, vff font.Face) *image.RGBA {
+			return RenderBadge(&badge, vff, lff, services.LabelStyleIcon, app, 1.0, ts, ls, colors)
+		}, "width", 1},
+		{"lr-height", services.BadgeStyleLogoLeftValueRight, false, func(app services.BadgeAppearance, ts, ls float32, lff, vff font.Face) *image.RGBA {
+			return RenderBadge(&badge, vff, lff, services.LabelStyleIcon, app, 1.0, ts, ls, colors)
+		}, "height", 2},
+		{"tb", services.BadgeStyleLogoTB, true, func(app services.BadgeAppearance, ts, ls float32, lff, vff font.Face) *image.RGBA {
+			return RenderVerticalBadge(&badge, vff, lff, services.LabelStyleIcon, app, 1.0, ts, ls, colors)
+		}, "height", 2},
+		{"tb-width", services.BadgeStyleLogoTB, true, func(app services.BadgeAppearance, ts, ls float32, lff, vff font.Face) *image.RGBA {
+			return RenderVerticalBadge(&badge, vff, lff, services.LabelStyleIcon, app, 1.0, ts, ls, colors)
+		}, "width", 1},
+	}
+
+	for _, tc := range cases {
+		base := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: tc.style, Width: 100, Height: 100}
+		var changed services.BadgeAppearance
+		switch tc.dimension {
+		case "width":
+			changed = base
+			changed.Width = 200
+		case "height":
+			changed = base
+			changed.Height = 200
+		}
+
+		img1 := tc.render(base, 1.0, 1.0, lf, vf)
+		img2 := tc.render(changed, 1.0, 1.0, lf, vf)
+
+		b1, b2 := img1.Bounds(), img2.Bounds()
+		widthChanged := b1.Dx() != b2.Dx()
+		heightChanged := b1.Dy() != b2.Dy()
+
+		switch tc.expectedAxis {
+		case 1:
+			if !widthChanged {
+				t.Errorf("%s: expected width to change, got %dx%d vs %dx%d", tc.name, b1.Dx(), b1.Dy(), b2.Dx(), b2.Dy())
+			}
+			if heightChanged {
+				t.Errorf("%s: height changed with %s slider", tc.name, tc.dimension)
+			}
+		case 2:
+			if !heightChanged {
+				t.Errorf("%s: expected height to change, got %dx%d vs %dx%d", tc.name, b1.Dx(), b1.Dy(), b2.Dx(), b2.Dy())
+			}
+			if widthChanged {
+				t.Errorf("%s: width changed with %s slider", tc.name, tc.dimension)
+			}
+		}
+
+		lw1, lh1 := logoSize(img1)
+		lw2, lh2 := logoSize(img2)
+		if lw1 != lw2 || lh1 != lh2 {
+			t.Errorf("%s: logo size changed with %s slider: %dx%d -> %dx%d",
+				tc.name, tc.dimension, lw1, lh1, lw2, lh2)
+		}
+		tw1, th1 := textSize(img1)
+		tw2, th2 := textSize(img2)
+		if tw1 != tw2 || th1 != th2 {
+			t.Errorf("%s: text size changed with %s slider: %dx%d -> %dx%d",
+				tc.name, tc.dimension, tw1, th1, tw2, th2)
+		}
+	}
+
+	// text_size slider: only text ink changes.
+	for _, tc := range []struct {
+		name     string
+		style    services.BadgeStyle
+		vertical bool
+	}{
+		{"lr-text", services.BadgeStyleLogoLeftValueRight, false},
+		{"tb-text", services.BadgeStyleLogoTB, true},
+	} {
+		app := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: tc.style, Width: 100, Height: 100}
+		var img1, img2 *image.RGBA
+		if tc.vertical {
+			img1 = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 1.0, colors)
+			img2 = RenderVerticalBadge(&badge, valueFace2, labelFace2, services.LabelStyleIcon, app, 1.0, 2.0, 1.0, colors)
+		} else {
+			img1 = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 1.0, colors)
+			img2 = RenderBadge(&badge, valueFace2, labelFace2, services.LabelStyleIcon, app, 1.0, 2.0, 1.0, colors)
+		}
+		b1, b2 := img1.Bounds(), img2.Bounds()
+		if b1.Dx() != b2.Dx() || b1.Dy() != b2.Dy() {
+			t.Errorf("%s: badge box changed with text_size: %dx%d -> %dx%d", tc.name, b1.Dx(), b1.Dy(), b2.Dx(), b2.Dy())
+		}
+		lw1, lh1 := logoSize(img1)
+		lw2, lh2 := logoSize(img2)
+		if lw1 != lw2 || lh1 != lh2 {
+			t.Errorf("%s: logo size changed with text_size: %dx%d -> %dx%d", tc.name, lw1, lh1, lw2, lh2)
+		}
+		tw1, th1 := textSize(img1)
+		tw2, th2 := textSize(img2)
+		if tw1 == tw2 || th1 == th2 {
+			t.Errorf("%s: text size did not increase with text_size: %dx%d -> %dx%d", tc.name, tw1, th1, tw2, th2)
+		}
+	}
+
+	// logo_size slider: only logo ink changes.
+	for _, tc := range []struct {
+		name     string
+		style    services.BadgeStyle
+		vertical bool
+	}{
+		{"lr-logo", services.BadgeStyleLogoLeftValueRight, false},
+		{"tb-logo", services.BadgeStyleLogoTB, true},
+	} {
+		app := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: tc.style, Width: 100, Height: 100}
+		var img1, img2 *image.RGBA
+		if tc.vertical {
+			img1 = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 1.0, colors)
+			img2 = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 2.0, colors)
+		} else {
+			img1 = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 1.0, colors)
+			img2 = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 2.0, colors)
+		}
+		b1, b2 := img1.Bounds(), img2.Bounds()
+		if b1.Dx() != b2.Dx() || b1.Dy() != b2.Dy() {
+			t.Errorf("%s: badge box changed with logo_size: %dx%d -> %dx%d", tc.name, b1.Dx(), b1.Dy(), b2.Dx(), b2.Dy())
+		}
+		tw1, th1 := textSize(img1)
+		tw2, th2 := textSize(img2)
+		if tw1 != tw2 || th1 != th2 {
+			t.Errorf("%s: text size changed with logo_size: %dx%d -> %dx%d", tc.name, tw1, th1, tw2, th2)
+		}
+		lw1, lh1 := logoSize(img1)
+		lw2, lh2 := logoSize(img2)
+		if lw1 == lw2 || lh1 == lh2 {
+			t.Errorf("%s: logo size did not increase with logo_size: %dx%d -> %dx%d", tc.name, lw1, lh1, lw2, lh2)
+		}
+	}
+}
+
+// TestOversizedLogoClippingPreservesAnchor guards that when the logo outgrows
+// its section, the unique outer-side margin is preserved (not clipped to the
+// content gap), the non-anchor outer sides clip at the content gap, and the
+// inward side clips at the section seam.
+func TestOversizedLogoClippingPreservesAnchor(t *testing.T) {
+	loadTestFont(t)
+	vf := GetValueFontFace()
+	lf := GetFontFace()
+	if vf == nil || lf == nil {
+		t.Skip("fonts not loaded")
+	}
+	defer vf.Close()
+	defer lf.Close()
+
+	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 48; x++ {
+			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+		}
+	}
+	iconCacheMu.Lock()
+	iconCache[*services.SourceImdb] = synthetic
+	iconCacheMu.Unlock()
+	defer func() {
+		iconCacheMu.Lock()
+		delete(iconCache, *services.SourceImdb)
+		iconCacheMu.Unlock()
+	}()
+
+	colors := map[string]services.SourceColorSet{
+		"imdb": {Accent: "#ff0000", Value: "#00ff00"},
+	}
+	badge := services.RatingBadge{Source: services.SourceImdb, Value: "10.0"}
+	gap := int(newScaledDims(1.0).contentGap)
+
+	cases := []struct {
+		name         string
+		style        services.BadgeStyle
+		vertical     bool
+		anchorMargin int // expected unique-side margin (iconPad for lr/rl, anchorV for tb/bt)
+	}{
+		{"lr", services.BadgeStyleLogoLeftValueRight, false, (baseBadgeHeight - baseIconHeight) / 2},
+		{"rl", services.BadgeStyleValueLeftLogoRight, false, (baseBadgeHeight - baseIconHeight) / 2},
+		{"tb", services.BadgeStyleLogoTB, true, (baseBadgeHeight - baseIconHeight) / 2},
+		{"bt", services.BadgeStyleValueTB, true, (baseBadgeHeight - baseIconHeight) / 2},
+	}
+
+	for _, tc := range cases {
+		app := services.BadgeAppearance{Shape: services.BadgeShapeRounded, Alpha: services.BadgeAlpha(100), Style: tc.style, Width: 100, Height: 100}
+		var img *image.RGBA
+		if tc.vertical {
+			img = RenderVerticalBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 3.0, colors)
+		} else {
+			img = RenderBadge(&badge, vf, lf, services.LabelStyleIcon, app, 1.0, 1.0, 3.0, colors)
+		}
+		b := img.Bounds()
+		x0, y0, x1, y1, ok := cyanBounds(img)
+		if !ok {
+			t.Fatalf("%s: no logo ink found", tc.name)
+		}
+		left, right := x0-b.Min.X, b.Max.X-1-x1
+		top, bottom := y0-b.Min.Y, b.Max.Y-1-y1
+
+		switch tc.style {
+		case services.BadgeStyleLogoLeftValueRight:
+			if diff := abs(left - tc.anchorMargin); diff > 1 {
+				t.Errorf("%s: anchor (left) margin=%d, want %d", tc.name, left, tc.anchorMargin)
+			}
+			if top != gap || bottom != gap {
+				t.Errorf("%s: top/bottom margins should clip at content gap %d, got %d/%d", tc.name, gap, top, bottom)
+			}
+		case services.BadgeStyleValueLeftLogoRight:
+			if diff := abs(right - tc.anchorMargin); diff > 1 {
+				t.Errorf("%s: anchor (right) margin=%d, want %d", tc.name, right, tc.anchorMargin)
+			}
+			if top != gap || bottom != gap {
+				t.Errorf("%s: top/bottom margins should clip at content gap %d, got %d/%d", tc.name, gap, top, bottom)
+			}
+		case services.BadgeStyleLogoTB:
+			if diff := abs(top - tc.anchorMargin); diff > 1 {
+				t.Errorf("%s: anchor (top) margin=%d, want %d", tc.name, top, tc.anchorMargin)
+			}
+			if left != gap || right != gap {
+				t.Errorf("%s: left/right margins should clip at content gap %d, got %d/%d", tc.name, gap, left, right)
+			}
+		case services.BadgeStyleValueTB:
+			if diff := abs(bottom - tc.anchorMargin); diff > 1 {
+				t.Errorf("%s: anchor (bottom) margin=%d, want %d", tc.name, bottom, tc.anchorMargin)
+			}
+			if left != gap || right != gap {
+				t.Errorf("%s: left/right margins should clip at content gap %d, got %d/%d", tc.name, gap, left, right)
+			}
 		}
 	}
 }
