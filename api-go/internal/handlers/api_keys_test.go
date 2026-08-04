@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	appimg "openposterdb/internal/image"
@@ -18,6 +19,13 @@ import (
 )
 
 const apiKeySettingsTestSchema = `
+CREATE TABLE IF NOT EXISTS admin_users (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	username TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	prefs TEXT NOT NULL DEFAULT '{}'
+);
 CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS api_keys (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +93,8 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	backdrop_badge_alpha INTEGER NOT NULL DEFAULT 80,
 	episode_badge_alpha INTEGER NOT NULL DEFAULT 80,
 	backdrop_edge_inset_x INTEGER NOT NULL DEFAULT 0,
-	backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0
+	backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0,
+	colors TEXT NOT NULL DEFAULT ''
 );
 `
 
@@ -166,20 +175,20 @@ func TestUpdateKeySettingsPreservesOmittedFields(t *testing.T) {
 	db := newHandlersTestDB(t)
 
 	seed := &services.APIKeySettings{
-		APIKeyID:             1,
-		ImageSource:          "t",
-		Lang:                 "en",
-		RatingsLimit:         7,
-		LogoRatingsLimit:     9,
-		BackdropRatingsLimit: 2,
-		EpisodeRatingsLimit:  4,
-		PosterBadgeDirection: "h",
+		APIKeyID:               1,
+		ImageSource:            "t",
+		Lang:                   "en",
+		RatingsLimit:           7,
+		LogoRatingsLimit:       9,
+		BackdropRatingsLimit:   2,
+		EpisodeRatingsLimit:    4,
+		PosterBadgeDirection:   "h",
 		BackdropBadgeDirection: "v",
 		EpisodeBadgeDirection:  "h",
-		PosterBadgeStyle:      "lr",
-		PosterLabelStyle:      "o",
-		PosterBadgeShape:      "r",
-		PosterBadgeAlpha:      80,
+		PosterBadgeStyle:       "lr",
+		PosterLabelStyle:       "o",
+		PosterBadgeShape:       "r",
+		PosterBadgeAlpha:       80,
 	}
 	if err := services.UpsertAPIKeySettings(db, seed); err != nil {
 		t.Fatal(err)
@@ -384,6 +393,104 @@ func TestValidateAndNormalizeKeySettings(t *testing.T) {
 	}
 	if err := validateAndNormalizeKeySettings(&services.APIKeySettings{Lang: "en", RatingsLimit: 11}); err == nil {
 		t.Error("ratings_limit > 10 should be rejected")
+	}
+}
+
+// TestKeySettingsColorsRoundTrip guards per-key colours end-to-end: a PUT with
+// colours stores them (normalised), and the GET returns the effective colours
+// including the key's overrides plus the fanart_available flag, matching the
+// global settings GET shape.
+func TestKeySettingsColorsRoundTrip(t *testing.T) {
+	db := newHandlersTestDB(t)
+
+	payload := `{
+		"lang": "de",
+		"colors": {"imdb": {"border": "#ff0000", "text": "#00ff00"}}
+	}`
+	rec := putKeySettings(t, db, 1, payload)
+	if rec.Code != 200 {
+		t.Fatalf("PUT returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Stored row keeps the compact JSON overrides.
+	stored, err := services.GetAPIKeySettings(db, 1)
+	if err != nil || stored == nil {
+		t.Fatalf("GetAPIKeySettings: %v", err)
+	}
+	if !strings.Contains(stored.Colors, `"imdb"`) || !strings.Contains(stored.Colors, `#ff0000`) {
+		t.Errorf("stored colors=%q, want imdb border override", stored.Colors)
+	}
+
+	// GET returns the effective colours (global defaults filled) + overrides.
+	req := httptest.NewRequest(http.MethodGet, "/api/keys/1/settings", nil)
+	req.SetPathValue("id", "1")
+	rec2 := httptest.NewRecorder()
+	HandleGetKeySettings(db, true)(rec2, req)
+	if rec2.Code != 200 {
+		t.Fatalf("GET returned %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var resp perKeySettingsResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Colors["imdb"].Border != "#ff0000" {
+		t.Errorf("effective imdb border=%q, want #ff0000", resp.Colors["imdb"].Border)
+	}
+	if resp.Colors["imdb"].Text != "#00ff00" {
+		t.Errorf("effective imdb text=%q, want #00ff00", resp.Colors["imdb"].Text)
+	}
+	// Sources without overrides keep their defaults (filled in).
+	if resp.Colors["mal"].Accent == "" {
+		t.Error("unoverridden source should have default colours filled in")
+	}
+	if !resp.FanartAvailable {
+		t.Error("fanart_available should be true when passed true")
+	}
+}
+
+// TestKeySettingsColorsPreservedWhenOmitted guards partial-update semantics for
+// colours: a PUT without a colors field keeps the stored colours.
+func TestKeySettingsColorsPreservedWhenOmitted(t *testing.T) {
+	db := newHandlersTestDB(t)
+	seed := &services.APIKeySettings{
+		APIKeyID:     1,
+		ImageSource:  "t",
+		Lang:         "en",
+		RatingsLimit: 3,
+		Colors:       `{"imdb":{"border":"#123456"}}`,
+	}
+	if err := services.UpsertAPIKeySettings(db, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := putKeySettings(t, db, 1, `{"lang":"de"}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT returned %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := services.GetAPIKeySettings(db, 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetAPIKeySettings: %v", err)
+	}
+	if !strings.Contains(got.Colors, "#123456") {
+		t.Errorf("colors=%q, want stored override preserved", got.Colors)
+	}
+}
+
+// TestKeySettingsInvalidColors guards colours validation: unknown sources and
+// invalid hex values are rejected with 400.
+func TestKeySettingsInvalidColors(t *testing.T) {
+	db := newHandlersTestDB(t)
+	if err := services.UpsertAPIKeySettings(db, &services.APIKeySettings{APIKeyID: 1, ImageSource: "t", Lang: "en", RatingsLimit: 3}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := putKeySettings(t, db, 1, `{"colors":{"bogus":{"border":"#ff0000"}}}`)
+	if rec.Code != 400 {
+		t.Errorf("unknown source returned %d, want 400", rec.Code)
+	}
+	rec = putKeySettings(t, db, 1, `{"colors":{"imdb":{"border":"not-a-color"}}}`)
+	if rec.Code != 400 {
+		t.Errorf("invalid hex returned %d, want 400", rec.Code)
 	}
 }
 

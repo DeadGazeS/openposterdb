@@ -102,7 +102,15 @@ func HandleDeleteKey(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func HandleGetKeySettings(db *sql.DB) http.HandlerFunc {
+// perKeySettingsResponse wraps the effective render settings with the
+// fanart_available flag the shared settings form needs, matching the global
+// settings GET response shape (admin.go HandleGetSettings).
+type perKeySettingsResponse struct {
+	services.RenderSettings
+	FanartAvailable bool `json:"fanart_available"`
+}
+
+func HandleGetKeySettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "Method not allowed")
@@ -118,7 +126,7 @@ func HandleGetKeySettings(db *sql.DB) http.HandlerFunc {
 
 		settings := services.GetEffectiveRenderSettings(db, id, nil)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(settings)
+		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
 }
 
@@ -267,6 +275,11 @@ func mergeKeySettingsUpdate(base *services.APIKeySettings, body *keySettingsUpda
 	} else {
 		merged.EpisodeBadgeDirection = base.EpisodeBadgeDirection
 	}
+	if merged.Colors == "" {
+		// Omitted colours keep the stored value (the web client always sends
+		// them, so this only affects partial/legacy payloads).
+		merged.Colors = base.Colors
+	}
 	return merged
 }
 
@@ -345,6 +358,25 @@ func validateAndNormalizeKeySettings(s *services.APIKeySettings) error {
 	s.EpisodeLogoSize = int32(services.ClampScalePercent(s.EpisodeLogoSize))
 	s.BackdropEdgeInsetX = services.ClampEdgeInset(s.BackdropEdgeInsetX)
 	s.BackdropEdgeInsetY = services.ClampEdgeInset(s.BackdropEdgeInsetY)
+
+	// Validate and normalise per-source colours, mirroring the global path
+	// (admin.go): reject unknown sources / invalid hex, strip default-valued
+	// entries so only real overrides are stored.
+	if s.Colors != "" {
+		var colors map[string]services.SourceColorSet
+		if err := json.Unmarshal([]byte(s.Colors), &colors); err != nil {
+			return fmt.Errorf("invalid colors: not valid JSON")
+		}
+		if err := services.ValidateSourceColors(colors); err != nil {
+			return err
+		}
+		normalized := services.NormalizeSourceColors(colors)
+		out, err := json.Marshal(normalized)
+		if err != nil {
+			return fmt.Errorf("invalid colors: %w", err)
+		}
+		s.Colors = string(out)
+	}
 	return nil
 }
 
@@ -436,7 +468,7 @@ func HandleSelfKeyInfo(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func HandleSelfSettings(db *sql.DB) http.HandlerFunc {
+func HandleSelfSettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "Method not allowed")
@@ -451,7 +483,7 @@ func HandleSelfSettings(db *sql.DB) http.HandlerFunc {
 
 		settings := services.GetEffectiveRenderSettings(db, apiUser.KeyID, nil)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(settings)
+		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
 }
 

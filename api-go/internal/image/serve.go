@@ -365,11 +365,14 @@ func ratingsLimitForKind(kind string, settings *services.RenderSettings, overrid
 // ServeImage is the full image-generation pipeline shared by the public image
 // endpoint and the admin fetch endpoint. It resolves the ID, fetches ratings,
 // downloads the base artwork, renders badges, and caches the result to the
-// filesystem and the image_meta table.
+// in-memory cache (when provided), the filesystem, and the image_meta table.
 //
 // ratingsLimit is the explicit ?ratings_limit override from the public image
 // query (nil when absent). The stored ratings_limit settings fields are legacy
 // and are never consulted for the limit decision.
+//
+// caches optionally provides the process-wide in-memory caches (rendered
+// images, ID resolutions, fetched ratings); nil fields disable that layer.
 //
 // Returns (image bytes, content type, error).
 func ServeImage(
@@ -390,6 +393,7 @@ func ServeImage(
 	imageStaleSecs uint64,
 	quality uint8,
 	imageSizeStr *string,
+	caches *services.MemCacheSet,
 ) ([]byte, string, error) {
 	idType, err := services.ParseIDType(idTypeStr)
 	if err != nil {
@@ -402,6 +406,9 @@ func ServeImage(
 
 	if tmdb == nil {
 		return nil, "", apperr.NewOther("TMDB API key not configured — image generation unavailable")
+	}
+	if caches == nil {
+		caches = &services.MemCacheSet{}
 	}
 
 	contentType := ImageContentType(kind)
@@ -428,7 +435,7 @@ func ServeImage(
 
 	// Resolve the ID, uplifting episodes to their parent series for poster,
 	// logo, and backdrop endpoints.
-	resolved, err := services.ResolveID(idType, idValue, tmdb)
+	resolved, err := services.ResolveIDCached(caches.IDs, idType, idValue, tmdb)
 	if err != nil {
 		return nil, "", err
 	}
@@ -436,7 +443,7 @@ func ServeImage(
 	if kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
 		if resolved.Episode != nil {
 			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-			resolved, err = services.ResolveID(services.IDTypeTMDB, seriesID, tmdb)
+			resolved, err = services.ResolveIDCached(caches.IDs, services.IDTypeTMDB, seriesID, tmdb)
 			if err != nil {
 				return nil, "", err
 			}
@@ -476,7 +483,8 @@ func ServeImage(
 			epEpisode = resolved.Episode.EpisodeNumber
 		}
 
-		_, _, _, _, rawBadges = services.FetchRatings(
+		rawBadges = services.FetchRatingsCached(
+			caches.Ratings,
 			resolved.TMDbID, mediaType, imdbID,
 			epShowID, epSeason, epEpisode,
 			tmdb, omdb, mdblist, trakt,
@@ -507,12 +515,24 @@ func ServeImage(
 		return nil, "", err
 	}
 
+	// Serve from the in-memory cache first (fast path; works even with
+	// external_cache_only, mirroring the Rust image_mem_cache).
+	if caches.ImageMem != nil {
+		if v, ok := caches.ImageMem.Get(cacheKey); ok {
+			slog.Debug("image mem cache hit", "kind", kind, "cache_key", cacheKey)
+			return v.([]byte), contentType, nil
+		}
+	}
+
 	// Serve from filesystem cache if present and fresh.
 	releaseDate := resolved.ReleaseDate
 	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), ratingsMinStaleSecs, ratingsMaxAgeSecs)
 	if !externalCacheOnly {
 		if entry, err := services.ReadCache(cachePath, staleSecs); err == nil && !entry.IsStale {
 			slog.Debug("image cache hit", "kind", kind, "cache_key", cacheKey)
+			if caches.ImageMem != nil {
+				caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
+			}
 			return entry.Bytes, contentType, nil
 		}
 	}
@@ -539,7 +559,10 @@ func ServeImage(
 		return nil, "", apperr.NewImageError(err)
 	}
 
-	// Persist: filesystem + metadata DB.
+	// Persist: in-memory + filesystem + metadata DB.
+	if caches.ImageMem != nil {
+		caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
+	}
 	if !externalCacheOnly {
 		if err := services.WriteCache(cachePath, rendered); err != nil {
 			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)

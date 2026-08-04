@@ -520,6 +520,47 @@ func FetchRatings(
 	return mdblistResp, nil, nil, omdbResp, badges
 }
 
+// FetchRatingsCached fetches ratings and caches the resulting badges in the
+// given in-memory cache (key "tmdbID/mediaType" or "showID/episode/SsEe",
+// matching the Rust ratings_cache). A nil cache bypasses caching. Only the
+// badge list is cached; the auxiliary responses are refetched on a hit but are
+// unused by all current callers.
+func FetchRatingsCached(
+	cache *MemCache,
+	resolvedTMDbID uint64,
+	mediaType string,
+	imdbID *string,
+	episodeShowTMDbID uint64,
+	episodeSeason, episodeEpisode uint32,
+	tmdb *TmdbClient,
+	omdb *OmdbClient,
+	mdblist *MdblistClient,
+	trakt *TraktClient,
+) []RatingBadge {
+	if cache != nil {
+		key := fmt.Sprintf("%d/%s", resolvedTMDbID, mediaType)
+		if mediaType == "episode" {
+			key = fmt.Sprintf("%d/episode/S%dE%d", episodeShowTMDbID, episodeSeason, episodeEpisode)
+		}
+		if v, ok := cache.Get(key); ok {
+			return v.([]RatingBadge)
+		}
+		_, _, _, _, badges := FetchRatings(
+			resolvedTMDbID, mediaType, imdbID,
+			episodeShowTMDbID, episodeSeason, episodeEpisode,
+			tmdb, omdb, mdblist, trakt,
+		)
+		cache.Set(key, badges, int64(len(badges))*100+64)
+		return badges
+	}
+	_, _, _, _, badges := FetchRatings(
+		resolvedTMDbID, mediaType, imdbID,
+		episodeShowTMDbID, episodeSeason, episodeEpisode,
+		tmdb, omdb, mdblist, trakt,
+	)
+	return badges
+}
+
 func fetchTmdbRating(tmdb *TmdbClient, tmdbID uint64, mediaType string, showID uint64, season, episode uint32) *RatingBadge {
 	path := fmt.Sprintf("/%s/%d", mediaType, tmdbID)
 	if mediaType == "episode" {

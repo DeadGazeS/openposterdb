@@ -430,4 +430,12 @@ var migrations = []migration{
 		"ALTER TABLE api_key_settings DROP COLUMN episode_badges_per_row",
 		"no such column",
 	},
+	{
+		"ALTER TABLE api_key_settings ADD COLUMN colors TEXT NOT NULL DEFAULT ''",
+		"duplicate column",
+	},
+	{
+		"ALTER TABLE admin_users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'",
+		"duplicate column",
+	},
 }

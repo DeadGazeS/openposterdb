@@ -95,9 +95,12 @@ type ServiceKeyManager struct {
 }
 
 type ServiceKeyStatus struct {
-	Locked  bool    `json:"locked"`
-	HasKey  bool    `json:"has_key"`
-	Masked  *string `json:"masked"`
+	Locked bool    `json:"locked"`
+	HasKey bool    `json:"has_key"`
+	Masked *string `json:"masked"`
+	// Keys holds the real (decrypted) keys. Only populated by the admin
+	// settings endpoint, which already has plaintext access (export).
+	Keys []string `json:"keys,omitempty"`
 }
 
 type ServiceKeysResponse struct {
@@ -302,7 +305,13 @@ func (m *ServiceKeyManager) statusFor(service string, keys []string) ServiceKeyS
 		s := strings.Join(parts, ", ")
 		masked = &s
 	}
-	return ServiceKeyStatus{Locked: locked, HasKey: hasKey, Masked: masked}
+	// The real keys are only exposed for unlocked services (env-locked keys
+	// stay hidden); the admin UI uses them to render removable per-key chips.
+	var realKeys []string
+	if !locked && hasKey {
+		realKeys = keys
+	}
+	return ServiceKeyStatus{Locked: locked, HasKey: hasKey, Masked: masked, Keys: realKeys}
 }
 
 func (m *ServiceKeyManager) UpdateKeys(update *ServiceKeysUpdate) error {

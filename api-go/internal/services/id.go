@@ -126,6 +126,25 @@ func ResolveID(idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, er
 	return nil, apperr.NewInvalidIDType(idType.String())
 }
 
+// ResolveIDCached resolves an ID, caching successful results in the given
+// in-memory cache (key "idtype/idvalue", matching the Rust id_cache). A nil
+// cache bypasses caching. Errors are never cached, so a transient TMDB failure
+// doesn't poison the cache.
+func ResolveIDCached(cache *MemCache, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+	if cache != nil {
+		key := idType.String() + "/" + idValue
+		if v, ok := cache.Get(key); ok {
+			return v.(*ResolvedID), nil
+		}
+		resolved, err := ResolveID(idType, idValue, tmdb)
+		if err == nil {
+			cache.Set(key, resolved, 1)
+		}
+		return resolved, err
+	}
+	return ResolveID(idType, idValue, tmdb)
+}
+
 func resolveIMDB(imdbID string, tmdb *TmdbClient) (*ResolvedID, error) {
 	if rest, ok := strings.CutPrefix(imdbID, "episode-"); ok {
 		return resolveIMDBEpisode(rest, imdbID, tmdb)

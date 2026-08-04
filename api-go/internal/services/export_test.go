@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	backdrop_badge_alpha INTEGER NOT NULL DEFAULT 80,
 	episode_badge_alpha INTEGER NOT NULL DEFAULT 80,
 	backdrop_edge_inset_x INTEGER NOT NULL DEFAULT 0,
-	backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0
+	backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0,
+	colors TEXT NOT NULL DEFAULT ''
 );
 `
 
@@ -116,7 +118,10 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertAPIKeySettings(db, &APIKeySettings{APIKeyID: id, ImageSource: "t", Lang: "en", RatingsLimit: 3}); err != nil {
+	if err := UpsertAPIKeySettings(db, &APIKeySettings{
+		APIKeyID: id, ImageSource: "t", Lang: "en", RatingsLimit: 3,
+		Colors: `{"imdb":{"border":"#ff0000"}}`,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -168,6 +173,9 @@ func TestExportImportRoundTrip(t *testing.T) {
 	ks, err := GetAPIKeySettings(db2, restored.ID)
 	if err != nil || ks == nil || ks.RatingsLimit != 3 {
 		t.Errorf("per-key settings not restored: %+v (err %v)", ks, err)
+	}
+	if ks == nil || !strings.Contains(ks.Colors, `"imdb"`) || !strings.Contains(ks.Colors, "#ff0000") {
+		t.Errorf("per-key colors not restored: %+v (err %v)", ks, err)
 	}
 
 	// Export without keys should exclude them.

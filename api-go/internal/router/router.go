@@ -27,6 +27,7 @@ type AppState struct {
 	Trakt         *services.TraktClient
 	ServiceKeys   *services.ServiceKeyManager
 	SecureCookies bool
+	Caches        *services.MemCacheSet
 	jwtSecret     []byte
 }
 
@@ -40,8 +41,8 @@ func New(state *AppState) *Router {
 }
 
 type Router struct {
-	state *AppState
-	mux   *http.ServeMux
+	state     *AppState
+	mux       *http.ServeMux
 	staticDir string
 	fs        http.Handler
 }
@@ -209,7 +210,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleGetKeySettings(s.DB)(w, req)
+			handlers.HandleGetKeySettings(s.DB, s.Fanart != nil)(w, req)
 		case http.MethodPut:
 			handlers.HandleUpdateKeySettings(s.DB)(w, req)
 		case http.MethodDelete:
@@ -226,7 +227,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("/api/key/me/settings", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleSelfSettings(s.DB)(w, req)
+			handlers.HandleSelfSettings(s.DB, s.Fanart != nil)(w, req)
 		case http.MethodPut:
 			handlers.HandleUpdateSelfSettings(s.DB)(w, req)
 		case http.MethodDelete:
@@ -236,7 +237,10 @@ func (r *Router) registerRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret())(handlers.HandleStats(s.DB)))
+	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret())(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Caches)))
+
+	// Per-admin-user UI preferences (sidebar disclaimer state etc.).
+	r.mux.Handle("/api/admin/prefs", handlers.RequireAuth(r.jwtSecret())(handlers.HandleUserPrefs(s.DB)))
 	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
@@ -249,7 +253,7 @@ func (r *Router) registerRoutes() {
 	})))
 
 	r.mux.Handle("/api/admin/cache/purge", handlers.RequireAuth(r.jwtSecret())(
-		handlers.HandlePurgeAll(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly)))
+		handlers.HandlePurgeAll(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
 
 	// Admin preview routes
 	r.mux.Handle("/api/admin/preview/poster", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
@@ -272,28 +276,28 @@ func (r *Router) registerRoutes() {
 	// Clear-by-kind routes
 	r.mux.Handle("/api/admin/posters", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
-			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "p", s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "p", s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		} else {
 			handlers.HandleListImages(s.DB, "p")(w, req)
 		}
 	}))
 	r.mux.Handle("/api/admin/logos", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
-			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "l", s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "l", s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		} else {
 			handlers.HandleListImages(s.DB, "l")(w, req)
 		}
 	}))
 	r.mux.Handle("/api/admin/backdrops", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
-			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "b", s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "b", s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		} else {
 			handlers.HandleListImages(s.DB, "b")(w, req)
 		}
 	}))
 	r.mux.Handle("/api/admin/episodes", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
-			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "e", s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandleClearKind(s.DB, s.Config.CacheDir, "e", s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		} else {
 			handlers.HandleListImages(s.DB, "e")(w, req)
 		}
@@ -303,7 +307,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("/api/admin/posters/{id_type}/{id_value}", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		idT, idV := req.PathValue("id_type"), req.PathValue("id_value")
 		if req.Method == http.MethodDelete {
-			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "p", idT, idV, s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "p", idT, idV, s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		} else {
 			writeError(w, 405, "Method not allowed")
 		}
@@ -320,7 +324,7 @@ func (r *Router) registerRoutes() {
 		case http.MethodGet:
 			handlers.HandleImageFile(s.DB, s.Config.CacheDir, "l", idT, idV)(w, req)
 		case http.MethodDelete:
-			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "l", idT, idV, s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "l", idT, idV, s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		default:
 			writeError(w, 405, "Method not allowed")
 		}
@@ -334,7 +338,7 @@ func (r *Router) registerRoutes() {
 		case http.MethodGet:
 			handlers.HandleImageFile(s.DB, s.Config.CacheDir, "b", idT, idV)(w, req)
 		case http.MethodDelete:
-			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "b", idT, idV, s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "b", idT, idV, s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		default:
 			writeError(w, 405, "Method not allowed")
 		}
@@ -345,7 +349,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("/api/admin/episodes/{id_type}/{id_value}", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		idT, idV := req.PathValue("id_type"), req.PathValue("id_value")
 		if req.Method == http.MethodDelete {
-			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "e", idT, idV, s.Config.ExternalCacheOnly)(w, req)
+			handlers.HandlePurgeTitle(s.DB, s.Config.CacheDir, "e", idT, idV, s.Config.ExternalCacheOnly, s.Caches)(w, req)
 		} else {
 			writeError(w, 405, "Method not allowed")
 		}
@@ -517,6 +521,7 @@ func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {
 		RatingsMaxAgeSecs:   s.Config.RatingsMaxAgeSecs,
 		ImageStaleSecs:      s.Config.ImageStaleSecs,
 		ImageQuality:        s.Config.ImageQuality,
+		Caches:              s.Caches,
 	}
 }
 

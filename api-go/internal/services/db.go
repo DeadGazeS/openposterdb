@@ -1240,6 +1240,36 @@ func CountAPIKeys(db *sql.DB) (int64, error) {
 	return count, err
 }
 
+// GetUserPrefs returns the admin user's stored UI preferences (JSON map).
+// Unknown/missing prefs come back as an empty map.
+func GetUserPrefs(db *sql.DB, username string) (map[string]string, error) {
+	var raw string
+	err := db.QueryRow("SELECT prefs FROM admin_users WHERE username = ?", username).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	prefs := map[string]string{}
+	if raw != "" && raw != "{}" {
+		if uerr := json.Unmarshal([]byte(raw), &prefs); uerr != nil {
+			return nil, uerr
+		}
+	}
+	return prefs, nil
+}
+
+// SetUserPrefs stores the admin user's UI preferences (JSON map).
+func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
+	if prefs == nil {
+		prefs = map[string]string{}
+	}
+	raw, err := json.Marshal(prefs)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("UPDATE admin_users SET prefs = ? WHERE username = ?", string(raw), username)
+	return err
+}
+
 func BatchUpdateLastUsed(db *sql.DB, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
@@ -1463,6 +1493,7 @@ type APIKeySettings struct {
 	EpisodeBadgeAlpha      int32  `json:"episode_badge_alpha"`
 	BackdropEdgeInsetX     int32  `json:"backdrop_edge_inset_x"`
 	BackdropEdgeInsetY     int32  `json:"backdrop_edge_inset_y"`
+	Colors                 string `json:"colors"`
 }
 
 // apiKeySettingsAlias strips the custom UnmarshalJSON from APIKeySettings so
@@ -1496,6 +1527,35 @@ func layoutJSONField(raw json.RawMessage) (string, error) {
 	return string(raw), nil
 }
 
+// colorsJSONField normalises the colors field from either form the client may
+// send: a JSON object mapping colour keys to SourceColorSet values, or a legacy
+// JSON string holding that object's text. The object form is validated by
+// decoding it and stored as its compact JSON string, because the
+// api_key_settings.colors DB column is TEXT and is scanned/bound as a string.
+// Empty and "null" values map to "" (meaning "no per-key colour overrides").
+func colorsJSONField(raw json.RawMessage) (string, error) {
+	raw = []byte(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return "", err
+		}
+		return s, nil
+	}
+	var m map[string]SourceColorSet
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", err
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // UnmarshalJSON accepts the four layout fields in either form: a legacy JSON
 // string ({"top": ...} as text) or a JSON object. The explicit outer
 // json.RawMessage fields shadow the embedded alias fields with the same json
@@ -1509,22 +1569,25 @@ func (s *APIKeySettings) UnmarshalJSON(data []byte) error {
 		LogoLayout     json.RawMessage `json:"logo_layout"`
 		BackdropLayout json.RawMessage `json:"backdrop_layout"`
 		EpisodeLayout  json.RawMessage `json:"episode_layout"`
+		Colors         json.RawMessage `json:"colors"`
 	}
 	raw.apiKeySettingsAlias = (*apiKeySettingsAlias)(s)
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	fields := []struct {
-		raw json.RawMessage
-		dst *string
+		raw  json.RawMessage
+		dst  *string
+		norm func(json.RawMessage) (string, error)
 	}{
-		{raw.PosterLayout, &s.PosterLayout},
-		{raw.LogoLayout, &s.LogoLayout},
-		{raw.BackdropLayout, &s.BackdropLayout},
-		{raw.EpisodeLayout, &s.EpisodeLayout},
+		{raw.PosterLayout, &s.PosterLayout, layoutJSONField},
+		{raw.LogoLayout, &s.LogoLayout, layoutJSONField},
+		{raw.BackdropLayout, &s.BackdropLayout, layoutJSONField},
+		{raw.EpisodeLayout, &s.EpisodeLayout, layoutJSONField},
+		{raw.Colors, &s.Colors, colorsJSONField},
 	}
 	for _, f := range fields {
-		v, err := layoutJSONField(f.raw)
+		v, err := f.norm(f.raw)
 		if err != nil {
 			return err
 		}
@@ -1554,7 +1617,7 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 		episode_layout, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
 		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
-		backdrop_edge_inset_x, backdrop_edge_inset_y
+		backdrop_edge_inset_x, backdrop_edge_inset_y, colors
 		FROM api_key_settings WHERE api_key_id = ?`, apiKeyID).Scan(
 		&s.APIKeyID, &s.ImageSource, &s.Lang, &s.Textless, &s.RatingsLimit, &s.RatingsOrder, &s.RatingsExclude,
 		&s.PosterLayout, &s.LogoRatingsLimit, &s.BackdropRatingsLimit,
@@ -1574,7 +1637,7 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 		&s.EpisodeLayout, &s.EpisodeBadgeDirection, &s.EpisodeBlur,
 		&s.PosterBadgeShape, &s.LogoBadgeShape, &s.BackdropBadgeShape, &s.EpisodeBadgeShape,
 		&s.PosterBadgeAlpha, &s.LogoBadgeAlpha, &s.BackdropBadgeAlpha, &s.EpisodeBadgeAlpha,
-		&s.BackdropEdgeInsetX, &s.BackdropEdgeInsetY,
+		&s.BackdropEdgeInsetX, &s.BackdropEdgeInsetY, &s.Colors,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1602,8 +1665,8 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		episode_layout, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
 		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
-		backdrop_edge_inset_x, backdrop_edge_inset_y
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		backdrop_edge_inset_x, backdrop_edge_inset_y, colors
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(api_key_id) DO UPDATE SET
 		image_source = excluded.image_source,
 		lang = excluded.lang,
@@ -1660,7 +1723,8 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		backdrop_badge_alpha = excluded.backdrop_badge_alpha,
 		episode_badge_alpha = excluded.episode_badge_alpha,
 		backdrop_edge_inset_x = excluded.backdrop_edge_inset_x,
-		backdrop_edge_inset_y = excluded.backdrop_edge_inset_y`,
+		backdrop_edge_inset_y = excluded.backdrop_edge_inset_y,
+		colors = excluded.colors`,
 		s.APIKeyID, s.ImageSource, s.Lang, s.Textless, s.RatingsLimit, s.RatingsOrder, s.RatingsExclude,
 		s.PosterLayout, s.LogoRatingsLimit, s.BackdropRatingsLimit,
 		s.PosterBadgeStyle, s.LogoBadgeStyle, s.BackdropBadgeStyle,
@@ -1679,7 +1743,7 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 		s.EpisodeLayout, s.EpisodeBadgeDirection, s.EpisodeBlur,
 		s.PosterBadgeShape, s.LogoBadgeShape, s.BackdropBadgeShape, s.EpisodeBadgeShape,
 		s.PosterBadgeAlpha, s.LogoBadgeAlpha, s.BackdropBadgeAlpha, s.EpisodeBadgeAlpha,
-		s.BackdropEdgeInsetX, s.BackdropEdgeInsetY,
+		s.BackdropEdgeInsetX, s.BackdropEdgeInsetY, s.Colors,
 	)
 	return err
 }
@@ -1695,6 +1759,24 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 	defaults := DefaultRenderSettings()
 	perKey, err := GetAPIKeySettings(db, apiKeyID)
 	if err == nil && perKey != nil {
+		// Effective colours: the global effective colours (the stored globals,
+		// or the caller's cached globals) overlaid with the key's own overrides,
+		// so a key without colour overrides renders with the global colours.
+		base := defaults
+		if cachedGlobals != nil {
+			base = *cachedGlobals
+		} else if globals, gerr := GetGlobalSettings(db); gerr == nil {
+			base = ParseGlobalRenderSettings(globals)
+		}
+		colors := EffectiveSourceColors(&base)
+		if perKey.Colors != "" {
+			var overrides map[string]SourceColorSet
+			if uerr := json.Unmarshal([]byte(perKey.Colors), &overrides); uerr == nil {
+				for k, v := range overrides {
+					colors[k] = v
+				}
+			}
+		}
 		return RenderSettings{
 			ImageSource:            ImageSource(perKey.ImageSource),
 			Lang:                   strOrDefault(perKey.Lang, "en"),
@@ -1753,6 +1835,7 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 			LogoBadgeAlpha:         ClampBadgeAlpha(perKey.LogoBadgeAlpha),
 			BackdropBadgeAlpha:     ClampBadgeAlpha(perKey.BackdropBadgeAlpha),
 			EpisodeBadgeAlpha:      ClampBadgeAlpha(perKey.EpisodeBadgeAlpha),
+			Colors:                 colors,
 		}
 	}
 
