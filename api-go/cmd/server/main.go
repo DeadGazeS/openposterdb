@@ -102,17 +102,15 @@ func main() {
 			0, 50_000, 30*time.Minute, 0,
 		),
 	}
+	// Mirror the Rust image_mem_cache: re-check release-date staleness of
+	// in-memory entries every 60s so fresh ratings propagate through hot
+	// cached images within about a minute.
+	state.Caches.ImageMem.SetRevalidateAfter(60 * time.Second)
 
 	state.SetupOMDB(mgr.OMDBKeys())
 	state.SetupMDBList(mgr.MDBListKeys())
 	state.SetupFanart(mgr.FanartKeys())
 	state.SetupTrakt(mgr.TraktClientIDs())
-
-	if cfg.ExternalCacheOnly && !cfg.EnableCDNRedirects {
-		slog.Warn("EXTERNAL_CACHE_ONLY is enabled without ENABLE_CDN_REDIRECTS — " +
-			"every request after the in-memory cache expires will regenerate the image. " +
-			"Consider enabling CDN redirects so a CDN can absorb repeat traffic.")
-	}
 
 	if !cfg.ExternalCacheOnly {
 		os.MkdirAll(cfg.CacheDir, 0755)
@@ -125,8 +123,23 @@ func main() {
 	}
 	image.LoadIcons()
 
-	flusher := app.NewLastUsedFlusher(db, 60*time.Second)
+	flusher := services.NewLastUsedFlusher(db, 60*time.Second)
+	state.LastUsedFlusher = flusher
 	flusher.Start()
+
+	// CDN content-addressed settings hash registry. Entries expire after 5 min
+	// (matches the documented settings-hash TTL); a janitor sweeps them up.
+	state.CDNHashes = services.NewHashRegistry(5 * time.Minute)
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		for range ticker.C {
+			state.CDNHashes.SweepExpired()
+		}
+	}()
+
+	// In-flight render dedup: concurrent requests for the same cache key
+	// share a single render (mirrors the Rust image_inflight).
+	state.Inflight = image.NewInflightSet()
 
 	r := router.New(state)
 
@@ -175,8 +188,10 @@ func logConfig(cfg *config.Config) {
 		"image_quality", cfg.ImageQuality,
 		"mem_cache_mb", cfg.ImageMemCacheMB,
 		"secure_cookies", cfg.SecureCookies,
-		"cdn_redirects", cfg.EnableCDNRedirects,
 		"external_cache_only", cfg.ExternalCacheOnly,
+		"enable_cdn_redirects", cfg.EnableCDNRedirects,
+		"rate_limit_rpm", cfg.RateLimitRPM,
+		"rate_limit_cdn_rpm", cfg.RateLimitCDNRPM,
 		"free_key_enabled", cfg.FreeKeyEnabled,
 		"log_level", cfg.LogLevel,
 	)

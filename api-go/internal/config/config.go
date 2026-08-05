@@ -25,8 +25,10 @@ type Config struct {
 	ImageMemCacheMB     uint64
 	StaticDir           string
 	CORSOrigin          string
-	EnableCDNRedirects  bool
+	RateLimitRPM        uint64
+	RateLimitCDNRPM     uint64
 	ExternalCacheOnly   bool
+	EnableCDNRedirects  bool
 	FreeKeyEnabled      *bool
 	DisablePublicPages  bool
 	LogLevel            string
@@ -53,8 +55,10 @@ func FromEnv() (*Config, error) {
 		ImageMemCacheMB:     envUint64OrDefault("IMAGE_MEM_CACHE_MB", 512),
 		StaticDir:           sanitizeValue(os.Getenv("STATIC_DIR")),
 		CORSOrigin:          sanitizeValue(os.Getenv("CORS_ORIGIN")),
-		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
+		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
+		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
+		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
 		LogLevel:            sanitizeValue(envOrDefault("LOG_LEVEL", "info")),
 	}

@@ -34,8 +34,21 @@ func (r *Router) registerRoutes() {
 	r.registerAdminRoutes()
 	r.registerKindRoutes()
 	r.registerPreviewRoutes()
+	r.registerOpenAPIRoute()
 	r.registerImageRoutes()
 	r.setupStatic()
+}
+
+// registerOpenAPIRoute wires GET /api/openapi.json. The spec is public by
+// default so a CDN edge can cache it; when DISABLE_PUBLIC_PAGES=true the
+// route is gated behind admin auth.
+func (r *Router) registerOpenAPIRoute() {
+	openapiHandler := http.HandlerFunc(handlers.HandleOpenAPISpec)
+	if r.state.Config.DisablePublicPages {
+		r.mux.Handle("/api/openapi.json", handlers.RequireAuth(r.jwtSecret())(openapiHandler))
+		return
+	}
+	r.mux.Handle("/api/openapi.json", openapiHandler)
 }
 
 func (r *Router) registerAuthRoutes() {
@@ -161,11 +174,11 @@ func (r *Router) registerKeyRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/key/me", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/key/me", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		handlers.HandleSelfKeyInfo(s.DB)(w, req)
 	})))
 
-	r.mux.Handle("/api/key/me/settings", handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/key/me/settings", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleSelfSettings(s.DB, s.Fanart != nil)(w, req)
@@ -315,24 +328,33 @@ func (r *Router) registerPreviewRoutes() {
 			}
 		}
 		r.mux.Handle("/api/admin/preview/"+kind, r.requireAuth(serve))
-		r.mux.Handle("/api/key/me/preview/"+kind, handlers.RequireAPIKeyAuth(r.jwtSecret())(http.HandlerFunc(serve)))
+		r.mux.Handle("/api/key/me/preview/"+kind, handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(serve)))
 	}
 }
 
 func (r *Router) registerImageRoutes() {
 	s := r.state
 
+	// Per-IP rate limiters (0 disables). Constructed once per Router.
+	imageRateLimit := RateLimit(newRateLimiter(s.Config.RateLimitRPM))
+	cdnRateLimit := RateLimit(newRateLimiter(s.Config.RateLimitCDNRPM))
+
+	// Content-addressed CDN route: /c/{hash}/{rest...}. Resolves the hash to
+	// settings via the registry populated by HandleImage's redirect.
+	cdnHandler := handlers.HandleCDNImage(s.imageDeps(), s.hashes())
+	r.mux.Handle("/c/{hash}/{rest...}", cdnRateLimit(http.HandlerFunc(cdnHandler)))
+
 	// Image/isValid routes via catch-all
 	imageHandler := handlers.HandleImage(s.imageDeps(), s.isFreeAPIKeyEnabled)
 	isValidHandler := handlers.HandleIsValid(s.DB, s.isFreeAPIKeyEnabled)
-	r.mux.HandleFunc("/{apiKey}/{rest...}", func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/{apiKey}/{rest...}", imageRateLimit(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		rest := req.PathValue("rest")
 		if rest == "isValid" {
 			isValidHandler(w, req)
 			return
 		}
 		imageHandler(w, req)
-	})
+	})))
 }
 
 // setupStatic configures SPA serving from Config.StaticDir (if set).

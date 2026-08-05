@@ -44,9 +44,6 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.ImageQuality != 85 {
 		t.Errorf("expected 85, got %d", cfg.ImageQuality)
 	}
-	if cfg.EnableCDNRedirects {
-		t.Error("expected EnableCDNRedirects to be false by default")
-	}
 	if cfg.ExternalCacheOnly {
 		t.Error("expected ExternalCacheOnly to be false by default")
 	}
@@ -56,7 +53,6 @@ func TestFromEnvCustomValues(t *testing.T) {
 	setEnv(t, "TMDB_API_KEY", "tmdb_test")
 	setEnv(t, "CACHE_DIR", "/custom/cache")
 	setEnv(t, "LISTEN_ADDR", "127.0.0.1:8080")
-	setEnv(t, "ENABLE_CDN_REDIRECTS", "true")
 	setEnv(t, "EXTERNAL_CACHE_ONLY", "1")
 
 	cfg, err := FromEnv()
@@ -68,9 +64,6 @@ func TestFromEnvCustomValues(t *testing.T) {
 	}
 	if cfg.ListenAddr != "127.0.0.1:8080" {
 		t.Errorf("expected 127.0.0.1:8080, got %s", cfg.ListenAddr)
-	}
-	if !cfg.EnableCDNRedirects {
-		t.Error("expected EnableCDNRedirects to be true")
 	}
 	if !cfg.ExternalCacheOnly {
 		t.Error("expected ExternalCacheOnly to be true")

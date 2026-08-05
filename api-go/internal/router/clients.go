@@ -72,14 +72,22 @@ func (s *AppState) RefreshClientsFromKeys() {
 // fetch handlers.
 func (s *AppState) imageDeps() handlers.ImageDeps {
 	return handlers.ImageDeps{
-		DB:      s.DB,
-		Config:  s.imageServeConfig(),
-		TMDB:    s.TMDB,
-		OMDB:    s.OMDB,
-		MDBList: s.MDBList,
-		Trakt:   s.Trakt,
-		Fanart:  s.Fanart,
+		DB:        s.DB,
+		Config:    s.imageServeConfig(),
+		TMDB:      s.TMDB,
+		OMDB:      s.OMDB,
+		MDBList:   s.MDBList,
+		Trakt:     s.Trakt,
+		Fanart:    s.Fanart,
+		CDNHashes: s.CDNHashes,
 	}
+}
+
+// hashes returns the settings-hash registry used to map /c/{hash}/... URLs back
+// to the effective render settings. May be nil (the CDN redirect path is
+// skipped in that case).
+func (s *AppState) hashes() handlers.CDNLookup {
+	return s.CDNHashes
 }
 
 func (s *AppState) isFreeAPIKeyEnabled() bool {
@@ -94,10 +102,18 @@ func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {
 	return &handlers.ImageServeConfig{
 		CacheDir:            s.Config.CacheDir,
 		ExternalCacheOnly:   s.Config.ExternalCacheOnly,
+		EnableCDNRedirects:  s.Config.EnableCDNRedirects,
 		RatingsMinStaleSecs: s.Config.RatingsMinStaleSecs,
 		RatingsMaxAgeSecs:   s.Config.RatingsMaxAgeSecs,
 		ImageStaleSecs:      s.Config.ImageStaleSecs,
 		ImageQuality:        s.Config.ImageQuality,
 		Caches:              s.Caches,
+		Inflight:            s.Inflight,
 	}
+}
+
+// lastUsed returns the flusher that records api_keys.last_used_at on every
+// authenticated key request. May be nil in tests that don't wire one up.
+func (s *AppState) lastUsed() handlers.KeyRecorder {
+	return s.LastUsedFlusher
 }
