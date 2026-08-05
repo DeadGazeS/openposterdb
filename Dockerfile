@@ -1,16 +1,18 @@
+# syntax=docker/dockerfile:1
 FROM golang:1.25-bookworm AS api-builder
 WORKDIR /app
 ARG APP_VERSION
 
 COPY api-go/go.mod api-go/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY api-go/ ./
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o openposterdb ./cmd/server/
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o openposterdb ./cmd/server/
 
 FROM node:22-bookworm AS web-builder
 WORKDIR /app
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY web/ .
 ARG APP_VERSION
 RUN if [ -n "${APP_VERSION}" ]; then sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${APP_VERSION}\"/" package.json; fi
