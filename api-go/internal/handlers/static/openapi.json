@@ -1,0 +1,413 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "openposterdb API",
+    "description": "HTTP API for OpenPosterDB. The full per-route surface lives in api-go/internal/router/routes.go; this document covers the endpoints you most often need to know about from a client or external tool.",
+    "version": "1.x"
+  },
+  "servers": [{"url": "/"}],
+  "tags": [
+    {"name": "Auth"},
+    {"name": "API Keys"},
+    {"name": "Settings"},
+    {"name": "Cache"},
+    {"name": "Preview"},
+    {"name": "Icons"},
+    {"name": "Image"},
+    {"name": "Admin"}
+  ],
+  "components": {
+    "securitySchemes": {
+      "adminAuth": {"type": "apiKey", "in": "cookie", "name": "token"},
+      "keyAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {"error": {"type": "string"}}
+      },
+      "RenderSettings": {
+        "type": "object",
+        "description": "Full render-settings schema. See the response of GET /api/free-key/settings for the canonical shape."
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/status": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Authentication status",
+        "responses": {
+          "200": {
+            "description": "Status snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "admin": {"type": "boolean"},
+                    "api_key": {"type": "boolean"},
+                    "username": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Admin login (cookie + JWT)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password"],
+                "properties": {
+                  "username": {"type": "string"},
+                  "password": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Authenticated; cookie set"},
+          "401": {"description": "Invalid credentials"}
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh the admin session (rotates refresh token)",
+        "security": [{"adminAuth": []}],
+        "responses": {
+          "200": {"description": "Session refreshed"},
+          "401": {"description": "Refresh token missing or invalid"}
+        }
+      }
+    },
+    "/api/auth/key-login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Exchange a raw API key for a short-lived JWT (use as Authorization: Bearer)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["api_key"],
+                "properties": {"api_key": {"type": "string"}}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "JWT issued"},
+          "401": {"description": "Invalid or disabled key"}
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Admin logout",
+        "security": [{"adminAuth": []}],
+        "responses": {"200": {"description": "Logged out"}}
+      }
+    },
+    "/api/free-key/settings": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Global default render settings used by the free API key",
+        "responses": {
+          "200": {
+            "description": "Defaults",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RenderSettings"}}}
+          }
+        }
+      }
+    },
+    "/api/keys": {
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "List API keys (admin auth)",
+        "security": [{"adminAuth": []}],
+        "parameters": [
+          {"name": "page", "in": "query", "schema": {"type": "integer"}},
+          {"name": "page_size", "in": "query", "schema": {"type": "integer"}}
+        ],
+        "responses": {"200": {"description": "Page of keys"}}
+      },
+      "post": {
+        "tags": ["API Keys"],
+        "summary": "Create a new API key (the raw key is returned ONCE)",
+        "security": [{"adminAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string"}}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["key"],
+                  "properties": {"key": {"type": "string"}}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/{id}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}}
+      ],
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "Get one key (metadata; raw key is never returned)",
+        "security": [{"adminAuth": []}],
+        "responses": {"200": {"description": "Key"}}
+      },
+      "delete": {
+        "tags": ["API Keys"],
+        "summary": "Delete an API key",
+        "security": [{"adminAuth": []}],
+        "responses": {
+          "200": {"description": "Deleted"},
+          "404": {"description": "Not found"}
+        }
+      }
+    },
+    "/api/keys/{id}/settings": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}}
+      ],
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "Per-key override settings",
+        "security": [{"adminAuth": []}],
+        "responses": {"200": {"description": "Key settings (effective: global + key overrides)"}}
+      },
+      "put": {
+        "tags": ["API Keys"],
+        "summary": "Replace per-key settings (empty body to clear)",
+        "security": [{"adminAuth": []}],
+        "responses": {
+          "200": {"description": "Saved"},
+          "400": {
+            "description": "Bad payload",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+          }
+        }
+      },
+      "delete": {
+        "tags": ["API Keys"],
+        "summary": "Clear per-key overrides (revert to global settings)",
+        "security": [{"adminAuth": []}],
+        "responses": {"200": {"description": "Cleared"}}
+      }
+    },
+    "/api/key/me": {
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "Info for the current API key session",
+        "security": [{"keyAuth": []}],
+        "responses": {"200": {"description": "Key info"}}
+      }
+    },
+    "/api/key/me/settings": {
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "Effective settings for the current API key",
+        "security": [{"keyAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Effective settings",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RenderSettings"}}}
+          }
+        }
+      }
+    },
+    "/api/key/me/preview/{kind}": {
+      "parameters": [
+        {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["poster", "logo", "backdrop", "episode"]}},
+        {"name": "ratings_limit", "in": "query", "schema": {"type": "integer"}},
+        {"name": "ratings_order", "in": "query", "schema": {"type": "string"}},
+        {"name": "ratings_exclude", "in": "query", "schema": {"type": "string"}},
+        {"name": "lang", "in": "query", "schema": {"type": "string"}},
+        {"name": "text_size", "in": "query", "schema": {"type": "integer"}},
+        {"name": "badge_width", "in": "query", "schema": {"type": "integer"}},
+        {"name": "badge_height", "in": "query", "schema": {"type": "integer"}},
+        {"name": "logo_size", "in": "query", "schema": {"type": "integer"}},
+        {"name": "badge_shape", "in": "query", "schema": {"type": "string"}},
+        {"name": "badge_alpha", "in": "query", "schema": {"type": "integer"}},
+        {"name": "fit", "in": "query", "schema": {"type": "string"}},
+        {"name": "edge_inset_x", "in": "query", "schema": {"type": "integer"}},
+        {"name": "edge_inset_y", "in": "query", "schema": {"type": "integer"}},
+        {"name": "blur", "in": "query", "schema": {"type": "boolean"}},
+        {"name": "size", "in": "query", "schema": {"type": "string"}}
+      ],
+      "get": {
+        "tags": ["Preview"],
+        "summary": "Render a preview image for the current API key",
+        "security": [{"keyAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Image bytes",
+            "content": {"image/jpeg": {}, "image/png": {}}
+          }
+        }
+      }
+    },
+    "/api/admin/settings": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Global render settings (admin)",
+        "security": [{"adminAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RenderSettings"}}}
+          }
+        }
+      },
+      "put": {
+        "tags": ["Settings"],
+        "summary": "Replace global settings",
+        "security": [{"adminAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object"}}}
+        },
+        "responses": {
+          "200": {"description": "Saved"},
+          "400": {
+            "description": "Bad payload",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+          }
+        }
+      }
+    },
+    "/api/admin/cache/purge": {
+      "post": {
+        "tags": ["Cache"],
+        "summary": "Clear every rendered image + metadata row + in-memory entry",
+        "security": [{"adminAuth": []}],
+        "responses": {"200": {"description": "Purged"}}
+      }
+    },
+    "/api/admin/{kind}": {
+      "parameters": [
+        {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["posters", "logos", "backdrops", "episodes"]}},
+        {"name": "idType", "in": "query", "required": true, "schema": {"type": "string", "enum": ["imdb", "tmdb", "tvdb"]}},
+        {"name": "idValue", "in": "query", "required": true, "schema": {"type": "string"}},
+        {"name": "scope", "in": "query", "schema": {"type": "string", "enum": ["title", "variant"]}}
+      ],
+      "delete": {
+        "tags": ["Cache"],
+        "summary": "Purge one title from one cache kind (?scope=variant purges exactly the cache key named idValue)",
+        "security": [{"adminAuth": []}],
+        "responses": {
+          "200": {"description": "Purged"},
+          "404": {"description": "Nothing to purge"}
+        }
+      }
+    },
+    "/api/icons/{source}": {
+      "get": {
+        "tags": ["Icons"],
+        "summary": "Rating source icon (used in badge rendering)",
+        "parameters": [
+          {"name": "source", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "value", "in": "query", "schema": {"type": "string", "description": "Source-specific value (defaults to the bare icon)."}}
+        ],
+        "responses": {
+          "200": {"description": "Icon", "content": {"image/png": {}, "image/svg+xml": {}}}
+        }
+      }
+    },
+    "/{apiKey}/{rest}": {
+      "parameters": [
+        {
+          "name": "apiKey",
+          "in": "path",
+          "required": true,
+          "schema": {"type": "string", "description": "Raw API key, or the free key constant `t0-free-rpdb` when the free key is enabled."}
+        }
+      ],
+      "get": {
+        "tags": ["Image"],
+        "summary": "Render image (catch-all)",
+        "description": "{rest} is `{id_type}/{image_kind}/{id_value}.{ext}` where image_kind is poster-default, logo-default, backdrop-default, or episode-default. Accepts every render-options query parameter documented at `/api/key/me/preview/{kind}`. With ENABLE_CDN_REDIRECTS=true, the response is 302 to `/c/{settings_hash}/...` so a CDN edge can dedupe across users.",
+        "parameters": [
+          {"name": "lang", "in": "query", "schema": {"type": "string"}},
+          {"name": "ratings_limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "text_size", "in": "query", "schema": {"type": "integer"}},
+          {"name": "badge_width", "in": "query", "schema": {"type": "integer"}},
+          {"name": "badge_height", "in": "query", "schema": {"type": "integer"}},
+          {"name": "logo_size", "in": "query", "schema": {"type": "integer"}},
+          {"name": "badge_alpha", "in": "query", "schema": {"type": "integer"}},
+          {"name": "fit", "in": "query", "schema": {"type": "string"}},
+          {"name": "edge_inset_x", "in": "query", "schema": {"type": "integer"}},
+          {"name": "edge_inset_y", "in": "query", "schema": {"type": "integer"}},
+          {"name": "blur", "in": "query", "schema": {"type": "boolean"}},
+          {"name": "size", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "302": {"description": "CDN redirect (only when ENABLE_CDN_REDIRECTS=true)"},
+          "200": {"description": "Image bytes", "content": {"image/jpeg": {}, "image/png": {}}},
+          "401": {"description": "Invalid key"},
+          "403": {"description": "Free key disabled"}
+        }
+      }
+    },
+    "/c/{hash}/{rest}": {
+      "parameters": [
+        {"name": "hash", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "rest", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "get": {
+        "tags": ["Image"],
+        "summary": "CDN content-addressed image",
+        "description": "Hit by a CDN after the upstream 302 redirected. Public (no auth). The hash is registered for 5 minutes after the authenticated request so long-lived edge caching is intended.",
+        "responses": {
+          "200": {"description": "Image", "content": {"image/jpeg": {}, "image/png": {}}},
+          "404": {"description": "Unknown or expired hash"}
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "OpenAPI 3.0 specification for this API",
+        "description": "Public by default; gated behind admin auth when DISABLE_PUBLIC_PAGES=true.",
+        "responses": {
+          "200": {
+            "description": "This document",
+            "content": {"application/json": {"schema": {"type": "object"}}}
+          }
+        }
+      }
+    }
+  }
+}
