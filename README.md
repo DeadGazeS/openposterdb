@@ -16,9 +16,9 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 ## Highlights
 
 - **Everything self-hosted** — your keys, your data, no third-party dependency for image serving.
-- **Drop-in RPDB compatibility** — same API shape, so existing Plex/Jellyfin/aiometadata setups can switch over.
-- **Fully customisable overlays** — per-source badge colours, badge style, shape, size, and opacity.
-- **Works with the tools you already use** — Plex, Jellyfin, and aiometadata.
+- **Drop-in RPDB compatibility** — same API shape, so existing Plex/Jellyfin/AIOMetadata setups can switch over.
+- **Fully customisable overlays** — per-source badge colours, badge style, shape, and size.
+- **Works with the tools you already use** — Plex, Jellyfin, and AIOMetadata.
 
 ## Features
 
@@ -31,10 +31,9 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - **High-resolution label style** — a `High Res` label option renders each rating source's crisp, source-SVG logo (instead of the 48px official PNGs).
 - **Aspect-ratio fitting** — poster fit modes (`native`/`cover`/`pad`/`blur`) keep non-2:3 posters from being cropped.
 - **Episode blur** — optional blur for spoiler protection.
-- **Background opacity** — independent opacity slider for posters, logos, backdrops, and episodes.
 
 ### Ratings
-- Aggregates ratings from **MDBList, OMDb, Trakt, and TMDB** across IMDb, Rotten Tomatoes (critics and audience), Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.
+- Aggregates ratings from the MDBList, OMDb, Trakt, and TMDB APIs across all ten rating sources: IMDb, Rotten Tomatoes (critics and audience), Metacritic, TMDB, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.
 - Configurable **rating order and per-source exclusion** — reorder with the arrows, hide a source with the eye toggle. The number of ratings shown is driven by the layout grid.
 - Ratings are cached so repeated requests are fast and don't hammer the providers.
 
@@ -43,10 +42,11 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - **Multi-key pools** — comma-separated keys with automatic rotation and 429 back-off for MDBList, Fanart.tv, OMDb, and Trakt.
 - **Encrypted at rest** — service keys are encrypted in the SQLite database.
 - **Settings backup & restore** — export and import your full configuration, optionally including external service keys and API keys, from the admin panel.
+- **Free key mode** — optionally enable a shared free API key so the public image endpoints work without per-user keys.
 
 ### Operations
-- **Multi-layer caching** — filesystem and SQLite with staleness-aware refresh.
-- **Full admin UI** — a Vue 3 dashboard covering stats, API key management, per-key settings, and cache purging (all / per-kind / per-title).
+- **Multi-layer caching** — in-memory (TTL/weight-bounded), filesystem, and SQLite with staleness-aware refresh.
+- **Full admin UI** — a Vue 3 dashboard covering stats, global and per-key image settings, API key management, and cache purging (all / per-kind / per-title).
 - **Secure auth** — Argon2 password hashing, JWT access tokens, rotating refresh tokens, and API-key auth.
 
 ## Self-hosting
@@ -66,7 +66,7 @@ TMDB is required for artwork — it can be set in `.env` or later via the admin 
 
 Grab an API key from the admin UI and point your media server at it:
 
-- **[aiometadata](docs/media-servers.md#aiometadata)** — poster/backdrop/logo/episode URL templates
+- **[AIOMetadata](docs/media-servers.md#aiometadata)** — poster/backdrop/logo/episode URL templates
 - **[Jellyfin](docs/media-servers.md#jellyfin)** — dedicated remote image provider plugin
 - **[Plex](docs/media-servers.md#plex)** — Custom Metadata Provider (PMS 1.43+)
 
@@ -74,7 +74,7 @@ Any client that fetches images by URL works — see the [API Reference](docs/api
 
 ## Documentation
 
-- [Connecting a Media Server](docs/media-servers.md) — aiometadata, Jellyfin, Plex
+- [Connecting a Media Server](docs/media-servers.md) — AIOMetadata, Jellyfin, Plex
 - [Configuration](docs/configuration.md) — all environment variables
 - [API Reference](docs/api.md) — endpoints, parameters, image sizes
 - [Deployment](docs/deployment.md) — reverse proxy and CDN

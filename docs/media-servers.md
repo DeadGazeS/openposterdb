@@ -2,13 +2,13 @@
 
 OpenPosterDB serves rating-badged posters, backdrops, logos, and episode stills to any client that can fetch images by URL. Replace `{base_url}` with your instance URL (e.g. `http://localhost:3000` or `https://openposterdb.com`) and `{api_key}` with your API key throughout.
 
-- [aiometadata](#aiometadata)
+- [AIOMetadata](#aiometadata)
 - [Jellyfin](#jellyfin)
 - [Plex](#plex)
 
-## aiometadata
+## AIOMetadata
 
-To use OpenPosterDB with [aiometadata](https://github.com/cedya77/aiometadata), set the following URL templates in your aiometadata configuration. `{type}` is `movie` or `series` depending on the media type.
+To use OpenPosterDB with [AIOMetadata](https://github.com/cedya77/AIOMetadata), set the following URL templates in your AIOMetadata configuration. `{type}` is `movie` or `series` depending on the media type.
 
 | Image type | URL template |
 |---|---|
