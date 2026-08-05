@@ -47,6 +47,14 @@ const cards = [
   { key: 'image_mem_cache_mb', label: 'Image Cache (MB)' },
 ] as const
 
+type CardKey = (typeof cards)[number]['key']
+
+function formatStatValue(key: CardKey, value: number | undefined): string {
+  if (value == null) return '—'
+  if (key === 'image_mem_cache_mb') return value.toFixed(2)
+  return String(value)
+}
+
 const clearMessage = ref('')
 function onCleared(message: string) {
   clearMessage.value = message
@@ -68,7 +76,7 @@ function onCleared(message: string) {
       </CardHeader>
       <CardContent>
         <Skeleton v-if="isPending" class="h-8 w-20" />
-        <p v-else class="text-2xl font-bold">{{ stats?.[card.key] ?? '—' }}</p>
+        <p v-else class="text-2xl font-bold">{{ formatStatValue(card.key, stats?.[card.key]) }}</p>
       </CardContent>
     </Card>
     </div>
