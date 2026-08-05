@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	apperr "openposterdb/internal/errors"
 )
 
 type RetryConfig struct {
@@ -100,7 +102,7 @@ func SendWithRetry(config *RetryConfig, requestFn RequestFunc) (*http.Response, 
 		if err != nil {
 			slog.Warn(fmt.Sprintf("%s connection error, retrying", config.ServiceName),
 				"attempt", fmt.Sprintf("%d/%d", attempt+1, config.MaxRetries),
-				"error", err,
+				"error", apperr.RedactURLSecrets(err),
 			)
 			if attempt == config.MaxRetries {
 				return nil, fmt.Errorf("request failed after %d retries: %w", config.MaxRetries, err)

@@ -224,7 +224,13 @@ func httpGet(client *http.Client, url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "openposterdb/1.2.1")
-	return client.Do(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		// The url.Error carries the full URL, including the api_key query
+		// param — redact it so keys never reach logs.
+		return nil, errors.RedactURLSecrets(err)
+	}
+	return resp, nil
 }
 
 // Log helper for slow operations

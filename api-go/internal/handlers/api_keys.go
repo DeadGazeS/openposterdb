@@ -57,8 +57,12 @@ func HandleCreateKey(db *sql.DB) http.HandlerFunc {
 		var body struct {
 			Name string `json:"name"`
 		}
-		if err := httpx.DecodeJSON(r, &body); err != nil || body.Name == "" {
-			httpx.WriteError(w, 400, "name is required")
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.WriteError(w, 400, "invalid request body")
+			return
+		}
+		if err := services.ValidateAPIKeyName(body.Name); err != nil {
+			httpx.WriteError(w, 400, err.Error())
 			return
 		}
 

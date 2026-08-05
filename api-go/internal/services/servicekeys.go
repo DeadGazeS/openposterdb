@@ -15,6 +15,8 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/hkdf"
+
+	apperr "openposterdb/internal/errors"
 )
 
 func deriveCipherKey(jwtSecret []byte) []byte {
@@ -439,7 +441,7 @@ func checkProviderURL(httpClient *http.Client, url, service string) error {
 	req.Header.Set("User-Agent", "openposterdb/1.2.1")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		slog.Warn("service key validation request failed", "service", service, "error", err)
+		slog.Warn("service key validation request failed", "service", service, "error", apperr.RedactURLSecrets(err))
 		return nil
 	}
 	defer resp.Body.Close()
