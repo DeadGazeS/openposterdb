@@ -26,22 +26,25 @@ func marshalLayoutResponse(l services.ImageLayout) string {
 type ImageServeConfig struct {
 	CacheDir            string
 	ExternalCacheOnly   bool
+	EnableCDNRedirects  bool
 	RatingsMinStaleSecs uint64
 	RatingsMaxAgeSecs   uint64
 	ImageStaleSecs      uint64
 	ImageQuality        uint8
 	Caches              *services.MemCacheSet
+	Inflight            *image.InflightSet
 }
 
 // ImageDeps bundles the dependencies shared by the image-serving handlers.
 type ImageDeps struct {
-	DB      *sql.DB
-	Config  *ImageServeConfig
-	TMDB    *services.TmdbClient
-	OMDB    *services.OmdbClient
-	MDBList *services.MdblistClient
-	Trakt   *services.TraktClient
-	Fanart  *services.FanartClient
+	DB        *sql.DB
+	Config    *ImageServeConfig
+	TMDB      *services.TmdbClient
+	OMDB      *services.OmdbClient
+	MDBList   *services.MdblistClient
+	Trakt     *services.TraktClient
+	Fanart    *services.FanartClient
+	CDNHashes *services.HashRegistry
 }
 
 // ImageQuery represents all query parameters for image endpoints.
@@ -153,6 +156,24 @@ func HandleImage(deps ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFu
 		// Apply query parameter overrides
 		settings = applyQueryOverrides(settings, query, kind)
 
+		// CDN redirect: when enabled, register the effective settings under a
+		// hash and 302 to /c/{hash}/... so a CDN edge can deduplicate across
+		// users. Free-key requests skip the redirect (the free key is public
+		// and the hash registry is small; we don't want to leak free settings).
+		if deps.Config.EnableCDNRedirects && apiKey != freeAPIKey && deps.CDNHashes != nil {
+			if hash := deps.CDNHashes.Register(settings); hash != "" {
+				ext := ".jpg"
+				if kind == "logo" {
+					ext = ".png"
+				}
+				target := "/c/" + hash + "/" + idTypeStr + "/" + imageKind + "/" + idValue + ext
+				w.Header().Set("Location", target)
+				w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=3600")
+				w.WriteHeader(http.StatusFound)
+				return
+			}
+		}
+
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
 			DB: deps.DB, TMDB: deps.TMDB, OMDB: deps.OMDB, MDBList: deps.MDBList, Trakt: deps.Trakt, Fanart: deps.Fanart,
 			IDType: idTypeStr, IDValue: idValue, Kind: kind,
@@ -161,6 +182,7 @@ func HandleImage(deps ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFu
 			RatingsMinStaleSecs: deps.Config.RatingsMinStaleSecs, RatingsMaxAgeSecs: deps.Config.RatingsMaxAgeSecs,
 			ImageStaleSecs: deps.Config.ImageStaleSecs, Quality: deps.Config.ImageQuality,
 			ImageSizeStr: query.ImageSize, Caches: deps.Config.Caches,
+			Inflight: deps.Config.Inflight,
 		})
 		if err != nil {
 			if appErr, ok := err.(*errors.AppError); ok {

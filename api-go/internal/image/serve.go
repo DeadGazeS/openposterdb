@@ -375,6 +375,7 @@ type ServeParams struct {
 	Quality             uint8
 	ImageSizeStr        *string
 	Caches              *services.MemCacheSet
+	Inflight            *InflightSet
 }
 
 func ServeImage(p ServeParams) ([]byte, string, error) {
@@ -395,7 +396,6 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 
 	contentType := ImageContentType(p.Kind)
-	imageTypeChar := ImageDbValue(p.Kind)
 	imageSize := services.ImageSizeMedium
 	if p.ImageSizeStr != nil {
 		imageSize = services.ParseImageSize(*p.ImageSizeStr)
@@ -437,10 +437,80 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
 	}
 
-	// Fetch ratings. The number of ratings shown is the explicit ?ratings_limit
-	// override when provided (and valid), otherwise the layout's total badge
-	// capacity. The stored ratings_limit settings fields are legacy and are
-	// never read here.
+	// Fetch ratings, apply preferences, and build the cache key.
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Serve from the in-memory cache first (fast path; works even with
+	// external_cache_only, mirroring the Rust image_mem_cache). When the entry
+	// is due for re-validation (60s window) and the release-date staleness says
+	// the cached render is out of date, serve the bytes anyway and refresh in
+	// the background — mirroring the Rust check_caches behavior so ratings
+	// changes propagate through a hot in-memory entry within ~a minute.
+	if p.Caches.ImageMem != nil {
+		if v, ok, due := p.Caches.ImageMem.GetDue(cacheKey); ok {
+			if due && !p.ExternalCacheOnly {
+				revalStaleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
+				if entry, err := services.ReadCache(cachePath, revalStaleSecs); err == nil && entry.IsStale {
+					slog.Debug("image mem cache entry stale, background refresh", "kind", p.Kind, "cache_key", cacheKey)
+					go p.refreshStale(resolved, imageSize)
+				}
+				p.Caches.ImageMem.Touch(cacheKey)
+			}
+			slog.Debug("image mem cache hit", "kind", p.Kind, "cache_key", cacheKey)
+			return v.([]byte), contentType, nil
+		}
+	}
+
+	// Serve from filesystem cache if present and fresh. A stale entry is
+	// served immediately and regenerated in the background so the request is
+	// not blocked (mirrors the Rust background refresh; the inflight set
+	// guarantees at most one regeneration per cache key).
+	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
+	if !p.ExternalCacheOnly {
+		if entry, err := services.ReadCache(cachePath, staleSecs); err == nil {
+			if !entry.IsStale {
+				slog.Debug("image cache hit", "kind", p.Kind, "cache_key", cacheKey)
+				if p.Caches.ImageMem != nil {
+					p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
+				}
+				return entry.Bytes, contentType, nil
+			}
+			slog.Debug("image cache stale, serving + background refresh", "kind", p.Kind, "cache_key", cacheKey)
+			if p.Caches.ImageMem != nil {
+				p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
+			}
+			go p.refreshStale(resolved, imageSize)
+			return entry.Bytes, contentType, nil
+		}
+	}
+
+	// Render (fetch artwork + generate + persist), coalesced so concurrent
+	// requests for the same cache key share a single render.
+	render := func() ([]byte, error) {
+		return p.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+	}
+	var rendered []byte
+	if p.Inflight != nil {
+		rendered, err = p.Inflight.RunCoalesced(cacheKey, render)
+	} else {
+		rendered, err = render()
+	}
+	if err != nil {
+		return nil, "", err
+	}
+
+	slog.Debug("image generated", "kind", p.Kind, "cache_key", cacheKey, "badges", len(badges))
+	return rendered, contentType, nil
+}
+
+// prepareRender fetches ratings (when the kind's limit allows), applies
+// preferences, and computes the cache key/path for the request's ID form.
+// It is the first half of the render pipeline, shared by ServeImage and the
+// background-refresh path.
+func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, err error) {
 	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 
 	var rawBadges []services.RatingBadge
@@ -481,64 +551,59 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "ratings_limit=0")
 	}
 
-	badges := services.ApplyRatingPreferences(rawBadges, p.Settings.RatingsOrder, p.Settings.RatingsExclude, limit)
+	badges = services.ApplyRatingPreferences(rawBadges, p.Settings.RatingsOrder, p.Settings.RatingsExclude, limit)
 
-	// Build the cache value (id value + variant + settings/ratings suffix).
+	suffix := p.renderSuffix(badges)
+	cacheKey, cachePath, err = p.cacheKeyFor(p.IDType, p.IDValue, suffix)
+	releaseDate = resolved.ReleaseDate
+	imageTypeChar = ImageDbValue(p.Kind)
+	return badges, cacheKey, cachePath, releaseDate, imageTypeChar, err
+}
+
+// renderSuffix builds the settings+ratings cache suffix for the given badges.
+// It is ID-independent, so it can be reused for alternate-ID cache keys.
+func (p ServeParams) renderSuffix(badges []services.RatingBadge) string {
 	ratingsSuffix := services.BadgesCacheSuffix(badges)
-	suffix := services.SettingsCacheSuffixWithRatings(p.Settings, p.Kind, p.ImageSizeStr, ratingsSuffix)
+	return services.SettingsCacheSuffixWithRatings(p.Settings, p.Kind, p.ImageSizeStr, ratingsSuffix)
+}
 
+// cacheKeyFor computes the cache key and path for a specific ID form using
+// the request's variant and suffix (both ID-independent).
+func (p ServeParams) cacheKeyFor(idType, idValue, suffix string) (cacheKey, cachePath string, err error) {
 	fanartPrimary := p.Settings.ImageSource.IsFanart() && p.Fanart != nil
 	variant := cacheVariant(p.Kind, p.Settings, fanartPrimary)
+	cacheValue := idValue + variant + suffix
+	cacheKey = idType + "/" + cacheValue
+	cachePath, err = services.TypedCachePath(p.CacheDir, services.ImageSubdir(p.Kind), idType, cacheValue, services.ImageExt(p.Kind))
+	return cacheKey, cachePath, err
+}
 
-	cacheValue := p.IDValue + variant + suffix
-	cacheKey := p.IDType + "/" + cacheValue
-	cachePath, err := services.TypedCachePath(p.CacheDir, services.ImageSubdir(p.Kind), p.IDType, cacheValue, services.ImageExt(p.Kind))
-	if err != nil {
-		return nil, "", err
-	}
-
-	// Serve from the in-memory cache first (fast path; works even with
-	// external_cache_only, mirroring the Rust image_mem_cache).
-	if p.Caches.ImageMem != nil {
-		if v, ok := p.Caches.ImageMem.Get(cacheKey); ok {
-			slog.Debug("image mem cache hit", "kind", p.Kind, "cache_key", cacheKey)
-			return v.([]byte), contentType, nil
-		}
-	}
-
-	// Serve from filesystem cache if present and fresh.
-	releaseDate := resolved.ReleaseDate
-	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
-	if !p.ExternalCacheOnly {
-		if entry, err := services.ReadCache(cachePath, staleSecs); err == nil && !entry.IsStale {
-			slog.Debug("image cache hit", "kind", p.Kind, "cache_key", cacheKey)
-			if p.Caches.ImageMem != nil {
-				p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
-			}
-			return entry.Bytes, contentType, nil
-		}
-	}
-
+// renderArtwork fetches the base artwork, renders badges onto it, and persists
+// the result (in-memory + filesystem + metadata, plus cross-ID copies). It is
+// the coalescable unit: concurrent requests for the same cache key share one
+// run via the inflight set.
+func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, imageSize services.ImageSize) ([]byte, error) {
 	// Fetch the base artwork (TMDB primary, fanart optional).
 	var imageBytes []byte
-	if fanartPrimary {
+	if p.Settings.ImageSource.IsFanart() && p.Fanart != nil {
 		imageBytes = fetchFanartArtwork(p.Fanart, p.TMDB, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
 	}
 	if imageBytes == nil {
+		var err error
 		imageBytes, err = fetchTmdbArtwork(p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, p.Settings, imageSize)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 	}
 	if imageBytes == nil {
 		slog.Warn("no artwork available", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
-		return nil, "", apperr.NewIDNotFound("no " + p.Kind + " artwork available for this title")
+		return nil, apperr.NewIDNotFound("no " + p.Kind + " artwork available for this title")
 	}
 
 	// Render badges onto the artwork.
 	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
 	if err != nil {
-		return nil, "", apperr.NewImageError(err)
+		return nil, apperr.NewImageError(err)
 	}
 
 	// Persist: in-memory + filesystem + metadata DB.
@@ -554,13 +619,35 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
 	}
 
-	slog.Debug("image generated", "kind", p.Kind, "cache_key", cacheKey, "badges", len(badges))
-	return rendered, contentType, nil
+	// Cross-ID cache writes (fire-and-forget, logged on failure).
+	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
+
+	return rendered, nil
 }
 
-// cacheVariant builds the language/source variant token that distinguishes the
-// artwork source (and language) within a cache key. Empty for the poster
-// default case so existing default cache keys stay stable.
+// refreshStale regenerates a stale cache entry in the background with fresh
+// ratings. Guarded by the inflight set so concurrent stale requests for the
+// same key trigger only one regeneration. Best-effort: failures are logged.
+func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize) {
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
+	if err != nil {
+		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
+		return
+	}
+	render := func() ([]byte, error) {
+		return p.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+	}
+	var renderErr error
+	if p.Inflight != nil {
+		_, renderErr = p.Inflight.RunCoalesced(cacheKey, render)
+	} else {
+		_, renderErr = render()
+	}
+	if renderErr != nil {
+		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", renderErr)
+	}
+}
+
 func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary bool) string {
 	switch kind {
 	case "poster":

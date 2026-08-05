@@ -8,26 +8,28 @@ import (
 )
 
 type memEntry struct {
-	key      string
-	value    any
-	weight   int64
-	inserted time.Time
-	lastUsed time.Time
-	elem     *list.Element
+	key         string
+	value       any
+	weight      int64
+	inserted    time.Time
+	lastUsed    time.Time
+	lastChecked time.Time
+	elem        *list.Element
 }
 
 // MemCache is a thread-safe in-memory cache with weight-based capacity, TTL and
 // idle-TTL eviction — the Go counterpart of the Rust implementation's moka
 // caches. A zero maxBytes/maxEntries means "unlimited" for that dimension.
 type MemCache struct {
-	mu         sync.Mutex
-	maxBytes   int64
-	maxEntries int
-	ttl        time.Duration
-	idleTTL    time.Duration
-	entries    map[string]*memEntry
-	lru        *list.List // front = most recently used
-	totalBytes int64
+	mu              sync.Mutex
+	maxBytes        int64
+	maxEntries      int
+	ttl             time.Duration
+	idleTTL         time.Duration
+	revalidateAfter time.Duration
+	entries         map[string]*memEntry
+	lru             *list.List // front = most recently used
+	totalBytes      int64
 }
 
 // NewMemCache creates a cache. ttl is the entry lifetime from insertion;
@@ -44,23 +46,58 @@ func NewMemCache(maxBytes int64, maxEntries int, ttl, idleTTL time.Duration) *Me
 	}
 }
 
+// SetRevalidateAfter configures how often GetDue reports an entry as needing
+// its staleness re-checked (mirrors the Rust image_mem_cache's 60s
+// last_checked window). 0 disables revalidation.
+func (c *MemCache) SetRevalidateAfter(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.revalidateAfter = d
+}
+
 // Get returns the cached value, refreshing its idle timer. Expired entries are
 // removed on access.
 func (c *MemCache) Get(key string) (any, bool) {
+	v, ok, _ := c.get(key)
+	return v, ok
+}
+
+// GetDue behaves like Get but additionally reports whether the entry's
+// staleness should be re-checked: true when revalidateAfter is configured and
+// the entry was last checked longer ago than the window. Callers that re-check
+// must call Touch to reset the clock. It is used by the image mem cache so
+// release-date staleness is honoured even on hot in-memory hits (mirrors the
+// Rust check_caches revalidation).
+func (c *MemCache) GetDue(key string) (any, bool, bool) {
+	return c.get(key)
+}
+
+func (c *MemCache) get(key string) (any, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
 	now := time.Now()
 	if (c.ttl > 0 && now.Sub(e.inserted) > c.ttl) || (c.idleTTL > 0 && now.Sub(e.lastUsed) > c.idleTTL) {
 		c.remove(e)
-		return nil, false
+		return nil, false, false
 	}
 	e.lastUsed = now
 	c.lru.MoveToFront(e.elem)
-	return e.value, true
+	due := c.revalidateAfter > 0 && now.Sub(e.lastChecked) >= c.revalidateAfter
+	return e.value, true, due
+}
+
+// Touch resets an entry's lastChecked clock (after the caller re-validated
+// its staleness). No-op when the key is absent.
+func (c *MemCache) Touch(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.entries[key]; ok {
+		e.lastChecked = time.Now()
+	}
 }
 
 // Set inserts or replaces an entry with the given weight (typically bytes for
@@ -76,9 +113,10 @@ func (c *MemCache) Set(key string, value any, weight int64) {
 		e.weight = weight
 		e.inserted = now
 		e.lastUsed = now
+		e.lastChecked = now
 		c.lru.MoveToFront(e.elem)
 	} else {
-		e := &memEntry{key: key, value: value, weight: weight, inserted: now, lastUsed: now}
+		e := &memEntry{key: key, value: value, weight: weight, inserted: now, lastUsed: now, lastChecked: now}
 		e.elem = c.lru.PushFront(e)
 		c.entries[key] = e
 		c.totalBytes += weight
