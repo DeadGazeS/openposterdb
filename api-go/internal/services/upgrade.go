@@ -106,10 +106,10 @@ func upgradeV002(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 		newVal := ".ptr." + style + "l" + "."
 		oldLen := len(old)
 		result, err := db.Exec(
-			"UPDATE image_meta SET cache_key = "+
-				"substr(cache_key, 1, instr(cache_key, '"+old+"') - 1) || '"+newVal+"' || "+
-				"substr(cache_key, instr(cache_key, '"+old+"') + "+stringInt(oldLen)+") "+
-				"WHERE image_type = 'b' AND instr(cache_key, '"+old+"') > 0 AND instr(cache_key, '.ptr.') = 0",
+			"UPDATE image_meta SET cache_key = " +
+				"substr(cache_key, 1, instr(cache_key, '" + old + "') - 1) || '" + newVal + "' || " +
+				"substr(cache_key, instr(cache_key, '" + old + "') + " + stringInt(oldLen) + ") " +
+				"WHERE image_type = 'b' AND instr(cache_key, '" + old + "') > 0 AND instr(cache_key, '.ptr.') = 0",
 		)
 		if err != nil {
 			return err
@@ -124,10 +124,10 @@ func upgradeV002(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 		newVal := label + "dv." + "b" + "."
 		oldLen := len(old)
 		result, err := db.Exec(
-			"UPDATE image_meta SET cache_key = "+
-				"substr(cache_key, 1, instr(cache_key, '"+old+"') - 1) || '"+newVal+"' || "+
-				"substr(cache_key, instr(cache_key, '"+old+"') + "+stringInt(oldLen)+") "+
-				"WHERE image_type = 'b' AND instr(cache_key, '"+old+"') > 0 AND instr(cache_key, '.dv.') = 0",
+			"UPDATE image_meta SET cache_key = " +
+				"substr(cache_key, 1, instr(cache_key, '" + old + "') - 1) || '" + newVal + "' || " +
+				"substr(cache_key, instr(cache_key, '" + old + "') + " + stringInt(oldLen) + ") " +
+				"WHERE image_type = 'b' AND instr(cache_key, '" + old + "') > 0 AND instr(cache_key, '.dv.') = 0",
 		)
 		if err != nil {
 			return err
@@ -235,10 +235,10 @@ func upgradeV003(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 		newToken := token + defaultSuffix
 		oldLen := len(token)
 		result, err := db.Exec(
-			"UPDATE image_meta SET cache_key = "+
-				"substr(cache_key, 1, instr(cache_key, '"+token+"') - 1) || '"+newToken+"' || "+
-				"substr(cache_key, instr(cache_key, '"+token+"') + "+stringInt(oldLen)+") "+
-				"WHERE instr(cache_key, '"+token+"') > 0 AND instr(cache_key, '.bg') = 0",
+			"UPDATE image_meta SET cache_key = " +
+				"substr(cache_key, 1, instr(cache_key, '" + token + "') - 1) || '" + newToken + "' || " +
+				"substr(cache_key, instr(cache_key, '" + token + "') + " + stringInt(oldLen) + ") " +
+				"WHERE instr(cache_key, '" + token + "') > 0 AND instr(cache_key, '.bg') = 0",
 		)
 		if err != nil {
 			return err

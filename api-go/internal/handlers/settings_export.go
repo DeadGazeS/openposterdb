@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 
+	"openposterdb/internal/httpx"
 	"openposterdb/internal/services"
 )
 
@@ -12,7 +13,7 @@ import (
 func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 		q := r.URL.Query()
@@ -21,13 +22,13 @@ func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 
 		payload, err := services.BuildExportPayload(db, keys, includeServiceKeys, includeAPIKeys)
 		if err != nil {
-			writeError(w, 500, "Failed to export settings")
+			httpx.WriteError(w, 500, "Failed to export settings")
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", `attachment; filename="openposterdb-settings.json"`)
-		writeJSON(w, 200, payload)
+		httpx.WriteJSON(w, 200, payload)
 	}
 }
 
@@ -37,26 +38,26 @@ func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		var payload services.ExportPayload
-		if err := decodeJSONBody(r, &payload); err != nil {
-			writeError(w, 400, "invalid JSON")
+		if err := httpx.DecodeJSON(r, &payload); err != nil {
+			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
 		if payload.Kind != "openposterdb/settings" {
-			writeError(w, 400, "not a settings export file")
+			httpx.WriteError(w, 400, "not a settings export file")
 			return
 		}
 
 		result, err := services.ApplyImportPayload(db, keys, &payload)
 		if err != nil {
-			writeError(w, 500, "Failed to import settings")
+			httpx.WriteError(w, 500, "Failed to import settings")
 			return
 		}
 
-		writeJSON(w, 200, result)
+		httpx.WriteJSON(w, 200, result)
 	}
 }

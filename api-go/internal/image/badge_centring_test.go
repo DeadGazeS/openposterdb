@@ -21,10 +21,9 @@ func horizontalValueSection(badge *services.RatingBadge, style services.BadgeSty
 		// equal outer margin + tiny inward gap), mirroring renderBadgeInner.
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
 			baseIconW, baseIconH2 := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
-			iconPad := (int(dims.badgeHeight) - int(baseIconH2)) / 2 // pillPad = 0 for rounded
-			if iconPad < 0 {
-				iconPad = 0
-			}
+			iconPad := max(
+				// pillPad = 0 for rounded
+				(int(dims.badgeHeight)-int(baseIconH2))/2, 0)
 			labelSectionW = int(baseIconW) + iconPad + badgeInwardGap
 		}
 	} else {
@@ -232,7 +231,7 @@ func TestOversizedValueClippedToValueSection(t *testing.T) {
 	}
 
 	for y := 0; y < full.Bounds().Dy(); y++ {
-		for x := 0; x < labelSectionW; x++ {
+		for x := range labelSectionW {
 			a := full.RGBAAt(x, y)
 			b := control.RGBAAt(x, y)
 			if a != b {
@@ -273,8 +272,8 @@ func TestValueTextCentredWithIconLabel(t *testing.T) {
 	// A synthetic 48x48 square icon matches every real source icon (white
 	// icons are 48x48, official/highRes are fit in a 48x48 box).
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -407,8 +406,8 @@ func TestContentNeverTouchesBadgeBorder(t *testing.T) {
 
 	// A synthetic 48x48 square icon matches every real source icon.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -542,8 +541,8 @@ func TestLogoDecoupledFromBadgeScale(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -681,8 +680,8 @@ func TestLogoUniformOuterMarginsAndInwardMinimal(t *testing.T) {
 
 	// A synthetic 48x48 square icon matches every real default source icon.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -821,8 +820,8 @@ func TestLogoAnchorMarginConstantAcrossBadgeSize(t *testing.T) {
 
 	// A synthetic square icon makes the margins predictable.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -921,8 +920,8 @@ func TestSliderOrthogonality(t *testing.T) {
 	defer valueFace2.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -1112,8 +1111,8 @@ func TestOversizedLogoClippingPreservesAnchor(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}

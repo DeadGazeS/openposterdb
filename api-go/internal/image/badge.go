@@ -59,10 +59,7 @@ func sectionColors(alpha services.BadgeAlpha, source *services.RatingSource, ove
 
 func shadowOffset(hasBG bool, badgeDim uint32) int {
 	if !hasBG {
-		offset := int(float64(badgeDim) / 29.0)
-		if offset < 1 {
-			offset = 1
-		}
+		offset := max(int(float64(badgeDim)/29.0), 1)
 		return offset
 	}
 	return 0
@@ -242,7 +239,7 @@ func textInkBBox(f font.Face, text string) (x0, y0, x1, y1 int, ok bool) {
 	drawText(img, color.RGBA{255, 255, 255, 255}, 0, baseline, f, text)
 	x0, y0 = adv+4, height
 	x1, y1 = 0, 0
-	for y := 0; y < height; y++ {
+	for y := range height {
 		for x := 0; x < adv+4; x++ {
 			if img.RGBAAt(x, y).A > 0 {
 				if x < x0 {
@@ -337,8 +334,8 @@ func ringMask(w, h, x0, y0, x1, y1 int, radius float32, inset int, corners uint8
 	outer := roundedRectMask(w, h, x0, y0, x1, y1, radius, corners)
 	inner := roundedRectMask(w, h, x0+inset, y0+inset, x1-inset, y1-inset, radius-float32(inset), corners)
 	mask := image.NewAlpha(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			oa := uint16(outer.AlphaAt(x, y).A)
 			ia := uint16(inner.AlphaAt(x, y).A)
 			mask.SetAlpha(x, y, color.Alpha{A: uint8(oa * (255 - ia) / 255)})
@@ -538,10 +535,7 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 			if appearance.Shape == services.BadgeShapePill {
 				refBadgeH += int(dims.pillPaddingV)
 			}
-			iconPad = (refBadgeH - int(baseIconH2)) / 2
-			if iconPad < 0 {
-				iconPad = 0
-			}
+			iconPad = max((refBadgeH-int(baseIconH2))/2, 0)
 			labelSectionW = int(baseIconW) + iconPad + badgeInwardGap
 		}
 	}
@@ -640,10 +634,7 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 		} else {
 			ix = labelSectionX + iconPad
 		}
-		iy := (badgeH - int(iconH2)) / 2
-		if iy < 0 {
-			iy = 0
-		}
+		iy := max((badgeH-int(iconH2))/2, 0)
 		overlayIconShadowedInRect(img, scaledIcon, ix, iy, shadowPx, labelClip)
 	} else {
 		actualLabelW := textWidth(label, labelFontFace)
@@ -806,18 +797,12 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 				refSectionH += int(dims.pillPaddingV)
 			}
 			_, baseIconH := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
-			anchorV = (refSectionH - int(baseIconH)) / 2
-			if anchorV < 0 {
-				anchorV = 0
-			}
+			anchorV = max((refSectionH-int(baseIconH))/2, 0)
 			// The logo width at 100% logo_size fills the fixed badge width minus
 			// the equal outer margins, then scales linearly with logo_size only
 			// (independent of badge_width).
 			baseVertBadgeW := int(math.Round(float64(baseVertBadgeWidth) * float64(badgeScale)))
-			vLogoWAt100 := baseVertBadgeW - 2*anchorV
-			if vLogoWAt100 < 1 {
-				vLogoWAt100 = 1
-			}
+			vLogoWAt100 := max(baseVertBadgeW-2*anchorV, 1)
 			vLogoW = int(math.Round(float64(vLogoWAt100) * float64(logoScale)))
 			var vLogoHAt100 int
 			if icon.Bounds().Dx() > 0 && icon.Bounds().Dy() > 0 {
@@ -833,10 +818,7 @@ func RenderVerticalBadge(badge *services.RatingBadge, fontFace, labelFontFace fo
 			// The label section is fixed at its 100% content-fit height: anchor
 			// margin + 100% logo height + inward gap, minus the corner padding.
 			// Badge height growth goes to the number section only.
-			labelAreaH = anchorV + vLogoHAt100 + badgeInwardGap - int(vertPadV)
-			if labelAreaH < 1 {
-				labelAreaH = 1
-			}
+			labelAreaH = max(anchorV+vLogoHAt100+badgeInwardGap-int(vertPadV), 1)
 		}
 	}
 	valueH := sectionH

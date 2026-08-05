@@ -22,9 +22,9 @@ func NewOmdbClient(keys []string, httpClient *http.Client) *OmdbClient {
 }
 
 type OmdbResponse struct {
-	Ratings   []OmdbRating `json:"Ratings"`
-	IMDBRating *string     `json:"imdbRating"`
-	Metascore  *string     `json:"Metascore"`
+	Ratings    []OmdbRating `json:"Ratings"`
+	IMDBRating *string      `json:"imdbRating"`
+	Metascore  *string      `json:"Metascore"`
 }
 
 type OmdbRating struct {

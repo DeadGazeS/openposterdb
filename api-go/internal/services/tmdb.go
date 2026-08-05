@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"openposterdb/internal/errors"
@@ -24,13 +25,14 @@ func NewTmdbClient(apiKey string, httpClient *http.Client) *TmdbClient {
 	}
 }
 
-func (c *TmdbClient) Get(path string, params map[string]string, target interface{}) error {
-	url := fmt.Sprintf("https://api.themoviedb.org/3%s?api_key=%s", path, c.APIKey)
+func (c *TmdbClient) Get(path string, params map[string]string, target any) error {
+	var url strings.Builder
+	url.WriteString(fmt.Sprintf("https://api.themoviedb.org/3%s?api_key=%s", path, c.APIKey))
 	for k, v := range params {
-		url += fmt.Sprintf("&%s=%s", k, v)
+		url.WriteString(fmt.Sprintf("&%s=%s", k, v))
 	}
 
-	resp, err := httpGet(c.HTTP, url)
+	resp, err := httpGet(c.HTTP, url.String())
 	if err != nil {
 		return errors.NewAPIError(err)
 	}

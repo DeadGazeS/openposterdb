@@ -36,9 +36,9 @@ type FanartImages struct {
 }
 
 type movieImages struct {
-	MoviePoster      []FanartPoster `json:"movieposter"`
-	HDMovieLogo      []FanartPoster `json:"hdmovielogo"`
-	MovieBackground  []FanartPoster `json:"moviebackground"`
+	MoviePoster     []FanartPoster `json:"movieposter"`
+	HDMovieLogo     []FanartPoster `json:"hdmovielogo"`
+	MovieBackground []FanartPoster `json:"moviebackground"`
 }
 
 type tvImages struct {

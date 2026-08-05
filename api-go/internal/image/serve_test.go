@@ -1,10 +1,10 @@
 package image
 
 import (
-	"os"
 	"bytes"
 	"image"
 	"image/color"
+	"os"
 	"sync"
 	"testing"
 
@@ -80,10 +80,8 @@ func TestConcurrentRendering(t *testing.T) {
 	values := []string{"10.0", "100%", "8.1", "85%", "5.0", "10.00", "4.0", "94%", "IMDb", "LB", "RT"}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			face := GetFontFace()
 			if face == nil {
 				t.Error("GetFontFace returned nil")
@@ -95,7 +93,7 @@ func TestConcurrentRendering(t *testing.T) {
 				d := &font.Drawer{Dst: img, Src: image.NewUniform(color.White), Face: face, Dot: fixed.P(0, 40)}
 				d.DrawString(s)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -115,9 +113,12 @@ func TestSampleRenderHasBadges(t *testing.T) {
 	appearance := services.DefaultBadgeAppearance()
 	valueFace := GetValueFontFace()
 	labelFace := GetFontFace()
-	out, err := RenderPosterSync(SamplePosterPNG, badges, valueFace, labelFace, 85,
-		layout, badgeStyle, labelStyle, appearance,
-		580, 1.2, 1.2, 1.0, 1.0, services.PosterFitNative, nil)
+	out, err := RenderPosterSync(SamplePosterPNG, RenderParams{
+		Badges: badges, ValueFontFace: valueFace, LabelFontFace: labelFace,
+		Quality: 85, Layout: layout, BadgeStyle: badgeStyle, LabelStyle: labelStyle,
+		Appearance: appearance, TargetWidth: 580, BadgeScale: 1.2, BadgeMultiplier: 1.2,
+		TextScale: 1.0, LogoScale: 1.0, PosterFit: services.PosterFitNative,
+	})
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}

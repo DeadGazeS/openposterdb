@@ -53,10 +53,7 @@ func decrypt(encrypted string, gcm cipher.AEAD) (string, error) {
 }
 
 func MaskKey(key string) string {
-	n := len(key) / 4
-	if n > 4 {
-		n = 4
-	}
+	n := min(len(key)/4, 4)
 	if n == 0 {
 		return "****"
 	}
@@ -202,7 +199,7 @@ func (m *ServiceKeyManager) loadFromDB(service string) *[]string {
 		return nil
 	}
 	var keys []string
-	for _, k := range strings.Split(plain, ",") {
+	for k := range strings.SplitSeq(plain, ",") {
 		k = strings.TrimSpace(k)
 		if k != "" {
 			keys = append(keys, k)
@@ -363,7 +360,7 @@ func (m *ServiceKeyManager) storeKey(service, value string) error {
 
 func parseKeys(keys string) []string {
 	var result []string
-	for _, k := range strings.Split(keys, ",") {
+	for k := range strings.SplitSeq(keys, ",") {
 		k = strings.TrimSpace(k)
 		if k != "" {
 			result = append(result, k)

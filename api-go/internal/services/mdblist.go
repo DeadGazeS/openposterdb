@@ -28,9 +28,9 @@ func (c *MdblistClient) ActiveKeyHash() string {
 }
 
 type MdblistResponse struct {
-	Ratings  []MdblistRating `json:"ratings"`
-	IDs      MdblistIDs      `json:"ids"`
-	Score    *float64        `json:"score"`
+	Ratings []MdblistRating `json:"ratings"`
+	IDs     MdblistIDs      `json:"ids"`
+	Score   *float64        `json:"score"`
 }
 
 type MdblistIDs struct {

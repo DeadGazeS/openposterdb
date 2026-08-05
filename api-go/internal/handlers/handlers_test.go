@@ -27,15 +27,15 @@ func TestHashRefreshTokenDifferent(t *testing.T) {
 }
 
 func TestHashAPIKeyDeterministic(t *testing.T) {
-	a := HashAPIKey("testkey123")
-	b := HashAPIKey("testkey123")
+	a := services.HashAPIKey("testkey123")
+	b := services.HashAPIKey("testkey123")
 	if a != b {
 		t.Error("same input should produce same hash")
 	}
 }
 
 func TestGenerateAPIKey(t *testing.T) {
-	raw, hash, prefix := GenerateAPIKey()
+	raw, hash, prefix := services.GenerateAPIKey()
 	if len(raw) != 64 {
 		t.Errorf("raw key should be 64 chars, got %d", len(raw))
 	}
@@ -45,7 +45,7 @@ func TestGenerateAPIKey(t *testing.T) {
 	if hash == "" {
 		t.Error("hash should not be empty")
 	}
-	if HashAPIKey(raw) != hash {
+	if services.HashAPIKey(raw) != hash {
 		t.Error("hash should match")
 	}
 	if raw[:8] != prefix {
@@ -254,7 +254,7 @@ func TestGlobalSettingsBadgeWidthHeightRoundTrip(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("GET failed: %d %s", rec.Code, rec.Body.String())
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}

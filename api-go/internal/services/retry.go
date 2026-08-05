@@ -70,10 +70,7 @@ var TraktRetry = RetryConfig{
 func retryAfterDelay(resp *http.Response, config *RetryConfig, attempt uint32) time.Duration {
 	if val := resp.Header.Get("Retry-After"); val != "" {
 		if secs, err := strconv.ParseUint(val, 10, 64); err == nil {
-			capped := time.Duration(secs) * time.Second
-			if capped > config.MaxDelay {
-				capped = config.MaxDelay
-			}
+			capped := min(time.Duration(secs)*time.Second, config.MaxDelay)
 			return addJitter(capped)
 		}
 	}
@@ -81,10 +78,7 @@ func retryAfterDelay(resp *http.Response, config *RetryConfig, attempt uint32) t
 }
 
 func backoffDelay(config *RetryConfig, attempt uint32) time.Duration {
-	delay := config.BaseDelay * (1 << attempt)
-	if delay > config.MaxDelay {
-		delay = config.MaxDelay
-	}
+	delay := min(config.BaseDelay*(1<<attempt), config.MaxDelay)
 	return addJitter(delay)
 }
 

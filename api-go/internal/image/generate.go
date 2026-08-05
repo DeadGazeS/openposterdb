@@ -85,33 +85,56 @@ func posterTargetHeight(targetWidth uint32) uint32 {
 	return uint32(math.Round(float64(targetWidth) * 1.5))
 }
 
-func RenderPosterSync(posterBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, posterFit services.PosterFit, colors map[string]services.SourceColorSet) ([]byte, error) {
-	if appearance.Shape == services.BadgeShapePill {
-		badgeStyle = badgeStyle.ForShape(appearance.Shape)
+// RenderParams holds every option for the Render*Sync renderers. Fields that do not
+// apply to a given kind are ignored (e.g. PosterFit for logos).
+type RenderParams struct {
+	Badges          []services.RatingBadge
+	ValueFontFace   font.Face
+	LabelFontFace   font.Face
+	Quality         uint8
+	Layout          services.ImageLayout
+	BadgeStyle      services.BadgeStyle
+	LabelStyle      services.LabelStyle
+	Appearance      services.BadgeAppearance
+	TargetWidth     uint32
+	BadgeScale      float32
+	BadgeMultiplier float32
+	TextScale       float32
+	LogoScale       float32
+	PosterFit       services.PosterFit
+	EdgeInsetX      int32
+	EdgeInsetY      int32
+	Blur            bool
+	Colors          map[string]services.SourceColorSet
+}
+
+func RenderPosterSync(posterBytes []byte, params RenderParams) ([]byte, error) {
+	if params.Appearance.Shape == services.BadgeShapePill {
+		params.BadgeStyle = params.BadgeStyle.ForShape(params.Appearance.Shape)
 	}
-	appearance.Style = badgeStyle.ResolveDefault()
+	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(posterBytes))
 	if err != nil {
 		return nil, err
 	}
 
-	canvas := fitPoster(base, targetWidth, posterFit)
+	canvas := fitPoster(base, params.TargetWidth, params.PosterFit)
 
-	if len(badges) > 0 && !layout.IsEmpty() {
+	if len(params.Badges) > 0 && !params.Layout.IsEmpty() {
 		var badgeImages []*image.RGBA
-		if appearance.Style.IsVertical() {
-			for _, b := range badges {
-				badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
+		if params.Appearance.Style.IsVertical() {
+			for _, b := range params.Badges {
+				badgeImages = append(badgeImages, RenderVerticalBadge(&b, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors))
 			}
 		} else {
-			badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors)
+			badgeImages = RenderBadgesUniform(params.Badges, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors)
 		}
-		overlayLayoutOnCanvas(canvas, badgeImages, &layout, badgeScale, badgeSideMargin, 0, 0)
+		overlayLayoutOnCanvas(canvas, badgeImages, &params.Layout, params.BadgeScale, badgeSideMargin, 0, 0)
 	}
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: int(quality)}); err != nil {
+	if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: int(params.Quality)}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -195,7 +218,8 @@ func fitPoster(base image.Image, targetWidth uint32, fit services.PosterFit) *im
 	return rgba
 }
 
-func resizeToFill(img image.Image, targetW, targetH int) *image.RGBA {	bounds := img.Bounds()
+func resizeToFill(img image.Image, targetW, targetH int) *image.RGBA {
+	bounds := img.Bounds()
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
@@ -249,11 +273,11 @@ func blurImage(img *image.RGBA, divisor int) *image.RGBA {
 
 // --- Logo rendering ---
 
-func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, layout services.ImageLayout, colors map[string]services.SourceColorSet) ([]byte, error) {
-	if appearance.Shape == services.BadgeShapePill {
-		badgeStyle = badgeStyle.ForShape(appearance.Shape)
+func RenderLogoSync(logoBytes []byte, params RenderParams) ([]byte, error) {
+	if params.Appearance.Shape == services.BadgeShapePill {
+		params.BadgeStyle = params.BadgeStyle.ForShape(params.Appearance.Shape)
 	}
-	appearance.Style = badgeStyle.ResolveDefault()
+	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(logoBytes))
 	if err != nil {
@@ -262,17 +286,17 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 
 	bounds := base.Bounds()
 	var logoImg *image.RGBA
-	if uint32(bounds.Dx()) != targetWidth {
-		scale := float64(targetWidth) / float64(bounds.Dx())
+	if uint32(bounds.Dx()) != params.TargetWidth {
+		scale := float64(params.TargetWidth) / float64(bounds.Dx())
 		targetH := uint32(math.Round(float64(bounds.Dy()) * scale))
-		logoImg = image.NewRGBA(image.Rect(0, 0, int(targetWidth), int(targetH)))
+		logoImg = image.NewRGBA(image.Rect(0, 0, int(params.TargetWidth), int(targetH)))
 		draw.ApproxBiLinear.Scale(logoImg, logoImg.Bounds(), base, bounds, draw.Src, nil)
 	} else {
 		logoImg = image.NewRGBA(bounds)
 		draw.Draw(logoImg, bounds, base, bounds.Min, draw.Src)
 	}
 
-	if len(badges) == 0 || layout.IsEmpty() {
+	if len(params.Badges) == 0 || params.Layout.IsEmpty() {
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, logoImg); err != nil {
 			return nil, err
@@ -281,22 +305,22 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 	}
 
 	var badgeImages []*image.RGBA
-	if appearance.Style.IsVertical() {
-		for _, b := range badges {
-			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
+	if params.Appearance.Style.IsVertical() {
+		for _, b := range params.Badges {
+			badgeImages = append(badgeImages, RenderVerticalBadge(&b, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors))
 		}
 	} else {
-		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors)
+		badgeImages = RenderBadgesUniform(params.Badges, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors)
 	}
 
-	logoBadgeSpacing := uint32(math.Round(float64(badgeSpacing) * float64(badgeScale)))
-	logoBadgeRowSpacing := uint32(math.Round(float64(badgeRowSpacing) * float64(badgeScale)))
-	gap := uint32(math.Round(15.0 * float64(badgeScale)))
+	logoBadgeSpacing := uint32(math.Round(float64(badgeSpacing) * float64(params.BadgeScale)))
+	logoBadgeRowSpacing := uint32(math.Round(float64(badgeRowSpacing) * float64(params.BadgeScale)))
+	gap := uint32(math.Round(15.0 * float64(params.BadgeScale)))
 
-	bySide := distributeLayout(badgeImages, &layout)
+	bySide := distributeLayout(badgeImages, &params.Layout)
 	blocks := make(map[string]*layoutBlock)
-	for _, side := range layout.OrderOrDefault() {
-		slot := layout.SideSlot(side)
+	for _, side := range params.Layout.OrderOrDefault() {
+		slot := params.Layout.SideSlot(side)
 		if slot == nil {
 			continue
 		}
@@ -308,7 +332,7 @@ func RenderLogoSync(logoBytes []byte, badges []services.RatingBadge, fontFace fo
 		blocks[side] = &layoutBlock{img: b, w: b.Bounds().Dx(), h: b.Bounds().Dy()}
 	}
 
-	canvas := composeLogoLayout(logoImg, blocks, &layout, int(gap))
+	canvas := composeLogoLayout(logoImg, blocks, &params.Layout, int(gap))
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, canvas); err != nil {
@@ -443,11 +467,11 @@ func composeLogoLayout(logoImg *image.RGBA, blocks map[string]*layoutBlock, layo
 
 // --- Backdrop rendering ---
 
-func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, edgeInsetX, edgeInsetY int32, colors map[string]services.SourceColorSet) ([]byte, error) {
-	if appearance.Shape == services.BadgeShapePill {
-		badgeStyle = badgeStyle.ForShape(appearance.Shape)
+func RenderBackdropSync(backdropBytes []byte, params RenderParams) ([]byte, error) {
+	if params.Appearance.Shape == services.BadgeShapePill {
+		params.BadgeStyle = params.BadgeStyle.ForShape(params.Appearance.Shape)
 	}
-	appearance.Style = badgeStyle.ResolveDefault()
+	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(backdropBytes))
 	if err != nil {
@@ -456,44 +480,44 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 
 	bounds := base.Bounds()
 	var canvas *image.RGBA
-	if uint32(bounds.Dx()) != targetWidth {
-		scale := float64(targetWidth) / float64(bounds.Dx())
+	if uint32(bounds.Dx()) != params.TargetWidth {
+		scale := float64(params.TargetWidth) / float64(bounds.Dx())
 		targetH := uint32(math.Round(float64(bounds.Dy()) * scale))
-		canvas = image.NewRGBA(image.Rect(0, 0, int(targetWidth), int(targetH)))
+		canvas = image.NewRGBA(image.Rect(0, 0, int(params.TargetWidth), int(targetH)))
 		draw.ApproxBiLinear.Scale(canvas, canvas.Bounds(), base, bounds, draw.Src, nil)
 	} else {
 		canvas = image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 		draw.Draw(canvas, canvas.Bounds(), base, bounds.Min, draw.Src)
 	}
 
-	if len(badges) == 0 {
+	if len(params.Badges) == 0 {
 		var buf bytes.Buffer
-		if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: int(quality)}); err != nil {
+		if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: int(params.Quality)}); err != nil {
 			return nil, err
 		}
 		return buf.Bytes(), nil
 	}
 
 	var badgeImages []*image.RGBA
-	if appearance.Style.IsVertical() {
-		for _, b := range badges {
-			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
+	if params.Appearance.Style.IsVertical() {
+		for _, b := range params.Badges {
+			badgeImages = append(badgeImages, RenderVerticalBadge(&b, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors))
 		}
 	} else {
-		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors)
+		badgeImages = RenderBadgesUniform(params.Badges, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors)
 	}
 
-	ix := services.ClampEdgeInset(edgeInsetX)
-	iy := services.ClampEdgeInset(edgeInsetY)
+	ix := services.ClampEdgeInset(params.EdgeInsetX)
+	iy := services.ClampEdgeInset(params.EdgeInsetY)
 	extraX := uint32(math.Round(float64(canvas.Bounds().Dx()) * float64(ix) / 100.0))
 	extraY := uint32(math.Round(float64(canvas.Bounds().Dy()) * float64(iy) / 100.0))
 
-	if len(badges) > 0 && !layout.IsEmpty() {
-		overlayLayoutOnCanvas(canvas, badgeImages, &layout, badgeScale, backdropSideMargin, extraX, extraY)
+	if len(params.Badges) > 0 && !params.Layout.IsEmpty() {
+		overlayLayoutOnCanvas(canvas, badgeImages, &params.Layout, params.BadgeScale, backdropSideMargin, extraX, extraY)
 	}
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: int(quality)}); err != nil {
+	if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: int(params.Quality)}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -501,11 +525,11 @@ func RenderBackdropSync(backdropBytes []byte, badges []services.RatingBadge, fon
 
 // --- Episode rendering ---
 
-func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFace font.Face, labelFontFace font.Face, quality uint8, layout services.ImageLayout, badgeStyle services.BadgeStyle, labelStyle services.LabelStyle, appearance services.BadgeAppearance, targetWidth uint32, badgeScale float32, badgeMultiplier float32, textScale float32, logoScale float32, blur bool, colors map[string]services.SourceColorSet) ([]byte, error) {
-	if appearance.Shape == services.BadgeShapePill {
-		badgeStyle = badgeStyle.ForShape(appearance.Shape)
+func RenderEpisodeSync(imageBytes []byte, params RenderParams) ([]byte, error) {
+	if params.Appearance.Shape == services.BadgeShapePill {
+		params.BadgeStyle = params.BadgeStyle.ForShape(params.Appearance.Shape)
 	}
-	appearance.Style = badgeStyle.ResolveDefault()
+	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
 	base, _, err := image.Decode(bytes.NewReader(imageBytes))
 	if err != nil {
@@ -514,43 +538,43 @@ func RenderEpisodeSync(imageBytes []byte, badges []services.RatingBadge, fontFac
 
 	bounds := base.Bounds()
 	var canvas *image.RGBA
-	if uint32(bounds.Dx()) != targetWidth {
-		scale := float64(targetWidth) / float64(bounds.Dx())
+	if uint32(bounds.Dx()) != params.TargetWidth {
+		scale := float64(params.TargetWidth) / float64(bounds.Dx())
 		targetH := uint32(math.Round(float64(bounds.Dy()) * scale))
-		canvas = image.NewRGBA(image.Rect(0, 0, int(targetWidth), int(targetH)))
+		canvas = image.NewRGBA(image.Rect(0, 0, int(params.TargetWidth), int(targetH)))
 		draw.ApproxBiLinear.Scale(canvas, canvas.Bounds(), base, bounds, draw.Src, nil)
 	} else {
 		canvas = image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 		draw.Draw(canvas, canvas.Bounds(), base, bounds.Min, draw.Src)
 	}
 
-	if blur && canvas.Bounds().Dx() >= 8 && canvas.Bounds().Dy() >= 8 {
+	if params.Blur && canvas.Bounds().Dx() >= 8 && canvas.Bounds().Dy() >= 8 {
 		canvas = blurImage(canvas, 4)
 	}
 
-	if len(badges) == 0 {
+	if len(params.Badges) == 0 {
 		var output bytes.Buffer
-		if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: int(quality)}); err != nil {
+		if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: int(params.Quality)}); err != nil {
 			return nil, err
 		}
 		return output.Bytes(), nil
 	}
 
 	var badgeImages []*image.RGBA
-	if appearance.Style.IsVertical() {
-		for _, b := range badges {
-			badgeImages = append(badgeImages, RenderVerticalBadge(&b, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors))
+	if params.Appearance.Style.IsVertical() {
+		for _, b := range params.Badges {
+			badgeImages = append(badgeImages, RenderVerticalBadge(&b, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors))
 		}
 	} else {
-		badgeImages = RenderBadgesUniform(badges, fontFace, labelFontFace, labelStyle, appearance, badgeScale, textScale, logoScale, colors)
+		badgeImages = RenderBadgesUniform(params.Badges, params.ValueFontFace, params.LabelFontFace, params.LabelStyle, params.Appearance, params.BadgeScale, params.TextScale, params.LogoScale, params.Colors)
 	}
 
-	if len(badges) > 0 && !layout.IsEmpty() {
-		overlayLayoutOnCanvas(canvas, badgeImages, &layout, badgeScale, badgeSideMargin, 0, 0)
+	if len(params.Badges) > 0 && !params.Layout.IsEmpty() {
+		overlayLayoutOnCanvas(canvas, badgeImages, &params.Layout, params.BadgeScale, badgeSideMargin, 0, 0)
 	}
 
 	var output bytes.Buffer
-	if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: int(quality)}); err != nil {
+	if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: int(params.Quality)}); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil

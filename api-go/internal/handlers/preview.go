@@ -4,12 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
 
-	apperr "openposterdb/internal/errors"
+	"openposterdb/internal/httpx"
 	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
@@ -242,11 +239,12 @@ func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge
 		season = resolved.Episode.SeasonNumber
 		episode = resolved.Episode.EpisodeNumber
 	}
-	_, _, _, _, badges := services.FetchRatings(
-		resolved.TMDbID, mediaType, imdbID, showID, season, episode,
-		p.cfg.TMDB, p.cfg.OMDB, p.cfg.MDBList, p.cfg.Trakt,
+	result := services.FetchRatings(
+		services.RatingsClients{TMDB: p.cfg.TMDB, OMDB: p.cfg.OMDB, MDBList: p.cfg.MDBList, Trakt: p.cfg.Trakt},
+		services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
+			EpisodeShowTMDbID: showID, EpisodeSeason: season, EpisodeEpisode: episode},
 	)
-	return badges
+	return result.Badges
 }
 
 func NewPreviewHandler(db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
@@ -258,7 +256,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	imageSize, err := parsePreviewImageSize(query.ImageSize, "poster")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -348,7 +346,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
@@ -356,7 +354,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	posterBytes, err := p.demoArtworkBytes("poster")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -367,15 +365,19 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	// box is stable for the 2:3 demo poster under every fit.
 	posterBytes, err = image.PosterPreviewArtwork(posterBytes, posterFit, targetWidth)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
-	rendered, err := image.RenderPosterSync(posterBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		layout, badgeStyle, labelStyle, appearance,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, posterFit, colors)
+	rendered, err := image.RenderPosterSync(posterBytes, image.RenderParams{
+		Badges: badges, ValueFontFace: valueFace, LabelFontFace: labelFace,
+		Quality: p.cfg.ImageQuality, Layout: layout, BadgeStyle: badgeStyle,
+		LabelStyle: labelStyle, Appearance: appearance, TargetWidth: targetWidth,
+		BadgeScale: badgeScale, BadgeMultiplier: badgeMultiplier, TextScale: textScale,
+		LogoScale: logoScale, PosterFit: posterFit, Colors: colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -389,7 +391,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 
 	imageSize, err := parsePreviewImageSize(query.ImageSize, "logo")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -463,7 +465,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
@@ -471,15 +473,19 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 
 	logoBytes, err := p.demoArtworkBytes("logo")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
-	rendered, err := image.RenderLogoSync(logoBytes, badges, valueFace, labelFace,
-		badgeStyle, labelStyle, appearance, targetWidth, badgeScale, badgeMultiplier, textScale, logoScale,
-		layout, colors)
+	rendered, err := image.RenderLogoSync(logoBytes, image.RenderParams{
+		Badges: badges, ValueFontFace: valueFace, LabelFontFace: labelFace,
+		Layout: layout, BadgeStyle: badgeStyle, LabelStyle: labelStyle,
+		Appearance: appearance, TargetWidth: targetWidth, BadgeScale: badgeScale,
+		BadgeMultiplier: badgeMultiplier, TextScale: textScale, LogoScale: logoScale,
+		Colors: colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -493,7 +499,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 
 	imageSize, err := parsePreviewImageSize(query.ImageSize, "backdrop")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -578,7 +584,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
@@ -586,15 +592,19 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 
 	backdropBytes, err := p.demoArtworkBytes("backdrop")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
-	rendered, err := image.RenderBackdropSync(backdropBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		layout, badgeStyle, labelStyle, appearance,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, edgeInsetX, edgeInsetY, colors)
+	rendered, err := image.RenderBackdropSync(backdropBytes, image.RenderParams{
+		Badges: badges, ValueFontFace: valueFace, LabelFontFace: labelFace,
+		Quality: p.cfg.ImageQuality, Layout: layout, BadgeStyle: badgeStyle,
+		LabelStyle: labelStyle, Appearance: appearance, TargetWidth: targetWidth,
+		BadgeScale: badgeScale, BadgeMultiplier: badgeMultiplier, TextScale: textScale,
+		LogoScale: logoScale, EdgeInsetX: edgeInsetX, EdgeInsetY: edgeInsetY, Colors: colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -608,7 +618,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 
 	imageSize, err := parsePreviewImageSize(query.ImageSize, "episode")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -689,7 +699,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
 	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
+		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
 	}
 
@@ -697,15 +707,19 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 
 	episodeBytes, err := p.demoArtworkBytes("episode")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
-	rendered, err := image.RenderEpisodeSync(episodeBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		layout, badgeStyle, labelStyle, appearance,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, blur, colors)
+	rendered, err := image.RenderEpisodeSync(episodeBytes, image.RenderParams{
+		Badges: badges, ValueFontFace: valueFace, LabelFontFace: labelFace,
+		Quality: p.cfg.ImageQuality, Layout: layout, BadgeStyle: badgeStyle,
+		LabelStyle: labelStyle, Appearance: appearance, TargetWidth: targetWidth,
+		BadgeScale: badgeScale, BadgeMultiplier: badgeMultiplier, TextScale: textScale,
+		LogoScale: logoScale, Blur: blur, Colors: colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -715,111 +729,6 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Admin image list/file serving ---
-
-func HandleImageFile(db *sql.DB, cacheDir string, imageType, idType, idValue string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
-			return
-		}
-
-		ext := "jpg"
-		contentType := "image/jpeg"
-		if imageType == "l" {
-			ext = "png"
-			contentType = "image/png"
-		}
-
-		subdir := services.ImageSubdirByType(imageType)
-		if subdir == "" {
-			writeError(w, 400, "invalid image type")
-			return
-		}
-
-		fileBase := strings.ReplaceAll(idValue, ":", "_")
-		path, err := services.TypedCachePath(cacheDir, subdir, idType, fileBase, ext)
-		if err != nil {
-			writeError(w, 400, "invalid path")
-			return
-		}
-
-		data, err := readFile(path)
-		if err != nil {
-			writeError(w, 404, "image not found")
-			return
-		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Write(data)
-	}
-}
-
-func HandleFetchImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClient, omdb *services.OmdbClient, mdblist *services.MdblistClient, trakt *services.TraktClient, fanart *services.FanartClient, imageType, idType, idValue string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeError(w, 405, "Method not allowed")
-			return
-		}
-
-		if err := services.ValidateIDValue(idValue); err != nil {
-			writeError(w, 400, "invalid id value")
-			return
-		}
-
-		if tmdb == nil {
-			writeError(w, 503, "TMDB API key not configured — image generation unavailable")
-			return
-		}
-
-		kind, ok := kindFromType(imageType)
-		if !ok {
-			writeError(w, 400, "invalid image type")
-			return
-		}
-
-		slog.Debug("admin fetch requested", "kind", kind, "id", idType+"/"+idValue)
-
-		globals, _ := services.GetGlobalSettings(db)
-		settings := services.ParseGlobalRenderSettings(globals)
-
-		bytes, contentType, err := image.ServeImage(
-			db, tmdb, omdb, mdblist, trakt, fanart,
-			idType, idValue, kind, &settings, nil,
-			cfg.CacheDir, cfg.ExternalCacheOnly,
-			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
-			cfg.ImageQuality, nil, cfg.Caches,
-		)
-		if err != nil {
-			if appErr, ok := err.(*apperr.AppError); ok {
-				writeError(w, appErr.Status, appErr.Message)
-			} else {
-				writeError(w, 500, err.Error())
-			}
-			return
-		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
-		w.Write(bytes)
-	}
-}
-
-func kindFromType(imageType string) (string, bool) {
-	switch imageType {
-	case "p":
-		return "poster", true
-	case "l":
-		return "logo", true
-	case "b":
-		return "backdrop", true
-	case "e":
-		return "episode", true
-	}
-	return "", false
-}
-
-// parsePreviewColors reads the `colors` query parameter (JSON object of
-// per-source color overrides) used for live previews of unsaved changes.
 func parsePreviewColors(r *http.Request) map[string]services.SourceColorSet {
 	raw := r.URL.Query().Get("colors")
 	if raw == "" {
@@ -838,13 +747,13 @@ func parsePreviewColors(r *http.Request) map[string]services.SourceColorSet {
 func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		dirCleared := false
 		if !externalCacheOnly {
-			subdir := services.ImageSubdirByType(imageType)
+			subdir := services.ImageSubdir(imageType)
 			if subdir != "" {
 				_, err := services.StageDirForClear(cacheDir, subdir)
 				dirCleared = err == nil
@@ -859,7 +768,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			caches.ImageMem.Clear()
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"ok":                  true,
 			"external_cache_only": externalCacheOnly,
 			"dir_cleared":         dirCleared,
@@ -871,7 +780,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
@@ -879,7 +788,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 
 		var filesDeleted int64 = 0
 		if !externalCacheOnly {
-			subdir := services.ImageSubdirByType(imageType)
+			subdir := services.ImageSubdir(imageType)
 			if subdir != "" {
 				if scope == "variant" {
 					ext := "jpg"
@@ -916,53 +825,11 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			}
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"ok":                  true,
 			"external_cache_only": externalCacheOnly,
 			"files_deleted":       filesDeleted,
 			"meta_deleted":        metaDeleted,
 		})
 	}
-}
-
-func HandleServiceKeys(db *sql.DB, serviceKeys *services.ServiceKeyManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, 200, serviceKeys.GetStatus())
-		case http.MethodPut:
-			var update services.ServiceKeysUpdate
-			if err := decodeJSONBody(r, &update); err != nil {
-				writeError(w, 400, "invalid JSON")
-				return
-			}
-			if err := serviceKeys.UpdateKeys(&update); err != nil {
-				writeError(w, 500, "failed to update keys")
-				return
-			}
-			writeJSON(w, 200, serviceKeys.GetStatus())
-		default:
-			writeError(w, 405, "Method not allowed")
-		}
-	}
-}
-
-func readFile(path string) ([]byte, error) {
-	entry, err := services.ReadCache(path, 0)
-	if err != nil {
-		return nil, err
-	}
-	return entry.Bytes, nil
-}
-
-func parseInt64Param(r *http.Request, name string, def int64) int64 {
-	v := r.URL.Query().Get(name)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 1 {
-		return def
-	}
-	return n
 }

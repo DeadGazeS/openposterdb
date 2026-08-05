@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"net/http"
-	"strconv"
 
+	"openposterdb/internal/httpx"
 	"openposterdb/internal/services"
 )
 
@@ -17,7 +18,7 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := GetAuthUser(r)
 		if user == nil {
-			writeError(w, 401, "Unauthorized")
+			httpx.WriteError(w, 401, "Unauthorized")
 			return
 		}
 
@@ -25,31 +26,29 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 		case http.MethodGet:
 			prefs, err := services.GetUserPrefs(db, user.Username)
 			if err != nil {
-				writeError(w, 500, "Failed to load preferences")
+				httpx.WriteError(w, 500, "Failed to load preferences")
 				return
 			}
-			writeJSON(w, 200, prefs)
+			httpx.WriteJSON(w, 200, prefs)
 		case http.MethodPut:
 			var updates map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-				writeError(w, 400, "Invalid JSON")
+				httpx.WriteError(w, 400, "Invalid JSON")
 				return
 			}
 			prefs, err := services.GetUserPrefs(db, user.Username)
 			if err != nil {
-				writeError(w, 500, "Failed to load preferences")
+				httpx.WriteError(w, 500, "Failed to load preferences")
 				return
 			}
-			for k, v := range updates {
-				prefs[k] = v
-			}
+			maps.Copy(prefs, updates)
 			if err := services.SetUserPrefs(db, user.Username, prefs); err != nil {
-				writeError(w, 500, "Failed to save preferences")
+				httpx.WriteError(w, 500, "Failed to save preferences")
 				return
 			}
-			writeJSON(w, 200, prefs)
+			httpx.WriteJSON(w, 200, prefs)
 		default:
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 		}
 	}
 }
@@ -57,7 +56,7 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 func HandleStats(db *sql.DB, cacheDir string, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
@@ -82,7 +81,7 @@ func HandleStats(db *sql.DB, cacheDir string, caches *services.MemCacheSet) http
 			}
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"total_images":          posterCount + logoCount + backdropCount + episodeCount,
 			"total_api_keys":        apiKeyCount,
 			"cached_posters":        posterCount,
@@ -101,18 +100,18 @@ func HandleStats(db *sql.DB, cacheDir string, caches *services.MemCacheSet) http
 func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailable bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		globals, err := services.GetGlobalSettings(db)
 		if err != nil {
-			writeError(w, 500, "Failed to load settings")
+			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
 		s := services.ParseGlobalRenderSettings(globals)
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"image_source":             string(s.ImageSource),
 			"lang":                     s.Lang,
 			"textless":                 s.Textless,
@@ -241,19 +240,19 @@ type updateSettingsRequest struct {
 func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		var req updateSettingsRequest
-		if err := decodeJSONBody(r, &req); err != nil {
-			writeError(w, 400, "invalid JSON")
+		if err := httpx.DecodeJSON(r, &req); err != nil {
+			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
 
 		globals, err := services.GetGlobalSettings(db)
 		if err != nil {
-			writeError(w, 500, "Failed to load settings")
+			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
 		s := services.ParseGlobalRenderSettings(globals)
@@ -428,14 +427,14 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 		if req.Colors != nil {
 			if err := services.ValidateSourceColors(*req.Colors); err != nil {
-				writeError(w, 400, err.Error())
+				httpx.WriteError(w, 400, err.Error())
 				return
 			}
 			s.Colors = services.NormalizeSourceColors(*req.Colors)
 		}
 
 		if err := services.ValidateRenderSettings(&s); err != nil {
-			writeError(w, 400, err.Error())
+			httpx.WriteError(w, 400, err.Error())
 			return
 		}
 
@@ -449,7 +448,7 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 
 		if err := services.SetGlobalSettingsBatch(db, batch); err != nil {
-			writeError(w, 500, "Failed to save settings")
+			httpx.WriteError(w, 500, "Failed to save settings")
 			return
 		}
 		if err := services.PruneStaleColorSettings(db, globals, batch); err != nil {
@@ -457,27 +456,27 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 
 		slog.Debug("global settings updated", "image_source", s.ImageSource, "lang", s.Lang, "ratings_order", s.RatingsOrder)
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}
 }
 
 func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
-		page := parseIntParam(r, "page", 1)
-		pageSize := parseIntParam(r, "page_size", 50)
+		page := httpx.ParseIntParam(r, "page", 1)
+		pageSize := httpx.ParseIntParam(r, "page_size", 50)
 
 		items, total, err := services.ListImageMetaByKind(db, imageType, page, pageSize)
 		if err != nil {
-			writeError(w, 500, "Failed to list images")
+			httpx.WriteError(w, 500, "Failed to list images")
 			return
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"items":     items,
 			"total":     total,
 			"page":      page,
@@ -489,7 +488,7 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
@@ -516,7 +515,7 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 			}
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"ok":                  true,
 			"external_cache_only": externalCacheOnly,
 			"dirs_cleared":        dirsCleared,
@@ -524,21 +523,4 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 			"ratings_deleted":     ratingsDeleted,
 		})
 	}
-}
-
-func parseIntParam(r *http.Request, name string, def int64) int64 {
-	v := r.URL.Query().Get(name)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 1 {
-		return def
-	}
-	return n
-}
-
-func decodeJSONBody(r *http.Request, v interface{}) error {
-	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(v)
 }

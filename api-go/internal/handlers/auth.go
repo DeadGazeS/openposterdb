@@ -49,12 +49,12 @@ func HashPassword(password string) (string, error) {
 }
 
 func VerifyPassword(password, storedHash string) (bool, error) {
-	idx := strings.IndexByte(storedHash, ':')
-	if idx < 0 {
+	before, after, ok := strings.Cut(storedHash, ":")
+	if !ok {
 		return false, fmt.Errorf("invalid hash format")
 	}
-	saltHex := storedHash[:idx]
-	hashHex := storedHash[idx+1:]
+	saltHex := before
+	hashHex := after
 	salt, err := hex.DecodeString(saltHex)
 	if err != nil {
 		return false, err
@@ -89,22 +89,8 @@ func HashRefreshToken(token string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func HashAPIKey(raw string) string {
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])
-}
-
-func GenerateAPIKey() (raw, hash, prefix string) {
-	b := make([]byte, 32)
-	rand.Read(b)
-	raw = hex.EncodeToString(b)
-	hash = HashAPIKey(raw)
-	prefix = raw[:8]
-	return
-}
-
 func ParseJWT(tokenString string, secret []byte) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (any, error) {
 		return secret, nil
 	})
 	if err != nil {
@@ -117,7 +103,7 @@ func ParseJWT(tokenString string, secret []byte) (*Claims, error) {
 }
 
 func ParseAPIKeyJWT(tokenString string, secret []byte) (*APIKeyClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &APIKeyClaims{}, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &APIKeyClaims{}, func(t *jwt.Token) (any, error) {
 		return secret, nil
 	})
 	if err != nil {
@@ -170,19 +156,19 @@ func RefreshCookie(token string, maxAgeSecs int, secure bool) *http.Cookie {
 	return c
 }
 
-func AuthStatus(db *sql.DB, isFreeAPIKeyEnabled func() bool, disablePublicPages bool) (int, interface{}) {
+func AuthStatus(db *sql.DB, isFreeAPIKeyEnabled func() bool, disablePublicPages bool) (int, any) {
 	count, err := services.CountAdminUsers(db)
 	if err != nil {
 		return 500, map[string]string{"error": err.Error()}
 	}
-	return 200, map[string]interface{}{
+	return 200, map[string]any{
 		"setup_required":       count == 0,
 		"free_api_key_enabled": isFreeAPIKeyEnabled(),
 		"disable_public_pages": disablePublicPages,
 	}
 }
 
-func SetupHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, interface{}, []*http.Cookie) {
+func SetupHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, any, []*http.Cookie) {
 	if err := services.ValidateUsername(username); err != nil {
 		return 400, map[string]string{"error": err.Error()}, nil
 	}
@@ -213,7 +199,7 @@ func SetupHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, pa
 	}
 }
 
-func LoginHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, interface{}, []*http.Cookie) {
+func LoginHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, any, []*http.Cookie) {
 	userID, returnedUsername, passwordHash, err := services.FindAdminUserByUsername(db, username)
 	if err != nil || returnedUsername == "" {
 		VerifyPassword(password, dummyHash)
@@ -239,7 +225,7 @@ func LoginHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, pa
 	}
 }
 
-func RefreshHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, refreshToken string) (int, interface{}, []*http.Cookie) {
+func RefreshHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, refreshToken string) (int, any, []*http.Cookie) {
 	if refreshToken == "" {
 		return 401, nil, nil
 	}
@@ -281,8 +267,8 @@ func LogoutHandler(db *sql.DB, username string) error {
 	return nil
 }
 
-func KeyLoginHandler(db *sql.DB, jwtSecret []byte, apiKey string) (int, interface{}) {
-	keyHash := HashAPIKey(apiKey)
+func KeyLoginHandler(db *sql.DB, jwtSecret []byte, apiKey string) (int, any) {
+	keyHash := services.HashAPIKey(apiKey)
 	k, err := services.FindAPIKeyByHash(db, keyHash)
 	if err != nil || k == nil {
 		return 401, map[string]string{"error": "Unauthorized"}
@@ -293,7 +279,7 @@ func KeyLoginHandler(db *sql.DB, jwtSecret []byte, apiKey string) (int, interfac
 		return 400, map[string]string{"error": "Authentication failed"}
 	}
 
-	return 200, map[string]interface{}{
+	return 200, map[string]any{
 		"token":      token,
 		"name":       k.Name,
 		"key_prefix": k.KeyPrefix,

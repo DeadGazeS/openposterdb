@@ -52,8 +52,8 @@ func PreviewPath(cacheDir, imageType, suffix, ext string) (string, error) {
 }
 
 type CacheEntry struct {
-	Bytes    []byte
-	IsStale  bool
+	Bytes   []byte
+	IsStale bool
 }
 
 func ReadCache(path string, staleSecs uint64) (*CacheEntry, error) {

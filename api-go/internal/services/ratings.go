@@ -3,30 +3,31 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
 
 type RatingSource struct {
-	Key        string
-	Label      string
-	CacheChar  byte
-	ColorR     uint8
-	ColorG     uint8
-	ColorB     uint8
+	Key       string
+	Label     string
+	CacheChar byte
+	ColorR    uint8
+	ColorG    uint8
+	ColorB    uint8
 }
 
 var (
-	SourceMal       = &RatingSource{Key: "mal", Label: "MAL", CacheChar: 'm', ColorR: 34, ColorG: 60, ColorB: 120}
-	SourceImdb      = &RatingSource{Key: "imdb", Label: "IMDb", CacheChar: 'i', ColorR: 180, ColorG: 145, ColorB: 15}
+	SourceMal        = &RatingSource{Key: "mal", Label: "MAL", CacheChar: 'm', ColorR: 34, ColorG: 60, ColorB: 120}
+	SourceImdb       = &RatingSource{Key: "imdb", Label: "IMDb", CacheChar: 'i', ColorR: 180, ColorG: 145, ColorB: 15}
 	SourceLetterboxd = &RatingSource{Key: "lb", Label: "LB", CacheChar: 'l', ColorR: 0, ColorG: 155, ColorB: 88}
-	SourceRt        = &RatingSource{Key: "rt", Label: "RTC", CacheChar: 'r', ColorR: 185, ColorG: 35, ColorB: 8}
+	SourceRt         = &RatingSource{Key: "rt", Label: "RTC", CacheChar: 'r', ColorR: 185, ColorG: 35, ColorB: 8}
 	SourceRtAudience = &RatingSource{Key: "rta", Label: "RTA", CacheChar: 'a', ColorR: 185, ColorG: 35, ColorB: 8}
 	SourceMetacritic = &RatingSource{Key: "mc", Label: "MC", CacheChar: 'c', ColorR: 75, ColorG: 150, ColorB: 38}
-	SourceTmdb      = &RatingSource{Key: "tmdb", Label: "TMDB", CacheChar: 't', ColorR: 1, ColorG: 155, ColorB: 88}
-	SourceTrakt     = &RatingSource{Key: "trakt", Label: "Trakt", CacheChar: 'k', ColorR: 175, ColorG: 15, ColorB: 45}
-	SourceMdblist   = &RatingSource{Key: "mdblist", Label: "MDB", CacheChar: 'd', ColorR: 66, ColorG: 132, ColorB: 202}
-	SourceEbert     = &RatingSource{Key: "ebert", Label: "Ebert", CacheChar: 'e', ColorR: 232, ColorG: 89, ColorB: 12}
+	SourceTmdb       = &RatingSource{Key: "tmdb", Label: "TMDB", CacheChar: 't', ColorR: 1, ColorG: 155, ColorB: 88}
+	SourceTrakt      = &RatingSource{Key: "trakt", Label: "Trakt", CacheChar: 'k', ColorR: 175, ColorG: 15, ColorB: 45}
+	SourceMdblist    = &RatingSource{Key: "mdblist", Label: "MDB", CacheChar: 'd', ColorR: 66, ColorG: 132, ColorB: 202}
+	SourceEbert      = &RatingSource{Key: "ebert", Label: "Ebert", CacheChar: 'e', ColorR: 232, ColorG: 89, ColorB: 12}
 )
 
 var allSources = []*RatingSource{
@@ -75,10 +76,10 @@ type RatingBadge struct {
 }
 
 type RatingsResult struct {
-	Badges  []RatingBadge
-	TmdbID  *uint64
-	TvdbID  *uint64
-	ImdbID  *string
+	Badges []RatingBadge
+	TmdbID *uint64
+	TvdbID *uint64
+	ImdbID *string
 }
 
 var canonicalOrder = []string{"mal", "imdb", "lb", "rt", "rta", "mc", "tmdb", "trakt", "mdblist", "ebert"}
@@ -145,7 +146,7 @@ func parseOrder(order string) []*RatingSource {
 		return nil
 	}
 	var sources []*RatingSource
-	for _, key := range strings.Split(order, ",") {
+	for key := range strings.SplitSeq(order, ",") {
 		key = strings.TrimSpace(key)
 		if s := SourceFromKey(key); s != nil {
 			sources = append(sources, s)
@@ -234,13 +235,7 @@ func RatingsCacheSuffix(order, exclude string, limit int32) string {
 
 	for _, key := range canonicalOrder {
 		s := sourceByKey[key]
-		found := false
-		for _, existing := range sources {
-			if existing == s {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(sources, s)
 		if !found {
 			sources = append(sources, s)
 		}
@@ -363,17 +358,33 @@ func TraktBadge(rating float64, votes uint64) *RatingBadge {
 
 // --- Fetch ratings (parallel) ---
 
-func FetchRatings(
-	resolvedTMDbID uint64,
-	mediaType string,
-	imdbID *string,
-	episodeShowTMDbID uint64,
-	episodeSeason, episodeEpisode uint32,
-	tmdb *TmdbClient,
-	omdb *OmdbClient,
-	mdblist *MdblistClient,
-	trakt *TraktClient,
-) (*MdblistResponse, *MdblistResponse, *TraktRatingsResponse, *OmdbResponse, []RatingBadge) {
+// RatingsClients bundles the rating-provider clients used by FetchRatings.
+type RatingsClients struct {
+	TMDB    *TmdbClient
+	OMDB    *OmdbClient
+	MDBList *MdblistClient
+	Trakt   *TraktClient
+}
+
+// RatingsQuery identifies the title whose ratings are being fetched.
+type RatingsQuery struct {
+	ResolvedTMDbID    uint64
+	MediaType         string
+	IMDbID            *string
+	EpisodeShowTMDbID uint64
+	EpisodeSeason     uint32
+	EpisodeEpisode    uint32
+}
+
+// FetchRatingsResult carries the ratings fetch outcome: the auxiliary provider
+// responses and the merged badge list.
+type FetchRatingsResult struct {
+	Mdblist *MdblistResponse
+	OMDB    *OmdbResponse
+	Badges  []RatingBadge
+}
+
+func FetchRatings(clients RatingsClients, q RatingsQuery) FetchRatingsResult {
 
 	type tmdbResult struct {
 		badge *RatingBadge
@@ -394,14 +405,14 @@ func FetchRatings(
 	traktCh := make(chan traktResult, 1)
 
 	go func() {
-		badge := fetchTmdbRating(tmdb, resolvedTMDbID, mediaType, episodeShowTMDbID, episodeSeason, episodeEpisode)
+		badge := fetchTmdbRating(clients.TMDB, q.ResolvedTMDbID, q.MediaType, q.EpisodeShowTMDbID, q.EpisodeSeason, q.EpisodeEpisode)
 		tmdbCh <- tmdbResult{badge}
 	}()
 
 	go func() {
 		var resp *OmdbResponse
-		if omdb != nil && imdbID != nil {
-			if r, err := omdb.GetRatings(*imdbID); err == nil {
+		if clients.OMDB != nil && q.IMDbID != nil {
+			if r, err := clients.OMDB.GetRatings(*q.IMDbID); err == nil {
 				resp = r
 			}
 		}
@@ -410,13 +421,13 @@ func FetchRatings(
 
 	go func() {
 		var resp *MdblistResponse
-		if mdblist != nil && mediaType != "episode" {
-			if imdbID != nil && *imdbID != "" {
-				if r, err := mdblist.GetRatings(*imdbID, mediaType); err == nil {
+		if clients.MDBList != nil && q.MediaType != "episode" {
+			if q.IMDbID != nil && *q.IMDbID != "" {
+				if r, err := clients.MDBList.GetRatings(*q.IMDbID, q.MediaType); err == nil {
 					resp = r
 				}
 			} else {
-				if r, err := mdblist.GetRatingsByTMDB(resolvedTMDbID, mediaType); err == nil {
+				if r, err := clients.MDBList.GetRatingsByTMDB(q.ResolvedTMDbID, q.MediaType); err == nil {
 					resp = r
 				}
 			}
@@ -426,17 +437,17 @@ func FetchRatings(
 
 	go func() {
 		var b *RatingBadge
-		if trakt != nil {
-			switch mediaType {
+		if clients.Trakt != nil {
+			switch q.MediaType {
 			case "movie":
-				if imdbID != nil && *imdbID != "" {
-					if r, err := trakt.GetMovieRating(*imdbID); err == nil && r != nil {
+				if q.IMDbID != nil && *q.IMDbID != "" {
+					if r, err := clients.Trakt.GetMovieRating(*q.IMDbID); err == nil && r != nil {
 						b = TraktBadge(r.Rating, r.Votes)
 					}
 				}
 			case "tv":
-				if imdbID != nil && *imdbID != "" {
-					if r, err := trakt.GetShowRating(*imdbID); err == nil && r != nil {
+				if q.IMDbID != nil && *q.IMDbID != "" {
+					if r, err := clients.Trakt.GetShowRating(*q.IMDbID); err == nil && r != nil {
 						b = TraktBadge(r.Rating, r.Votes)
 					}
 				}
@@ -517,7 +528,7 @@ func FetchRatings(
 		}
 	}
 
-	return mdblistResp, nil, nil, omdbResp, badges
+	return FetchRatingsResult{Mdblist: mdblistResp, OMDB: omdbResp, Badges: badges}
 }
 
 // FetchRatingsCached fetches ratings and caches the resulting badges in the
@@ -525,40 +536,21 @@ func FetchRatings(
 // matching the Rust ratings_cache). A nil cache bypasses caching. Only the
 // badge list is cached; the auxiliary responses are refetched on a hit but are
 // unused by all current callers.
-func FetchRatingsCached(
-	cache *MemCache,
-	resolvedTMDbID uint64,
-	mediaType string,
-	imdbID *string,
-	episodeShowTMDbID uint64,
-	episodeSeason, episodeEpisode uint32,
-	tmdb *TmdbClient,
-	omdb *OmdbClient,
-	mdblist *MdblistClient,
-	trakt *TraktClient,
-) []RatingBadge {
+func FetchRatingsCached(cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
 	if cache != nil {
-		key := fmt.Sprintf("%d/%s", resolvedTMDbID, mediaType)
-		if mediaType == "episode" {
-			key = fmt.Sprintf("%d/episode/S%dE%d", episodeShowTMDbID, episodeSeason, episodeEpisode)
+		key := fmt.Sprintf("%d/%s", q.ResolvedTMDbID, q.MediaType)
+		if q.MediaType == "episode" {
+			key = fmt.Sprintf("%d/episode/S%dE%d", q.EpisodeShowTMDbID, q.EpisodeSeason, q.EpisodeEpisode)
 		}
 		if v, ok := cache.Get(key); ok {
 			return v.([]RatingBadge)
 		}
-		_, _, _, _, badges := FetchRatings(
-			resolvedTMDbID, mediaType, imdbID,
-			episodeShowTMDbID, episodeSeason, episodeEpisode,
-			tmdb, omdb, mdblist, trakt,
-		)
-		cache.Set(key, badges, int64(len(badges))*100+64)
-		return badges
+		result := FetchRatings(clients, q)
+		cache.Set(key, result.Badges, int64(len(result.Badges))*100+64)
+		return result.Badges
 	}
-	_, _, _, _, badges := FetchRatings(
-		resolvedTMDbID, mediaType, imdbID,
-		episodeShowTMDbID, episodeSeason, episodeEpisode,
-		tmdb, omdb, mdblist, trakt,
-	)
-	return badges
+	result := FetchRatings(clients, q)
+	return result.Badges
 }
 
 func fetchTmdbRating(tmdb *TmdbClient, tmdbID uint64, mediaType string, showID uint64, season, episode uint32) *RatingBadge {
