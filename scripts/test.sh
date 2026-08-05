@@ -16,7 +16,7 @@ else
 fi
 
 echo "=== Backend tests ==="
-(cd api && cargo test)
+(cd api-go && go test ./...)
 
 echo ""
 echo "=== Frontend unit tests ==="
@@ -33,15 +33,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Building container image..."
-$CTR build -t "$IMAGE_NAME" --build-arg CARGO_FEATURES=test-support -f Containerfile .
+$CTR build -t "$IMAGE_NAME" -f Dockerfile .
 
 ENV_ARGS=()
-if [ -f api/.env ]; then
-    echo "Loading API keys from api/.env"
+if [ -f .env ]; then
+    echo "Loading API keys from .env"
     while IFS='=' read -r key value; do
         [[ -z "$key" || "$key" == \#* ]] && continue
         ENV_ARGS+=(-e "$key=$value")
-    done < api/.env
+    done < .env
 fi
 
 echo "Starting container..."

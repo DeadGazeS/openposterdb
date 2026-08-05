@@ -63,7 +63,7 @@ export default async function globalSetup() {
 
   console.log(`[e2e] Building container image via "${cmd}"...`)
   execSync(
-    `${cmd} build -t ${IMAGE_NAME} --build-arg CARGO_FEATURES=test-support -f Containerfile .`,
+    `${cmd} build -t ${IMAGE_NAME} --build-arg CARGO_FEATURES=test-support -f Dockerfile .`,
     { cwd: PROJECT_ROOT, stdio: 'inherit' },
   )
 

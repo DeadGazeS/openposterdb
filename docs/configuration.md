@@ -1,6 +1,6 @@
 # Configuration
 
-OpenPosterDB is configured entirely through environment variables. When using Docker Compose, set them in a `.env` file at the project root (copy `api-go/.env.example` to get started); when using `docker run`, pass them with `-e`.
+OpenPosterDB is configured entirely through environment variables. When using Docker Compose, set them in a `.env` file at the project root (copy `.env.example` to get started); when using `docker run`, pass them with `-e`.
 
 ## API keys
 
@@ -24,8 +24,7 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 | `DB_DIR` | `./db` | SQLite database directory |
 | `IMAGE_QUALITY` | `85` | JPEG output quality (1-100) |
 | `IMAGE_MEM_CACHE_MB` | `512` | In-memory cache size in MB |
-| `RENDER_CONCURRENCY` | `CPUs × 2` | Max concurrent image render tasks |
-| `CROSS_ID_CONCURRENCY` | `CPUs` | Max concurrent cross-ID cache write tasks |
+| `STATIC_DIR` | — | Directory of the built web UI (SPA) to serve; empty disables static serving |
 
 ## Auth & access
 
@@ -45,7 +44,6 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 | `RATINGS_STALE_SECS` | `86400` | Min ratings cache lifetime |
 | `RATINGS_MAX_AGE_SECS` | `31536000` | Film age after which ratings stop refreshing |
 | `IMAGE_STALE_SECS` | `0` | Base image cache lifetime (0 = never re-fetch) |
-| `ENABLE_CDN_REDIRECTS` | `false` | Enable content-addressed CDN redirects (see [Deployment](deployment.md#cloudflare)) |
 | `EXTERNAL_CACHE_ONLY` | `false` | Skip image file writes to disk; rely on a CDN for caching. SQLite metadata is still written (see [Architecture](architecture.md#external-cache-only)) |
 
 ## Logging

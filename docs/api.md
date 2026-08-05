@@ -119,6 +119,7 @@ Heights are representative for a standard ~2:3 source under the default `native`
 | `small` | 1280 × 720 |
 | `medium` *(default)* | 1920 × 1080 |
 | `large` | 3840 × 2160 |
+| `very-large` / `verylarge` | 3840 × 2160 (alias of `large`) |
 
 **Episode sizes:**
 
@@ -129,4 +130,4 @@ Heights are representative for a standard ~2:3 source under the default `native`
 | `large` | 1280 × 720 |
 | `very-large` / `verylarge` | 1920 × 1080 |
 
-`small` is only valid for backdrops and episodes — requesting it for posters or logos returns `400 Bad Request`. `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.
+`small` is only valid for backdrops and episodes — the admin/key **preview** endpoints reject it for posters or logos with `400 Bad Request` (the public image endpoint silently falls back to the default 580/780 width). `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.

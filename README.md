@@ -52,7 +52,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 ## Self-hosting
 
 ```bash
-cp api-go/.env.example .env
+cp .env.example .env
 # Set a JWT_SECRET (openssl rand -hex 32). Add TMDB_API_KEY for artwork and
 # MDBLIST_API_KEY (or OMDB_API_KEY) for ratings — or add them later in the admin UI.
 docker compose up -d
