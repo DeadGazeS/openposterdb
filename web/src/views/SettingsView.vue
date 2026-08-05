@@ -3,7 +3,10 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
-import { adminApi, type SaveSettingsPayload } from '@/lib/api'
+import { useSavedFlash } from '@/composables/useSavedFlash'
+import { parseApiError } from '@/lib/api-error'
+import { adminApi } from '@/lib/api'
+import type { SaveSettingsPayload } from '@/lib/settings'
 import { FREE_API_KEY } from '@/lib/constants'
 import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
@@ -21,7 +24,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
+import type { RenderSettings } from '@/lib/settings'
 
 const route = useRoute()
 
@@ -44,7 +47,6 @@ type ServiceKey = { locked: boolean; has_key: boolean; masked: string | null; ke
 type ServiceKeysResponse = { tmdb: ServiceKey; mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
 
 const freeApiKeyEnabled = ref(false)
-const freeKeyLoading = ref(false)
 const freeKeyError = ref('')
 
 const serviceKeysSaving = ref<string | null>(null)
@@ -258,14 +260,7 @@ const freeKeyDirty = computed(
   () => !!settings.value && freeApiKeyEnabled.value !== settings.value.free_api_key_enabled,
 )
 
-const apiSavedCheck = ref(false)
-let apiSavedTimeout: ReturnType<typeof setTimeout> | null = null
-
-function showApiSaved() {
-  apiSavedCheck.value = true
-  if (apiSavedTimeout) clearTimeout(apiSavedTimeout)
-  apiSavedTimeout = setTimeout(() => (apiSavedCheck.value = false), 1500)
-}
+const { active: apiSavedCheck, flash: showApiSaved } = useSavedFlash()
 
 async function saveFreeApiKeyToggle(): Promise<void> {
   if (!settings.value) return
@@ -440,7 +435,7 @@ async function onImportFile(e: Event) {
                 type="button"
                 role="switch"
                 :aria-checked="freeApiKeyEnabled"
-                :disabled="freeKeyLoading || !settings || settings?.free_api_key_locked"
+                :disabled="!settings || settings?.free_api_key_locked"
                 class="relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 :class="freeApiKeyEnabled ? 'bg-primary' : 'bg-input'"
                 @click="toggleFreeApiKey"
@@ -653,11 +648,8 @@ async function onImportFile(e: Event) {
         :show-actions="false"
         :load-settings="loadSettings"
         :save-settings="saveSettings"
-        :fetch-preview="adminApi.previewPoster"
-        :fetch-logo-preview="adminApi.previewLogo"
-        :fetch-backdrop-preview="adminApi.previewBackdrop"
-        :fetch-episode-preview="adminApi.previewEpisode"
-      />
+        :fetch-preview="adminApi.preview"
+                              />
     </div>
   </div>
 </template>

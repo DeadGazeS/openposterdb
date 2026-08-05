@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { watch } from 'vue'
+import { useSavedFlash } from '@/composables/useSavedFlash'
 import { RefreshCw, Check } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
@@ -11,17 +12,10 @@ const emit = defineEmits<{
   refresh: []
 }>()
 
-const showCheck = ref(false)
-let timeout: ReturnType<typeof setTimeout> | null = null
+const { active: showCheck, flash } = useSavedFlash()
 
 watch(() => props.fetching, (now, was) => {
-  if (was && !now) {
-    showCheck.value = true
-    if (timeout) clearTimeout(timeout)
-    timeout = setTimeout(() => {
-      showCheck.value = false
-    }, 1500)
-  }
+  if (was && !now) flash()
 })
 </script>
 

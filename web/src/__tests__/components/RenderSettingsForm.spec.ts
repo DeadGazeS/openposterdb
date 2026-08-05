@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
-import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
+import type { RenderSettings } from '@/lib/settings'
 import { shadcnStubs, SelectStub } from '@/__tests__/stubs'
 
 vi.mock('@/lib/api', () => ({}))
@@ -111,7 +111,21 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert', 'lr', 'i', 'd', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', undefined, 100, {}, 100, 100)
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 3,
+      ratingsOrder: 'mal,imdb,lb,rt,rta,mc,tmdb,trakt,mdblist,ebert',
+      badgeStyle: 'lr',
+      labelStyle: 'i',
+      badgeDirection: 'd',
+      textSize: 100,
+      layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+      badgeShape: 'r',
+      badgeAlpha: 80,
+      posterFit: 'native',
+      logoSize: 100,
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('calls fetchPreview with correct params for custom settings', async () => {
@@ -120,7 +134,16 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_layout: layout, ratings_order: 'imdb,rt,tmdb' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.stringContaining('imdb'), expect.any(String), expect.any(String), expect.any(String), 100, '', layout, 'r', 80, 'native', undefined, 100, {}, 100, 100)
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 5,
+      ratingsOrder: expect.stringContaining('imdb'),
+      textSize: 100,
+      layout,
+      badgeShape: 'r',
+      badgeAlpha: 80,
+      posterFit: 'native',
+      logoSize: 100,
+    }))
   })
 
   it('sets preview src from blob after fetch', async () => {
@@ -147,7 +170,14 @@ describe('RenderSettingsForm', () => {
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(5, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"per_row":5'), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 100, 100)
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 5,
+      textSize: 100,
+      layout: expect.stringContaining('"per_row":5'),
+      logoSize: expect.any(Number),
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('shows loading state while preview loads', async () => {
@@ -176,6 +206,12 @@ describe('RenderSettingsForm', () => {
     // The preview lives on the form's "Images" sub-tab. jsdom reports the
     // tabpanel as display:none regardless of the active tab, so assert on the
     // meaningful bits: the blob src is set and the loading spinner is gone.
+    // All four kind previews fetch on mount now; each needs its img 'load'
+    // event (jsdom never fires it) to clear its spinner.
+    for (const previewImg of wrapper.findAll('img[alt*="preview"]')) {
+      await previewImg.trigger('load')
+    }
+    await flushPromises()
     expect(img.attributes('src')).toBeTruthy()
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
   })
@@ -228,7 +264,14 @@ describe('RenderSettingsForm', () => {
     mountForm({}, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), expect.any(String), expect.any(String), expect.any(String), 100, '', expect.stringContaining('"bottom"'), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 100, 100)
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 3,
+      textSize: 100,
+      layout: expect.stringContaining('"bottom"'),
+      logoSize: expect.any(Number),
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('hides fanart checkbox when fanart_available is false', () => {
@@ -326,7 +369,20 @@ describe('RenderSettingsForm', () => {
     mountForm({ poster_badge_direction: 'v' }, fetchPreview)
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(3, expect.any(String), 'lr', 'i', 'd', 100, '', JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }), 'r', 80, 'native', undefined, 100, {}, 100, 100)
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 3,
+      badgeStyle: 'lr',
+      labelStyle: 'i',
+      badgeDirection: 'd',
+      textSize: 100,
+      layout: JSON.stringify({ top: { per_row: 0, rows: 0, start: 'c' }, right: { per_row: 0, rows: 0, start: 'c' }, bottom: { per_row: 3, rows: 1, start: 'c' }, left: { per_row: 0, rows: 0, start: 'c' }, order: ['bottom', 'top', 'left', 'right'] }),
+      badgeShape: 'r',
+      badgeAlpha: 80,
+      posterFit: 'native',
+      logoSize: 100,
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('normalizes the auto/legacy poster badge style to a valid select value', async () => {
@@ -341,9 +397,14 @@ describe('RenderSettingsForm', () => {
     const posterSelect = wrapper.findAllComponents(SelectStub).find(c => c.find('[data-testid="poster-badge-style-select"]').exists())
     expect(posterSelect?.props('modelValue')).toBe('lr')
 
-    expect(fetchPreview).toHaveBeenCalledWith(
-      3, expect.any(String), 'lr', expect.any(String), expect.any(String), expect.any(Number), expect.any(String), expect.any(String), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 100, 100,
-    )
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 3,
+      badgeStyle: 'lr',
+      badgeAlpha: expect.any(Number),
+      logoSize: expect.any(Number),
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   // --- Episode preview ---
@@ -368,21 +429,20 @@ describe('RenderSettingsForm', () => {
     expect(wrapper.find('img[alt="Episode preview"]').exists()).toBe(true)
   })
 
-  it('does not render episode section when fetchEpisodePreview is absent', () => {
+  it('renders the episode section by default', () => {
     const wrapper = mountForm()
-    expect(wrapper.find('img[alt="Episode preview"]').exists()).toBe(false)
+    expect(wrapper.find('img[alt="Episode preview"]').exists()).toBe(true)
   })
 
-  it('calls fetchEpisodePreview on mount with episode settings', async () => {
-    const fetchEpisodePreview = makeFetchPreview()
+  it('calls fetchPreview for the episode on mount with episode settings', async () => {
+    const fetchPreview = makeFetchPreview()
     const settings = { ...defaultSettings }
     mount(RenderSettingsForm, {
       props: {
         settings,
         loadSettings: vi.fn().mockResolvedValue(settings),
         saveSettings: vi.fn().mockResolvedValue(null),
-        fetchPreview: makeFetchPreview(),
-        fetchEpisodePreview,
+        fetchPreview,
       },
       global: {
         plugins: [createPinia()],
@@ -391,24 +451,20 @@ describe('RenderSettingsForm', () => {
     })
     await flushPromises()
 
-    expect(fetchEpisodePreview).toHaveBeenCalledWith(
-      1, // episode_ratings_limit
-      expect.any(String), // ratings_order
-      'v', // episode_badge_style
-      'o', // episode_label_style
-      100, // episode_text_size
-      'd', // badge direction (no longer configurable)
-      false, // episode_blur
-      expect.stringContaining('"right"'), // episode_layout
-      '', // ratings_exclude
-       'r', // episode_badge_shape
-       80, // episode_badge_alpha
-       undefined, // badge_size (legacy — the form no longer sends it)
-       100, // episode_logo_size
-       {},
-       100, // episode_badge_width
-       100, // episode_badge_height
-    )
+    expect(fetchPreview).toHaveBeenCalledWith('episode', expect.objectContaining({
+      ratingsLimit: 1, // episode_ratings_limit
+      badgeStyle: 'v', // episode_badge_style
+      labelStyle: 'o', // episode_label_style
+      textSize: 100, // episode_text_size
+      badgeDirection: 'd', // no longer configurable
+      blur: false, // episode_blur
+      layout: expect.stringContaining('"right"'), // episode_layout
+      badgeShape: 'r', // episode_badge_shape
+      badgeAlpha: 80, // episode_badge_alpha
+      logoSize: 100, // episode_logo_size
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('renders episode layout editor and blur controls', () => {
@@ -436,7 +492,7 @@ describe('RenderSettingsForm', () => {
 
   function mountWithBackdrop(
     overrides: Partial<RenderSettings> = {},
-    fetchBackdropPreview = makeFetchPreview(),
+    fetchPreview = makeFetchPreview(),
     saveSettings = vi.fn().mockResolvedValue(null),
   ) {
     const settings = { ...defaultSettings, ...overrides }
@@ -445,8 +501,7 @@ describe('RenderSettingsForm', () => {
         settings,
         loadSettings: vi.fn().mockResolvedValue(settings),
         saveSettings,
-        fetchPreview: makeFetchPreview(),
-        fetchBackdropPreview,
+        fetchPreview,
       },
       global: {
         plugins: [createPinia()],
@@ -466,25 +521,21 @@ describe('RenderSettingsForm', () => {
     mountWithBackdrop({ backdrop_edge_inset_x: 12, backdrop_edge_inset_y: 7 }, fetchBackdropPreview)
     await flushPromises()
 
-    expect(fetchBackdropPreview).toHaveBeenCalledWith(
-      5, // backdrop layout total (top 5x1)
-      expect.any(String), // ratings_order
-      'v', // backdrop_badge_style
-      'i', // backdrop_label_style
-      100, // backdrop_text_size
-      'd', // badge direction (no longer configurable)
-      '', // ratings_exclude
-       'r', // backdrop_badge_shape
-       80, // backdrop_badge_alpha
-       12, // backdrop_edge_inset_x
-       7, // backdrop_edge_inset_y
-       expect.stringContaining('"top"'), // backdrop_layout
-       undefined, // badge_size (legacy — the form no longer sends it)
-       100, // backdrop_logo_size
-       {},
-       100, // backdrop_badge_width
-       100, // backdrop_badge_height
-    )
+    expect(fetchBackdropPreview).toHaveBeenCalledWith('backdrop', expect.objectContaining({
+      ratingsLimit: 5, // backdrop layout total (top 5x1)
+      badgeStyle: 'v', // backdrop_badge_style
+      labelStyle: 'i', // backdrop_label_style
+      textSize: 100, // backdrop_text_size
+      badgeDirection: 'd', // no longer configurable
+      badgeShape: 'r', // backdrop_badge_shape
+      badgeAlpha: 80, // backdrop_badge_alpha
+      edgeInsetX: 12, // backdrop_edge_inset_x
+      edgeInsetY: 7, // backdrop_edge_inset_y
+      layout: expect.stringContaining('"top"'), // backdrop_layout
+      logoSize: 100, // backdrop_logo_size
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('coerces a cleared edge-inset input to 0 in the preview fetch', async () => {
@@ -499,25 +550,21 @@ describe('RenderSettingsForm', () => {
     vi.advanceTimersByTime(500)
     await flushPromises()
 
-    expect(fetchBackdropPreview).toHaveBeenCalledWith(
-      5, // backdrop layout total (top 5x1)
-      expect.any(String), // ratings_order
-      'v', // backdrop_badge_style
-      'i', // backdrop_label_style
-      100, // backdrop_text_size
-      'd', // badge direction (no longer configurable)
-      '', // ratings_exclude
-      'r', // backdrop_badge_shape
-      80, // backdrop_badge_alpha
-      0, // edge_inset_x coerced from '' -> 0
-      10, // edge_inset_y unchanged
-       expect.stringContaining('"top"'), // backdrop_layout
-       undefined, // badge_size (legacy — the form no longer sends it)
-       100, // backdrop_logo_size
-       {},
-       100, // backdrop_badge_width
-       100, // backdrop_badge_height
-    )
+    expect(fetchBackdropPreview).toHaveBeenCalledWith('backdrop', expect.objectContaining({
+      ratingsLimit: 5, // backdrop layout total (top 5x1)
+      badgeStyle: 'v', // backdrop_badge_style
+      labelStyle: 'i', // backdrop_label_style
+      textSize: 100, // backdrop_text_size
+      badgeDirection: 'd', // no longer configurable
+      badgeShape: 'r', // backdrop_badge_shape
+      badgeAlpha: 80, // backdrop_badge_alpha
+      edgeInsetX: 0, // edge_inset_x coerced from '' -> 0
+      edgeInsetY: 10, // edge_inset_y unchanged
+      layout: expect.stringContaining('"top"'), // backdrop_layout
+      logoSize: 100, // backdrop_logo_size
+      badgeWidth: 100,
+      badgeHeight: 100,
+    }))
   })
 
   it('editing a backdrop edge inset auto-saves the new value', async () => {
@@ -653,8 +700,11 @@ describe('RenderSettingsForm', () => {
     })
     await flushPromises()
 
-    expect(fetchPreview).toHaveBeenCalledWith(
-      3, expect.any(String), expect.any(String), expect.any(String), expect.any(String), expect.any(Number), expect.any(String), expect.any(String), expect.any(String), expect.any(Number), expect.any(String), undefined, expect.any(Number), {}, 120, 90,
-    )
+    expect(fetchPreview).toHaveBeenCalledWith('poster', expect.objectContaining({
+      ratingsLimit: 3,
+      logoSize: expect.any(Number),
+      badgeWidth: 120,
+      badgeHeight: 90,
+    }))
   })
 })

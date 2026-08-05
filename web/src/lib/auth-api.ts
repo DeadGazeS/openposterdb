@@ -1,60 +1,6 @@
-const BASE_URL = import.meta.env.VITE_API_URL || ''
+import type { FreeKeyDefaults } from '@/lib/settings'
 
-/**
- * Global default render settings the free API key serves with, returned by
- * `GET /api/free-key/settings`. Enum-coded fields use the same short codes as
- * the image query params (e.g. badge style `h`/`v`/`d`, image source `t`/`f`).
- */
-export interface FreeKeyDefaults {
-  image_source: string
-  lang: string
-  textless: boolean
-  ratings_limit: number
-  ratings_order: string
-  ratings_exclude: string
-  poster_layout: string
-  logo_ratings_limit: number
-  backdrop_ratings_limit: number
-  poster_badge_style: string
-  logo_badge_style: string
-  backdrop_badge_style: string
-  poster_label_style: string
-  logo_label_style: string
-  backdrop_label_style: string
-  poster_badge_direction: string
-  poster_fit: string
-  poster_text_size: number
-  logo_text_size: number
-  backdrop_text_size: number
-  poster_badge_size: number
-  logo_badge_size: number
-  backdrop_badge_size: number
-  poster_logo_size: number
-  logo_logo_size: number
-  backdrop_logo_size: number
-  logo_layout: string
-  backdrop_layout: string
-  backdrop_badge_direction: string
-  backdrop_edge_inset_x: number
-  backdrop_edge_inset_y: number
-  episode_ratings_limit: number
-  episode_badge_style: string
-  episode_label_style: string
-  episode_text_size: number
-  episode_badge_size: number
-  episode_logo_size: number
-  episode_layout: string
-  episode_badge_direction: string
-  episode_blur: boolean
-  poster_badge_shape: string
-  logo_badge_shape: string
-  backdrop_badge_shape: string
-  episode_badge_shape: string
-  poster_badge_alpha: number
-  logo_badge_alpha: number
-  backdrop_badge_alpha: number
-  episode_badge_alpha: number
-}
+const BASE_URL = import.meta.env.VITE_API_URL || ''
 
 export const authApi = {
   status: (): Promise<Response> =>

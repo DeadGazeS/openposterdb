@@ -10,7 +10,7 @@ vi.stubGlobal('sessionStorage', {
   removeItem: vi.fn(),
 })
 
-function makeRouter() {
+export function makeRouter() {
   const router = createRouter({
     history: createWebHistory(),
     routes: [
@@ -29,7 +29,6 @@ function makeRouter() {
           { path: 'logos', name: 'logos', component: { template: '<div>Logos</div>' } },
           { path: 'backdrops', name: 'backdrops', component: { template: '<div>Backdrops</div>' } },
           { path: 'episodes', name: 'episodes', component: { template: '<div>Episodes</div>' } },
-          { path: 'keys', name: 'keys', component: { template: '<div>Keys</div>' } },
         ],
       },
       {
@@ -209,5 +208,69 @@ describe('router', () => {
     await router.isReady()
 
     expect(router.currentRoute.value.name).toBe('docs')
+  })
+})
+
+describe('router - API key session', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('API key session visiting / redirects to /key-settings', async () => {
+    const router = makeRouter()
+    const auth = useAuthStore()
+    auth.apiKeyToken = 'jwt-token'
+
+    await router.push('/')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('key-settings')
+  })
+
+  it('API key session visiting /admin redirects to /key-settings', async () => {
+    const router = makeRouter()
+    const auth = useAuthStore()
+    auth.apiKeyToken = 'jwt-token'
+
+    await router.push('/admin')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('key-settings')
+  })
+
+  it('API key session visiting /login redirects to /key-settings', async () => {
+    const router = makeRouter()
+    const auth = useAuthStore()
+    auth.apiKeyToken = 'jwt-token'
+
+    await router.push('/login')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('key-settings')
+  })
+
+  it('unauthenticated user visiting /key-settings redirects to /login', async () => {
+    const router = makeRouter()
+    const auth = useAuthStore()
+
+    await router.push('/key-settings')
+    await router.isReady()
+
+    expect(router.currentRoute.value.name).toBe('login')
+  })
+
+  it('admin session can access /admin but not /key-settings', async () => {
+    const router = makeRouter()
+    const auth = useAuthStore()
+    auth.token = 'jwt-token'
+
+    await router.push('/admin')
+    await router.isReady()
+    expect(router.currentRoute.value.name).toBe('dashboard')
+
+    // Admin without apiKey gets bounced from /key-settings → login → dashboard
+    await router.push('/key-settings')
+    await router.isReady()
+    expect(router.currentRoute.value.name).toBe('dashboard')
   })
 })

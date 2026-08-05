@@ -5,7 +5,7 @@ import FreeApiKeyCard from '@/components/FreeApiKeyCard.vue'
 import { Select } from '@/components/ui/select'
 import { useAuthStore } from '@/stores/auth'
 import { DEFAULT_RATINGS_ORDER } from '@/lib/constants'
-import type { FreeKeyDefaults } from '@/lib/auth-api'
+import type { FreeKeyDefaults } from '@/lib/settings'
 
 /**
  * These tests mount the card with the REAL reka-ui Select components (the rest

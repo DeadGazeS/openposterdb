@@ -2,9 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { selfApi, type SaveSettingsPayload } from '@/lib/api'
+import { selfApi } from '@/lib/api'
+import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
-import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
+import type { RenderSettings } from '@/lib/settings'
 import { Button } from '@/components/ui/button'
 import { BookOpen } from 'lucide-vue-next'
 
@@ -105,11 +106,8 @@ function handleLogout() {
           :load-settings="loadSettings"
           :save-settings="saveSettings"
           :reset-settings="resetSettings"
-          :fetch-preview="selfApi.previewPoster"
-          :fetch-logo-preview="selfApi.previewLogo"
-          :fetch-backdrop-preview="selfApi.previewBackdrop"
-          :fetch-episode-preview="selfApi.previewEpisode"
-        />
+          :fetch-preview="selfApi.preview"
+                                      />
       </div>
     </div>
   </main>
