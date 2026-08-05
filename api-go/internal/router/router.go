@@ -9,22 +9,26 @@ import (
 
 	"openposterdb/internal/config"
 	"openposterdb/internal/handlers"
+	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
 
 type AppState struct {
-	Config        *config.Config
-	DB            *sql.DB
-	HTTPClient    *http.Client
-	TMDB          *services.TmdbClient
-	OMDB          *services.OmdbClient
-	MDBList       *services.MdblistClient
-	Fanart        *services.FanartClient
-	Trakt         *services.TraktClient
-	ServiceKeys   *services.ServiceKeyManager
-	SecureCookies bool
-	Caches        *services.MemCacheSet
-	JWTSecret     []byte
+	Config          *config.Config
+	DB              *sql.DB
+	HTTPClient      *http.Client
+	TMDB            *services.TmdbClient
+	OMDB            *services.OmdbClient
+	MDBList         *services.MdblistClient
+	Fanart          *services.FanartClient
+	Trakt           *services.TraktClient
+	ServiceKeys     *services.ServiceKeyManager
+	SecureCookies   bool
+	Caches          *services.MemCacheSet
+	CDNHashes       *services.HashRegistry
+	Inflight        *image.InflightSet
+	JWTSecret       []byte
+	LastUsedFlusher *services.LastUsedFlusher
 }
 
 func New(state *AppState) *Router {
@@ -65,7 +69,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r.mux.ServeHTTP(w, req)
+	CORS(r.state.Config.CORSOrigin)(Gzip(r.mux)).ServeHTTP(w, req)
 }
 
 func isAPIPath(path string) bool {
@@ -103,4 +107,8 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (r *Router) jwtSecret() []byte {
 	return r.state.JWTSecret
+}
+
+func (r *Router) lastUsed() handlers.KeyRecorder {
+	return r.state.LastUsedFlusher
 }

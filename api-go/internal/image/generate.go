@@ -255,22 +255,6 @@ func resizeExact(img image.Image, targetW, targetH int) *image.RGBA {
 // back up with bilinear interpolation — a cheap, dependency-free blur used for
 // blurred backdrops (the episode spoiler blur and the poster blur-fill fit).
 // Very small images are returned unchanged.
-func blurImage(img *image.RGBA, divisor int) *image.RGBA {
-	if divisor < 2 {
-		divisor = 2
-	}
-	b := img.Bounds()
-	cw, ch := b.Dx(), b.Dy()
-	if cw < divisor*2 || ch < divisor*2 {
-		return img
-	}
-	small := image.NewRGBA(image.Rect(0, 0, cw/divisor, ch/divisor))
-	draw.ApproxBiLinear.Scale(small, small.Bounds(), img, b, draw.Src, nil)
-	out := image.NewRGBA(b)
-	draw.ApproxBiLinear.Scale(out, out.Bounds(), small, small.Bounds(), draw.Src, nil)
-	return out
-}
-
 // --- Logo rendering ---
 
 func RenderLogoSync(logoBytes []byte, params RenderParams) ([]byte, error) {

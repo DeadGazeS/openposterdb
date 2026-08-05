@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// KeyRecorder is satisfied by anything that can remember an api_keys ID for
+// later persistence (e.g. services.LastUsedFlusher). Passing nil disables
+// recording.
+type KeyRecorder interface {
+	Record(keyID int64)
+}
+
+// recordKey is a helper that safely no-ops on a nil recorder.
+func recordKey(r KeyRecorder, keyID int64) {
+	if r != nil {
+		r.Record(keyID)
+	}
+}
+
 type contextKey string
 
 const authUserKey contextKey = "authUser"
@@ -65,7 +79,7 @@ func RequireAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 	}
 }
 
-func RequireAPIKeyAuth(jwtSecret []byte) func(http.Handler) http.Handler {
+func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
@@ -79,6 +93,11 @@ func RequireAPIKeyAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
+
+			// Record the key use so the admin UI can show when each key was
+			// last seen. nil-safe so routes that don't pass a flusher (tests)
+			// keep working.
+			recordKey(flusher, claims.KeyID)
 
 			next.ServeHTTP(w, WithAPIKeyUser(r, claims.KeyID))
 		})

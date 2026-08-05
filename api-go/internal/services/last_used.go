@@ -1,12 +1,10 @@
-package app
+package services
 
 import (
 	"database/sql"
 	"log/slog"
 	"sync"
 	"time"
-
-	"openposterdb/internal/services"
 )
 
 // LastUsedFlusher batches api_keys.last_used_at updates: handlers record key
@@ -23,6 +21,15 @@ type LastUsedFlusher struct {
 
 func NewLastUsedFlusher(db *sql.DB, interval time.Duration) *LastUsedFlusher {
 	return &LastUsedFlusher{db: db, interval: interval}
+}
+
+// Record marks the key as recently used; the next Flush will persist it to
+// the database. Safe to call from any goroutine (sync.Map).
+func (f *LastUsedFlusher) Record(keyID int64) {
+	if f == nil {
+		return
+	}
+	f.Pending.Store(keyID, struct{}{})
 }
 
 // Start launches the periodic flush worker; it runs until the process exits.
@@ -51,7 +58,7 @@ func (f *LastUsedFlusher) flush() {
 		return true
 	})
 	if len(ids) > 0 {
-		if err := services.BatchUpdateLastUsed(f.db, ids); err != nil {
+		if err := BatchUpdateLastUsed(f.db, ids); err != nil {
 			slog.Warn("failed to batch update last_used_at", "error", err)
 		}
 	}
