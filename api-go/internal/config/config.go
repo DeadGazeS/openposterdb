@@ -1,6 +1,9 @@
 package config
 
 import (
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -27,9 +30,13 @@ type Config struct {
 	FreeKeyEnabled      *bool
 	DisablePublicPages  bool
 	LogLevel            string
+	JWTSecret           []byte
+	SecureCookies       bool
+	AdminUsername       string
+	AdminPassword       string
 }
 
-func FromEnv() *Config {
+func FromEnv() (*Config, error) {
 	c := &Config{
 		TMDBAPIKey:          sanitizeValue(optionalSecret("TMDB_API_KEY")),
 		OMDBAPIKey:          sanitizeValue(optionalSecret("OMDB_API_KEY")),
@@ -57,15 +64,45 @@ func FromEnv() *Config {
 		c.FreeKeyEnabled = &b
 	}
 
-	return c
+	jwtSecret, err := loadJWTSecret()
+	if err != nil {
+		return nil, err
+	}
+	c.JWTSecret = jwtSecret
+	c.SecureCookies = loadSecureCookies()
+	c.AdminUsername = os.Getenv("ADMIN_USERNAME")
+	c.AdminPassword = os.Getenv("ADMIN_PASSWORD")
+
+	return c, nil
 }
 
-func requireEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic(key + " must be set")
+// loadJWTSecret reads the required JWT_SECRET env var (64 hex chars = 32
+// bytes) and returns an actionable error when it is missing or invalid.
+func loadJWTSecret() ([]byte, error) {
+	hexStr := os.Getenv("JWT_SECRET")
+	if hexStr == "" {
+		return nil, errors.New("JWT_SECRET is not set. This is required.\n" +
+			"Generate one with: openssl rand -hex 32\n" +
+			"Then add it to your .env file.")
 	}
-	return v
+	bytes, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("JWT_SECRET is not valid hex: %w", err)
+	}
+	if len(bytes) != 32 {
+		return nil, fmt.Errorf("JWT_SECRET must be 32 bytes (64 hex chars), got %d", len(bytes))
+	}
+	return bytes, nil
+}
+
+// loadSecureCookies reports whether cookies get the Secure attribute. Defaults
+// to true unless COOKIE_SECURE is explicitly "false" or "0".
+func loadSecureCookies() bool {
+	val := os.Getenv("COOKIE_SECURE")
+	if val == "" {
+		return true
+	}
+	return val != "false" && val != "0"
 }
 
 func optionalSecret(key string) string {

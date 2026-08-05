@@ -1,5 +1,7 @@
 package main
 
+import "openposterdb/internal/app"
+
 var schemaSQL = []string{
 	`CREATE TABLE IF NOT EXISTS image_meta (
 		cache_key TEXT PRIMARY KEY,
@@ -62,380 +64,375 @@ var schemaSQL = []string{
 	)`,
 }
 
-type migration struct {
-	SQL           string
-	ExpectedError string
-}
-
-var migrations = []migration{
+var migrations = []app.Migration{
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN ratings_limit INTEGER NOT NULL DEFAULT 3",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN ratings_limit INTEGER NOT NULL DEFAULT 3",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN ratings_order TEXT NOT NULL DEFAULT 'mal,imdb,lb,rt,rta,mc,tmdb,trakt'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN ratings_order TEXT NOT NULL DEFAULT 'mal,imdb,lb,rt,rta,mc,tmdb,trakt'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE image_meta ADD COLUMN image_type TEXT NOT NULL DEFAULT 'poster'",
-		"duplicate column",
+		SQL:           "ALTER TABLE image_meta ADD COLUMN image_type TEXT NOT NULL DEFAULT 'poster'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_position TEXT NOT NULL DEFAULT 'bc'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_position TEXT NOT NULL DEFAULT 'bc'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_ratings_limit INTEGER NOT NULL DEFAULT 5",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_ratings_limit INTEGER NOT NULL DEFAULT 5",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_ratings_limit INTEGER NOT NULL DEFAULT 5",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_ratings_limit INTEGER NOT NULL DEFAULT 5",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_style TEXT NOT NULL DEFAULT 'h'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_style TEXT NOT NULL DEFAULT 'h'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_style TEXT NOT NULL DEFAULT 'v'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_style TEXT NOT NULL DEFAULT 'v'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_style TEXT NOT NULL DEFAULT 'v'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_style TEXT NOT NULL DEFAULT 'v'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_label_style TEXT NOT NULL DEFAULT 'i'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_label_style TEXT NOT NULL DEFAULT 'i'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_label_style TEXT NOT NULL DEFAULT 'i'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_label_style TEXT NOT NULL DEFAULT 'i'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_label_style TEXT NOT NULL DEFAULT 'i'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_label_style TEXT NOT NULL DEFAULT 'i'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_direction TEXT NOT NULL DEFAULT 'd'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_direction TEXT NOT NULL DEFAULT 'd'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE available_ratings ADD COLUMN release_date TEXT",
-		"duplicate column",
+		SQL:           "ALTER TABLE available_ratings ADD COLUMN release_date TEXT",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"CREATE INDEX IF NOT EXISTS idx_available_ratings_updated_at ON available_ratings(updated_at)",
-		"already exists",
+		SQL:           "CREATE INDEX IF NOT EXISTS idx_available_ratings_updated_at ON available_ratings(updated_at)",
+		ExpectedError: "already exists",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_size TEXT NOT NULL DEFAULT 'm'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_size TEXT NOT NULL DEFAULT 'm'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_size TEXT NOT NULL DEFAULT 'm'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_size TEXT NOT NULL DEFAULT 'm'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_size TEXT NOT NULL DEFAULT 'm'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_size TEXT NOT NULL DEFAULT 'm'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"DROP INDEX IF EXISTS idx_image_meta_type",
-		"no such index",
+		SQL:           "DROP INDEX IF EXISTS idx_image_meta_type",
+		ExpectedError: "no such index",
 	},
 	{
-		"CREATE INDEX IF NOT EXISTS idx_image_meta_type_created ON image_meta(image_type, created_at DESC)",
-		"already exists",
+		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_created ON image_meta(image_type, created_at DESC)",
+		ExpectedError: "already exists",
 	},
 	{
-		"ALTER TABLE api_key_settings RENAME COLUMN poster_source TO image_source",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings RENAME COLUMN poster_source TO image_source",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings RENAME COLUMN fanart_lang TO lang",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings RENAME COLUMN fanart_lang TO lang",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings RENAME COLUMN fanart_textless TO textless",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings RENAME COLUMN fanart_textless TO textless",
+		ExpectedError: "no such column",
 	},
 	{
-		"UPDATE global_settings SET key = 'image_source' WHERE key = 'poster_source'",
-		"no such table",
+		SQL:           "UPDATE global_settings SET key = 'image_source' WHERE key = 'poster_source'",
+		ExpectedError: "no such table",
 	},
 	{
-		"UPDATE global_settings SET key = 'lang' WHERE key = 'fanart_lang'",
-		"no such table",
+		SQL:           "UPDATE global_settings SET key = 'lang' WHERE key = 'fanart_lang'",
+		ExpectedError: "no such table",
 	},
 	{
-		"UPDATE global_settings SET key = 'textless' WHERE key = 'fanart_textless'",
-		"no such table",
+		SQL:           "UPDATE global_settings SET key = 'textless' WHERE key = 'fanart_textless'",
+		ExpectedError: "no such table",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_ratings_limit INTEGER NOT NULL DEFAULT 1",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_ratings_limit INTEGER NOT NULL DEFAULT 1",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_style TEXT NOT NULL DEFAULT 'v'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_style TEXT NOT NULL DEFAULT 'v'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_label_style TEXT NOT NULL DEFAULT 'o'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_label_style TEXT NOT NULL DEFAULT 'o'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_size TEXT NOT NULL DEFAULT 'l'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_size TEXT NOT NULL DEFAULT 'l'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_position TEXT NOT NULL DEFAULT 'tr'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_position TEXT NOT NULL DEFAULT 'tr'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_direction TEXT NOT NULL DEFAULT 'v'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_direction TEXT NOT NULL DEFAULT 'v'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_blur INTEGER NOT NULL DEFAULT 0",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_blur INTEGER NOT NULL DEFAULT 0",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_position TEXT NOT NULL DEFAULT 'tr'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_position TEXT NOT NULL DEFAULT 'tr'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_direction TEXT NOT NULL DEFAULT 'v'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_direction TEXT NOT NULL DEFAULT 'v'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN ratings_exclude TEXT NOT NULL DEFAULT ''",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN ratings_exclude TEXT NOT NULL DEFAULT ''",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_shape TEXT NOT NULL DEFAULT 'r'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_shape TEXT NOT NULL DEFAULT 'r'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_shape TEXT NOT NULL DEFAULT 'r'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_shape TEXT NOT NULL DEFAULT 'r'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_shape TEXT NOT NULL DEFAULT 'r'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_shape TEXT NOT NULL DEFAULT 'r'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_shape TEXT NOT NULL DEFAULT 'r'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_shape TEXT NOT NULL DEFAULT 'r'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_alpha INTEGER NOT NULL DEFAULT 80",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_alpha INTEGER NOT NULL DEFAULT 80",
+		ExpectedError: "duplicate column",
 	},
 	{
 		// Migrate pre-alpha DBs: drop the old enum column (data replaced by the
 		// new alpha default).
-		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_background",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badge_background",
+		ExpectedError: "no such column",
 	},
 	{
 		// The logo/backdrop/episode_badge_background columns were added by a
 		// later migration but nothing ever reads or writes them (the alpha
 		// replaced the background enum). Drop them for DBs that already ran the
 		// ADD; fresh DBs never had them and tolerate the failed DROP.
-		"ALTER TABLE api_key_settings DROP COLUMN logo_badge_background",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN logo_badge_background",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_background",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_background",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN episode_badge_background",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN episode_badge_background",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_split INTEGER NOT NULL DEFAULT 0",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_split INTEGER NOT NULL DEFAULT 0",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_fit TEXT NOT NULL DEFAULT 'native'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_fit TEXT NOT NULL DEFAULT 'native'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_edge_inset_x INTEGER NOT NULL DEFAULT 0",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_edge_inset_x INTEGER NOT NULL DEFAULT 0",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_text_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_text_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_text_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_text_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_text_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_text_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_text_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_text_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_width INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_width INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_badge_height INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_height INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_width INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_width INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_height INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_height INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_width INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_width INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_height INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_height INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_width INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_width INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_badge_height INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_height INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN poster_logo_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_logo_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_logo_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_logo_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN backdrop_logo_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_logo_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN episode_logo_size INTEGER NOT NULL DEFAULT 100",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_logo_size INTEGER NOT NULL DEFAULT 100",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_position TEXT NOT NULL DEFAULT 'bc'",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_position TEXT NOT NULL DEFAULT 'bc'",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN logo_badge_split INTEGER NOT NULL DEFAULT 0",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_split INTEGER NOT NULL DEFAULT 0",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_size",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badge_size",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN logo_badge_size",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN logo_badge_size",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_size",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_size",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN episode_badge_size",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN episode_badge_size",
+		ExpectedError: "no such column",
 	},
 	{
-		`ALTER TABLE api_key_settings ADD COLUMN poster_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":3,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
-		"duplicate column",
+		SQL:           `ALTER TABLE api_key_settings ADD COLUMN poster_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":3,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		ExpectedError: "duplicate column",
 	},
 	{
-		`ALTER TABLE api_key_settings ADD COLUMN logo_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":5,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
-		"duplicate column",
+		SQL:           `ALTER TABLE api_key_settings ADD COLUMN logo_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":5,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		ExpectedError: "duplicate column",
 	},
 	{
-		`ALTER TABLE api_key_settings ADD COLUMN backdrop_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":5,"rows":1,"start":"r"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
-		"duplicate column",
+		SQL:           `ALTER TABLE api_key_settings ADD COLUMN backdrop_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":5,"rows":1,"start":"r"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		ExpectedError: "duplicate column",
 	},
 	{
-		`ALTER TABLE api_key_settings ADD COLUMN episode_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
-		"duplicate column",
+		SQL:           `ALTER TABLE api_key_settings ADD COLUMN episode_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN poster_position",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_position",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN logo_position",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN logo_position",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN backdrop_position",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN backdrop_position",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN episode_position",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN episode_position",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN poster_badge_split",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badge_split",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN logo_badge_split",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN logo_badge_split",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN poster_badges_per_row",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badges_per_row",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN logo_badges_per_row",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN logo_badges_per_row",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN backdrop_badges_per_row",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN backdrop_badges_per_row",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings DROP COLUMN episode_badges_per_row",
-		"no such column",
+		SQL:           "ALTER TABLE api_key_settings DROP COLUMN episode_badges_per_row",
+		ExpectedError: "no such column",
 	},
 	{
-		"ALTER TABLE api_key_settings ADD COLUMN colors TEXT NOT NULL DEFAULT ''",
-		"duplicate column",
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN colors TEXT NOT NULL DEFAULT ''",
+		ExpectedError: "duplicate column",
 	},
 	{
-		"ALTER TABLE admin_users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'",
-		"duplicate column",
+		SQL:           "ALTER TABLE admin_users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'",
+		ExpectedError: "duplicate column",
 	},
 }

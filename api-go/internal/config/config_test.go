@@ -11,6 +11,12 @@ func setEnv(t *testing.T, key, value string) {
 	t.Cleanup(func() { os.Unsetenv(key) })
 }
 
+func TestMain(m *testing.M) {
+	// JWT_SECRET is required by FromEnv; use a fixed valid value for tests.
+	os.Setenv("JWT_SECRET", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	os.Exit(m.Run())
+}
+
 func unsetEnv(t *testing.T, key string) {
 	t.Helper()
 	os.Unsetenv(key)
@@ -19,7 +25,10 @@ func unsetEnv(t *testing.T, key string) {
 
 func TestFromEnvDefaults(t *testing.T) {
 	setEnv(t, "TMDB_API_KEY", "tmdb_test")
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.TMDBAPIKey != "tmdb_test" {
 		t.Errorf("expected tmdb_test, got %s", cfg.TMDBAPIKey)
 	}
@@ -50,7 +59,10 @@ func TestFromEnvCustomValues(t *testing.T) {
 	setEnv(t, "ENABLE_CDN_REDIRECTS", "true")
 	setEnv(t, "EXTERNAL_CACHE_ONLY", "1")
 
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.CacheDir != "/custom/cache" {
 		t.Errorf("expected /custom/cache, got %s", cfg.CacheDir)
 	}
@@ -69,7 +81,10 @@ func TestOptionalSecretTrimsWhitespace(t *testing.T) {
 	setEnv(t, "TMDB_API_KEY", "tmdb_test")
 	setEnv(t, "OMDB_API_KEY", "  omdb_key  ")
 
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.OMDBAPIKey != "omdb_key" {
 		t.Errorf("expected omdb_key, got %q", cfg.OMDBAPIKey)
 	}
@@ -79,7 +94,10 @@ func TestOptionalSecretEmptyTreatedAsAbsent(t *testing.T) {
 	setEnv(t, "TMDB_API_KEY", "tmdb_test")
 	setEnv(t, "MDBLIST_API_KEY", "")
 
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(cfg.MDBListAPIKeys) != 0 {
 		t.Errorf("expected empty MDBList keys, got %v", cfg.MDBListAPIKeys)
 	}
@@ -89,7 +107,10 @@ func TestCommaSeparatedKeys(t *testing.T) {
 	setEnv(t, "TMDB_API_KEY", "tmdb_test")
 	setEnv(t, "MDBLIST_API_KEY", "key1, key2 ,key3")
 
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(cfg.MDBListAPIKeys) != 3 {
 		t.Fatalf("expected 3 keys, got %d", len(cfg.MDBListAPIKeys))
 	}
@@ -100,7 +121,10 @@ func TestCommaSeparatedKeys(t *testing.T) {
 
 func TestTMDBKeyOptional(t *testing.T) {
 	os.Unsetenv("TMDB_API_KEY")
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.TMDBAPIKey != "" {
 		t.Errorf("expected empty TMDB key, got %s", cfg.TMDBAPIKey)
 	}
@@ -110,7 +134,10 @@ func TestFreeKeyEnabled(t *testing.T) {
 	setEnv(t, "TMDB_API_KEY", "tmdb_test")
 	setEnv(t, "FREE_KEY_ENABLED", "true")
 
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.FreeKeyEnabled == nil || !*cfg.FreeKeyEnabled {
 		t.Error("expected FreeKeyEnabled to be true")
 	}
