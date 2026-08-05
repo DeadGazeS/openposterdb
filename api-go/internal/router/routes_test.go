@@ -141,6 +141,12 @@ var routeProbes = []probe{
 	// image catch-all (unknown API key -> JSON error, not mux 404)
 	{"GET", "/" + strings.Repeat("a", 64) + "/p/tmdb/1", -1},
 	{"GET", "/" + strings.Repeat("a", 64) + "/isValid", -1},
+	// CDN content-addressed route — unknown hash must yield the handler's JSON
+	// 404, not the mux's plain-text 404 (so the user's edge can distinguish
+	// "hash expired" from a generic miss).
+	{"GET", "/c/deadbeefdeadbeefdeadbeefdeadbeef/imdb/poster-default/tt999.jpg", -1},
+	// OpenAPI spec (PUBLIC by default — must yield application/json, not mux 404)
+	{"GET", "/api/openapi.json", 200},
 	// unknown single-segment path: mux redirects to /x/ which the catch-all
 	// matches, so it must never yield the mux's plain-text 404
 	{"GET", "/definitely-not-a-route", -1},
