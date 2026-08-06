@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"golang.org/x/image/font"
+
 	"openposterdb/internal/httpx"
 	"openposterdb/internal/image"
 	"openposterdb/internal/services"
@@ -15,6 +17,27 @@ const (
 	previewPosterRatingsLimit       = 3
 	previewLogoBackdropRatingsLimit = 5
 )
+
+// loadPreviewFonts resolves the value + label font faces for a preview render
+// at the given text size. On missing font it writes a 500 response and returns
+// ok=false; callers should `return` on !ok.
+func loadPreviewFonts(w http.ResponseWriter, textSize services.ScalePercent) (labelFace, valueFace font.Face, ok bool) {
+	labelFace, valueFace = image.GetFontFacesAt(float64(textSize))
+	if valueFace == nil || labelFace == nil {
+		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
+		return nil, nil, false
+	}
+	return labelFace, valueFace, true
+}
+
+// writePreviewImage writes the preview response headers (Content-Type +
+// Cache-Control) and the rendered bytes. Content-type per kind:
+// image/jpeg for poster/backdrop/episode, image/png for logo.
+func writePreviewImage(w http.ResponseWriter, contentType string, rendered []byte) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write(rendered)
+}
 
 func sampleBadges() []services.RatingBadge {
 	return []services.RatingBadge{
@@ -344,9 +367,8 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	badges := p.demoBadges("poster")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
+	labelFace, valueFace, fontOK := loadPreviewFonts(w, textSize)
+	if !fontOK {
 		return
 	}
 
@@ -381,9 +403,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/jpeg", rendered)
 }
 
 func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
@@ -463,9 +483,8 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 
 	badges := p.demoBadges("logo")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
+	labelFace, valueFace, fontOK := loadPreviewFonts(w, textSize)
+	if !fontOK {
 		return
 	}
 
@@ -489,9 +508,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/png", rendered)
 }
 
 func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) {
@@ -582,9 +599,8 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	}
 	badges := p.demoBadges("backdrop")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
+	labelFace, valueFace, fontOK := loadPreviewFonts(w, textSize)
+	if !fontOK {
 		return
 	}
 
@@ -608,9 +624,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/jpeg", rendered)
 }
 
 func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
@@ -697,9 +711,8 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	}
 	badges := p.demoBadges("episode")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
+	labelFace, valueFace, fontOK := loadPreviewFonts(w, textSize)
+	if !fontOK {
 		return
 	}
 
@@ -723,9 +736,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/jpeg", rendered)
 }
 
 // --- Admin image list/file serving ---
