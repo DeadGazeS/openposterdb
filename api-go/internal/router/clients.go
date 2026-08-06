@@ -5,13 +5,20 @@ import (
 	"openposterdb/internal/services"
 )
 
-// The Set* helpers mutate the rating-provider client fields under
-// clientsMu (writer lock); the *Locked variants assume the caller already
-// holds it. RefreshClientsFromKeys uses the Locked variants to swap every
-// client atomically as one batch — readers either see the pre-refresh
-// snapshot or the post-refresh snapshot, never a torn mix.
+// The setupX helpers mutate the rating-provider client fields; the caller
+// is responsible for holding clientsMu (writer lock). SetupX wraps each in
+// withClientsLock; RefreshClientsFromKeys holds the lock once for the whole
+// batch — readers either see the pre-refresh snapshot or the post-refresh
+// snapshot, never a torn mix.
 
-func (s *AppState) setTMDBLocked(key string) {
+// withClientsLock runs fn while holding the clientsMu writer lock.
+func (s *AppState) withClientsLock(fn func()) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	fn()
+}
+
+func (s *AppState) setTMDB(key string) {
 	if key != "" {
 		s.TMDB = services.NewTmdbClient(key, s.HTTPClient)
 	} else {
@@ -20,9 +27,7 @@ func (s *AppState) setTMDBLocked(key string) {
 }
 
 func (s *AppState) SetupTMDB(key string) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-	s.setTMDBLocked(key)
+	s.withClientsLock(func() { s.setTMDB(key) })
 }
 
 // previewConfig builds the shared config for the admin/key preview handlers.
@@ -41,7 +46,7 @@ func (s *AppState) previewConfig() *handlers.PreviewConfig {
 	}
 }
 
-func (s *AppState) setOMDBLocked(keys []string) {
+func (s *AppState) setOMDB(keys []string) {
 	if len(keys) > 0 {
 		s.OMDB = services.NewOmdbClient(keys, s.HTTPClient)
 	} else {
@@ -50,12 +55,10 @@ func (s *AppState) setOMDBLocked(keys []string) {
 }
 
 func (s *AppState) SetupOMDB(keys []string) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-	s.setOMDBLocked(keys)
+	s.withClientsLock(func() { s.setOMDB(keys) })
 }
 
-func (s *AppState) setMDBListLocked(keys []string) {
+func (s *AppState) setMDBList(keys []string) {
 	if len(keys) > 0 {
 		s.MDBList = services.NewMdblistClient(keys, s.HTTPClient)
 	} else {
@@ -64,12 +67,10 @@ func (s *AppState) setMDBListLocked(keys []string) {
 }
 
 func (s *AppState) SetupMDBList(keys []string) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-	s.setMDBListLocked(keys)
+	s.withClientsLock(func() { s.setMDBList(keys) })
 }
 
-func (s *AppState) setFanartLocked(keys []string) {
+func (s *AppState) setFanart(keys []string) {
 	if len(keys) > 0 {
 		s.Fanart = services.NewFanartClient(keys, s.HTTPClient)
 	} else {
@@ -78,12 +79,10 @@ func (s *AppState) setFanartLocked(keys []string) {
 }
 
 func (s *AppState) SetupFanart(keys []string) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-	s.setFanartLocked(keys)
+	s.withClientsLock(func() { s.setFanart(keys) })
 }
 
-func (s *AppState) setTraktLocked(keys []string) {
+func (s *AppState) setTrakt(keys []string) {
 	if len(keys) > 0 {
 		s.Trakt = services.NewTraktClient(keys, s.HTTPClient)
 	} else {
@@ -92,9 +91,7 @@ func (s *AppState) setTraktLocked(keys []string) {
 }
 
 func (s *AppState) SetupTrakt(keys []string) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-	s.setTraktLocked(keys)
+	s.withClientsLock(func() { s.setTrakt(keys) })
 }
 
 // RefreshClientsFromKeys rebuilds all rating-provider clients from the
@@ -104,11 +101,11 @@ func (s *AppState) SetupTrakt(keys []string) {
 func (s *AppState) RefreshClientsFromKeys() {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
-	s.setTMDBLocked(s.ServiceKeys.TMDBKey())
-	s.setOMDBLocked(s.ServiceKeys.OMDBKeys())
-	s.setMDBListLocked(s.ServiceKeys.MDBListKeys())
-	s.setFanartLocked(s.ServiceKeys.FanartKeys())
-	s.setTraktLocked(s.ServiceKeys.TraktClientIDs())
+	s.setTMDB(s.ServiceKeys.TMDBKey())
+	s.setOMDB(s.ServiceKeys.OMDBKeys())
+	s.setMDBList(s.ServiceKeys.MDBListKeys())
+	s.setFanart(s.ServiceKeys.FanartKeys())
+	s.setTrakt(s.ServiceKeys.TraktClientIDs())
 }
 
 // imageDeps bundles the dependencies shared by the public image and admin
