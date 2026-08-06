@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Generate a visual HTML report of all image permutations.
-# Expects the test container to already be running on port 3333.
+# Expects the test container to already be running (see test.sh).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/test-constants.sh"
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:3333}"
-API_KEY="${API_KEY:-t0-free-rpdb}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:${TEST_PORT}}"
+API_KEY="${API_KEY:-${TEST_FREE_API_KEY}}"
 REPORT_DIR="test-report"
 IMG_DIR="$REPORT_DIR/images"
 
