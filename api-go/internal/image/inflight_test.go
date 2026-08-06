@@ -2,6 +2,7 @@ package image
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -173,5 +174,108 @@ func TestInflightSet_IndependentKeys(t *testing.T) {
 	wg.Wait()
 	if set.Len() != 0 {
 		t.Fatalf("set should drain, Len=%d", set.Len())
+	}
+}
+
+func TestRunCoalescedPanicRecovers(t *testing.T) {
+	set := NewInflightSet()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := set.RunCoalesced("panic-key", func() ([]byte, error) {
+			close(started)
+			<-release // hold the leader inside fn so the waiter can join
+			panic("boom: rasterizer blew up")
+		})
+		leaderDone <- err
+	}()
+
+	// Wait until the leader is inside fn (entry is in the map) before
+	// spawning the waiter, so the waiter is guaranteed to join the
+	// in-flight run rather than racing to become the leader itself.
+	<-started
+
+	// A waiter joining while the leader is inside fn must receive an error
+	// instead of blocking on <-e.ch forever.
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := set.RunCoalesced("panic-key", func() ([]byte, error) {
+			return []byte("never-called"), nil
+		})
+		waiterDone <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond) // let the waiter join the in-flight run
+	close(release)                     // trigger the leader's panic
+
+	timeout := time.After(2 * time.Second)
+	collected := 0
+	for collected < 2 {
+		select {
+		case err := <-leaderDone:
+			collected++
+			if err == nil {
+				t.Fatal("leader got nil error; want a non-nil error containing 'panic'")
+			}
+			if !strings.Contains(err.Error(), "panic") {
+				t.Fatalf("leader error %q does not contain 'panic'", err)
+			}
+		case err := <-waiterDone:
+			collected++
+			if err == nil {
+				t.Fatal("waiter got nil error; want a non-nil error containing 'panic'")
+			}
+			if !strings.Contains(err.Error(), "panic") {
+				t.Fatalf("waiter error %q does not contain 'panic'", err)
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for panicked leader and waiter; a caller blocked forever")
+		}
+	}
+
+	if set.Len() != 0 {
+		t.Fatalf("set must be empty after a panicked run, Len=%d", set.Len())
+	}
+}
+
+func TestRunCoalescedPanicRemovesEntry(t *testing.T) {
+	set := NewInflightSet()
+
+	_, err := set.RunCoalesced("panic-key", func() ([]byte, error) {
+		panic("boom")
+	})
+	if err == nil || !strings.Contains(err.Error(), "panic") {
+		t.Fatalf("first run: got err=%v, want non-nil error containing 'panic'", err)
+	}
+	if set.Len() != 0 {
+		t.Fatalf("entry not removed after panic, Len=%d", set.Len())
+	}
+
+	// The panic must not leave the key wedged: a fresh call re-runs fn.
+	type result struct {
+		b   []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		b, err := set.RunCoalesced("panic-key", func() ([]byte, error) {
+			return []byte("recovered"), nil
+		})
+		done <- result{b, err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("fresh call after panic: unexpected error %v", r.err)
+		}
+		if string(r.b) != "recovered" {
+			t.Fatalf("fresh call after panic: got %q, want %q", r.b, "recovered")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out on fresh call after panic; entry was not removed")
 	}
 }

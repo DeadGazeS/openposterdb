@@ -1,6 +1,10 @@
 package image
 
-import "sync"
+import (
+	"fmt"
+	"log/slog"
+	"sync"
+)
 
 // InflightSet deduplicates concurrent renders of the same cache key: the
 // first caller becomes the leader and runs the work; every other caller with
@@ -41,13 +45,22 @@ func (s *InflightSet) RunCoalesced(key string, fn func() ([]byte, error)) ([]byt
 	s.m[key] = e
 	s.mu.Unlock()
 
-	b, err := fn()
-
-	s.mu.Lock()
-	delete(s.m, key)
-	e.result, e.err = b, err
-	close(e.ch)
-	s.mu.Unlock()
+	var b []byte
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("inflight panic: %v", r)
+				slog.Error("InflightSet fn panicked", "key", key, "panic", r)
+			}
+			s.mu.Lock()
+			delete(s.m, key)
+			e.result, e.err = b, err
+			close(e.ch)
+			s.mu.Unlock()
+		}()
+		b, err = fn()
+	}()
 	return b, err
 }
 
