@@ -1,10 +1,8 @@
 package image
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -207,22 +205,6 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 }
 
 // --- CDN helpers ---
-
-func SettingsHash(settings *services.RenderSettings, kind string, imageSizeStr *string) string {
-	h := sha256.New()
-	io.WriteString(h, kind+"\x00")
-	suffix := services.SettingsCacheSuffix(settings, kind, imageSizeStr)
-	io.WriteString(h, suffix+"\x00")
-	io.WriteString(h, services.ExcludeCacheToken(settings.RatingsExclude)+"\x00")
-	io.WriteString(h, string(settings.ImageSource)+"\x00")
-	io.WriteString(h, settings.Lang+"\x00")
-	if settings.Textless {
-		io.WriteString(h, "1")
-	} else {
-		io.WriteString(h, "0")
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))[:32]
-}
 
 func ImageResponse(data []byte, contentType string) (int, map[string]string, []byte) {
 	return 200, map[string]string{
