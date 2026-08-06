@@ -6,45 +6,7 @@ import (
 	"strings"
 )
 
-func DefaultLang() string { return "en" }
-
-func DefaultRatingsLimit() int32 { return 3 }
-
-func DefaultLogoBackdropRatingsLimit() int32 { return 5 }
-
-func DefaultEpisodeRatingsLimit() int32 { return 1 }
-
 func DefaultRatingsOrder() string { return "mal,imdb,lb,rt,mc,rta,tmdb,trakt,mdblist,ebert" }
-
-func DefaultRatingsExclude() string { return "" }
-
-func DefaultPosterPosition() BadgePosition { return PositionBottomCenter }
-
-func DefaultPosterBadgeStyle() BadgeStyle { return BadgeStyleDefault }
-
-func DefaultLogoBadgeStyle() BadgeStyle { return BadgeStyleLogoTB }
-
-func DefaultBackdropBadgeStyle() BadgeStyle { return BadgeStyleLogoTB }
-
-func DefaultPosterBadgeDirection() BadgeDirection { return BadgeDirectionDefault }
-
-func DefaultLabelStyle() LabelStyle { return LabelStyleOfficial }
-
-func DefaultBadgeShape() BadgeShape { return BadgeShapeRounded }
-
-func DefaultBackdropPosition() BadgePosition { return PositionTopRight }
-
-func DefaultBackdropBadgeDirection() BadgeDirection { return BadgeDirectionDefault }
-
-func DefaultEpisodePosition() BadgePosition { return PositionTopRight }
-
-func DefaultEpisodeBadgeStyle() BadgeStyle { return BadgeStyleLogoTB }
-
-func DefaultEpisodeBadgeDirection() BadgeDirection { return BadgeDirectionVertical }
-
-func DefaultPosterFit() PosterFit { return PosterFitNative }
-
-func DefaultBackdropEdgeInset() int32 { return 0 }
 
 func MaxEdgeInset() int32 { return 50 }
 
@@ -75,13 +37,6 @@ func ClampBadgesPerRow(v int32) int32 {
 		return 10
 	}
 	return v
-}
-
-func ValidateBadgesPerRow(perRow int32) error {
-	if perRow >= 0 && perRow <= 10 {
-		return nil
-	}
-	return fmt.Errorf("badges_per_row must be between 0 and 10 (0 = all in one row)")
 }
 
 func ValidateRatingsOrder(order string) error {
