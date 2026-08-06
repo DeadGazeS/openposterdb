@@ -144,8 +144,11 @@ func main() {
 	r := router.New(state)
 
 	server := &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: r,
+		Addr:              cfg.ListenAddr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	slog.Info("server listening", "addr", cfg.ListenAddr)
