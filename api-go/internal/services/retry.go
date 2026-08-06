@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -127,6 +128,8 @@ func SendWithRetry(config *RetryConfig, requestFn RequestFunc) (*http.Response, 
 				"delay_ms", delay.Milliseconds(),
 			)
 			time.Sleep(delay)
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 			continue
 		}
 
@@ -143,6 +146,8 @@ func SendWithRetry(config *RetryConfig, requestFn RequestFunc) (*http.Response, 
 				"delay_ms", delay.Milliseconds(),
 			)
 			time.Sleep(delay)
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 			continue
 		}
 
