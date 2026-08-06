@@ -65,16 +65,27 @@ export async function del(path: string): Promise<Response> {
   return request(path, { method: 'DELETE' })
 }
 
-/** Build a URL path with query parameters, omitting entries with nullish values. */
-function buildUrl(path: string, params: Record<string, string | number | undefined>): string {
+/** Convert a params object to a query string (with leading "?" if any entries,
+ *  empty string otherwise). Entries with undefined values are omitted (the
+ *  caller means "don't set this param"); empty-string values are KEPT
+ *  because URLSearchParams.set(key, '') emits `key=`, which is the
+ *  convention for clearing a server-side default. Numbers are stringified.
+ *  Shared by buildUrl (api client) and the FreeApiKeyCard preview-URL
+ *  builder. */
+export function toQueryParams(params: Record<string, string | number | undefined>): string {
   const qs = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') {
+    if (value !== undefined) {
       qs.set(key, String(value))
     }
   }
   const query = qs.toString()
-  return query ? `${path}?${query}` : path
+  return query ? `?${query}` : ''
+}
+
+/** Build a URL path with query parameters, omitting entries with nullish values. */
+function buildUrl(path: string, params: Record<string, string | number | undefined>): string {
+  return `${path}${toQueryParams(params)}`
 }
 
 // --- Typed API service layer ---
