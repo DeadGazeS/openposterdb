@@ -326,3 +326,80 @@ func TestServeImageStaleServesAndRefreshes(t *testing.T) {
 		t.Fatalf("expected 2 image_meta rows after refresh, got %d", n)
 	}
 }
+
+// TestServeImageDoesNotMutateCallerSettings guards the contract that ServeImage
+// must not mutate the caller's *RenderSettings. Before the fix, the
+// badge-direction/style default-resolution pass wrote ResolveDefault/Resolve
+// results back into p.Settings in place — harmless in production (each handler
+// builds a fresh struct) but a footgun for callers (including integration
+// tests) that reuse a struct across requests: the second call's cache key
+// would differ from the first.
+func TestServeImageDoesNotMutateCallerSettings(t *testing.T) {
+	loadTestFont(t)
+	db := newServeTestDB(t)
+	cacheDir := t.TempDir()
+
+	make := func() *services.RenderSettings {
+		// Use BadgeStyleDefault + the per-kind BadgeDirection "d" so the
+		// ResolveDefault/Resolve pass actually mutates something we can
+		// observe. PosterBadgeDirection is mutated for kind=poster; same
+		// pattern for backdrop/episode (covered by the switch in ServeImage).
+		return &services.RenderSettings{
+			ImageSource:          "t",
+			Lang:                 "en",
+			PosterBadgeStyle:     services.BadgeStyleDefault,
+			PosterBadgeDirection: services.BadgeDirectionDefault,
+		}
+	}
+
+	callerSettings := make()
+	params := serveParams(t, db, cacheDir)
+	params.Settings = callerSettings
+
+	beforeStyle := callerSettings.PosterBadgeStyle
+	beforeDir := callerSettings.PosterBadgeDirection
+
+	if _, _, err := ServeImage(params); err != nil {
+		t.Fatalf("first ServeImage: %v", err)
+	}
+
+	if callerSettings.PosterBadgeStyle != beforeStyle {
+		t.Errorf("callerSettings.PosterBadgeStyle was mutated: got %q want %q",
+			callerSettings.PosterBadgeStyle, beforeStyle)
+	}
+	if callerSettings.PosterBadgeDirection != beforeDir {
+		t.Errorf("callerSettings.PosterBadgeDirection was mutated: got %q want %q",
+			callerSettings.PosterBadgeDirection, beforeDir)
+	}
+
+	// Call a second and third time with the same caller struct — if
+	// ServeImage still mutated, the later calls' cache keys would shift and
+	// we'd see fresh renders; with the clone, the bytes are identical.
+	first, ct, err := ServeImage(params)
+	if err != nil {
+		t.Fatalf("second ServeImage: %v", err)
+	}
+	second, _, err := ServeImage(params)
+	if err != nil {
+		t.Fatalf("third ServeImage: %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Errorf("second/third ServeImage returned different bytes — caller mutation shifted cache key")
+	}
+	if ct == "" {
+		t.Error("content type should be non-empty")
+	}
+
+	// Wait for the cross-ID goroutines spawned by the three ServeImage calls
+	// to finish writing so the TempDir cleanup doesn't race them.
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM image_meta`).Scan(&n); err == nil && n >= 1 {
+			// small grace period to let the goroutine fully exit
+			time.Sleep(50 * time.Millisecond)
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("cross-ID goroutines never finished within 3s")
+}

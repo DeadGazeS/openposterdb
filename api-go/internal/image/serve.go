@@ -302,10 +302,6 @@ func ImageDbValue(kind string) string {
 	}
 }
 
-func computeCDNMaxAge(releaseDate *string, minStale, maxAge uint64) uint64 {
-	return services.ComputeCDNMaxAge(releaseDate, minStale, maxAge)
-}
-
 func newFontFace(data []byte) font.Face {
 	f, err := sfnt.Parse(data)
 	if err != nil {
@@ -402,6 +398,17 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 
 	slog.Debug("image request", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
+
+	// Clone the caller's settings so the badge-direction/style default
+	// resolution below (and any future in-place mutation) cannot mutate the
+	// caller's struct. RenderSettings mutated fields here are all value types
+	// (BadgeDirection / BadgeStyle / etc. are string aliases) so a shallow
+	// copy is sufficient; the Colors map is read-only in this function and is
+	// shared intentionally. Production handlers always pass a fresh struct per
+	// request, but integration tests reuse a struct across calls (would shift
+	// the cache key on each invocation), so this guards both.
+	settingsCopy := *p.Settings
+	p.Settings = &settingsCopy
 
 	// Resolve badge direction/style defaults before cache key construction.
 	switch p.Kind {
