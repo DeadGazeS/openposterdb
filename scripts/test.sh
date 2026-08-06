@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/test-constants.sh"
 
 IMAGE_NAME="openposterdb-test"
 CONTAINER_NAME="openposterdb-test"
@@ -47,10 +48,10 @@ fi
 echo "Starting container..."
 $CTR rm -f "$CONTAINER_NAME" 2>/dev/null || true
 $CTR run -d --name "$CONTAINER_NAME" \
-    -p 3333:3000 \
+    -p "${TEST_PORT}:3000" \
     --tmpfs /tmp/openposterdb-e2e \
     "${ENV_ARGS[@]}" \
-    -e JWT_SECRET=abababababababababababababababababababababababababababababababab \
+    -e JWT_SECRET="${TEST_JWT_SECRET}" \
     -e LISTEN_ADDR=0.0.0.0:3000 \
     -e COOKIE_SECURE=false \
     -e CACHE_DIR=/tmp/openposterdb-e2e \
@@ -60,7 +61,7 @@ $CTR run -d --name "$CONTAINER_NAME" \
 
 echo "Waiting for backend..."
 for i in $(seq 1 60); do
-    if curl -sf http://127.0.0.1:3333/api/auth/status > /dev/null 2>&1; then
+    if curl -sf "http://127.0.0.1:${TEST_PORT}/api/auth/status" > /dev/null 2>&1; then
         echo "Backend ready"
         break
     fi
