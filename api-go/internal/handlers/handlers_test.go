@@ -347,3 +347,60 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 		t.Errorf("merge failed: %v", prefs)
 	}
 }
+
+// TestLogoutRevokesRefreshTokens guards the logout-revocation contract:
+// before the fix, LogoutHandler was a no-op that looked up the user and
+// returned, so refresh tokens outlived logout. The fix calls
+// DeleteRefreshTokensForUser, so every refresh row for the user disappears
+// after LogoutHandler returns.
+func TestLogoutRevokesRefreshTokens(t *testing.T) {
+	db := newHandlersTestDB(t)
+
+	// refresh_tokens isn't in apiKeySettingsTestSchema; create a minimal copy.
+	if _, err := db.Exec(`CREATE TABLE refresh_tokens (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		token_hash TEXT NOT NULL UNIQUE,
+		expires_at TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed an admin user.
+	res, err := db.Exec("INSERT INTO admin_users (username, password_hash) VALUES ('admin', 'x')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := res.LastInsertId()
+
+	// Issue two refresh tokens for this user.
+	if _, err := services.CreateRefreshToken(db, userID, HashRefreshToken("tok-a"), "2099-01-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := services.CreateRefreshToken(db, userID, HashRefreshToken("tok-b"), "2099-01-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-condition: both rows present.
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", userID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("setup: want 2 tokens, got %d", count)
+	}
+
+	// Logout.
+	if err := LogoutHandler(db, "admin"); err != nil {
+		t.Fatalf("LogoutHandler: %v", err)
+	}
+
+	// Post-condition: every refresh row for this user is gone.
+	if err := db.QueryRow("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", userID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("after logout: want 0 tokens, got %d", count)
+	}
+}

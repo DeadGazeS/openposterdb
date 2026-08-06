@@ -259,12 +259,17 @@ func RefreshHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, refreshTok
 	}
 }
 
+// LogoutHandler revokes every active refresh token for the given user so a
+// stolen cookie becomes unusable after logout (previously a no-op: tokens
+// outlived the logout request). Returns the lookup error if the user no
+// longer exists; callers that ignore the return value are unaffected because
+// the original behaviour was to look up the user and discard the result.
 func LogoutHandler(db *sql.DB, username string) error {
-	_, _, _, err := services.FindAdminUserByUsername(db, username)
+	userID, _, _, err := services.FindAdminUserByUsername(db, username)
 	if err != nil {
 		return err
 	}
-	return nil
+	return services.DeleteRefreshTokensForUser(db, userID)
 }
 
 func KeyLoginHandler(db *sql.DB, jwtSecret []byte, apiKey string) (int, any) {
