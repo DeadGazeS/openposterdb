@@ -64,10 +64,19 @@ func NewOther(msg string) *AppError {
 }
 
 func (e *AppError) JSON() []byte {
-	msg := e.Message
-	if e.Status >= 500 {
-		msg = "Internal server error"
-	}
-	b, _ := json.Marshal(map[string]string{"error": msg})
+	b, _ := json.Marshal(map[string]string{"error": e.ClientMessage()})
 	return b
+}
+
+// ClientMessage returns the error message safe for client exposure: 5xx
+// errors are sanitized to "Internal server error" so internal details (SQL
+// errors, provider errors, panic traces) don't leak to API callers. 4xx
+// errors pass through verbatim because the caller needs the message to fix
+// their request. Centralised here so both AppError.JSON and httpx.WriteAppError
+// produce identical sanitisation.
+func (e *AppError) ClientMessage() string {
+	if e.Status >= 500 {
+		return "Internal server error"
+	}
+	return e.Message
 }

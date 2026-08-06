@@ -354,7 +354,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	posterBytes, err := p.demoArtworkBytes("poster")
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -365,7 +365,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	// box is stable for the 2:3 demo poster under every fit.
 	posterBytes, err = image.PosterPreviewArtwork(posterBytes, posterFit, targetWidth)
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -377,7 +377,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		LogoScale: logoScale, PosterFit: posterFit, Colors: colors,
 	})
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -473,7 +473,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 
 	logoBytes, err := p.demoArtworkBytes("logo")
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -485,7 +485,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 		Colors: colors,
 	})
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -592,7 +592,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 
 	backdropBytes, err := p.demoArtworkBytes("backdrop")
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -604,7 +604,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 		LogoScale: logoScale, EdgeInsetX: edgeInsetX, EdgeInsetY: edgeInsetY, Colors: colors,
 	})
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -707,7 +707,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 
 	episodeBytes, err := p.demoArtworkBytes("episode")
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -719,7 +719,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 		LogoScale: logoScale, Blur: blur, Colors: colors,
 	})
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 

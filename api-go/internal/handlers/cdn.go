@@ -103,7 +103,7 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 		cacheKey := idTypeStr + "/" + cacheValue
 		cachePath, err := services.TypedCachePath(d.Config.CacheDir, services.ImageSubdir(kind), idTypeStr, cacheValue, services.ImageExt(kind))
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+			httpx.WriteAppError(w, err)
 			return
 		}
 

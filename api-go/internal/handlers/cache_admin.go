@@ -91,7 +91,7 @@ func HandleFetchImage(deps ImageDeps, imageType, idType, idValue string) http.Ha
 			if appErr, ok := err.(*apperr.AppError); ok {
 				httpx.WriteError(w, appErr.Status, appErr.Message)
 			} else {
-				httpx.WriteError(w, 500, err.Error())
+				httpx.WriteAppError(w, err)
 			}
 			return
 		}

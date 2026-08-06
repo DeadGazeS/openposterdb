@@ -4,9 +4,12 @@ package httpx
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"log/slog"
 	"net/http"
 	"strconv"
+
+	apperr "openposterdb/internal/errors"
 )
 
 // WriteJSON writes v as a JSON response with the given status code.
@@ -21,6 +24,25 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 // WriteError writes a JSON {"error": message} response with the given status.
 func WriteError(w http.ResponseWriter, status int, message string) {
 	WriteJSON(w, status, map[string]string{"error": message})
+}
+
+// WriteAppError writes an *errors.AppError as a JSON {"error": message}
+// response using the AppError's status + client-safe message. For non-AppError
+// errors (or nil) it falls back to a 500 with a sanitized message — never
+// leaks the raw err.Error() to API callers, mirroring the central sanitisation
+// rule in errors.AppError.ClientMessage. Prefer this over WriteError(w, 500,
+// err.Error()) wherever a handler returns an error it didn't construct itself.
+func WriteAppError(w http.ResponseWriter, err error) {
+	if err == nil {
+		WriteError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	var ae *apperr.AppError
+	if stderrors.As(err, &ae) {
+		WriteJSON(w, ae.Status, map[string]string{"error": ae.ClientMessage()})
+		return
+	}
+	WriteError(w, http.StatusInternalServerError, "Internal server error")
 }
 
 // DecodeJSON decodes the request body as JSON into v and closes the body.
