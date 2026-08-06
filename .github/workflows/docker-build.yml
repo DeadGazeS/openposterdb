@@ -2,7 +2,7 @@ name: Build Docker Image
 
 on:
   push:
-    branches: [main, testing, rewrite]
+    branches: [main, testing, rewrite, refactor]
   workflow_dispatch:
 
 env:
