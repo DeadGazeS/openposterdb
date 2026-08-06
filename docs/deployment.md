@@ -41,7 +41,7 @@ Caddy automatically provisions TLS certificates via Let's Encrypt. No extra conf
 When Cloudflare sits in front of your origin, `EXTERNAL_CACHE_ONLY=true` significantly reduces origin load:
 
 - **`EXTERNAL_CACHE_ONLY`** skips image file writes to disk, relying on Cloudflare's edge cache for long-term storage and the in-memory cache for short-term deduplication. SQLite metadata (release dates, available rating sources) is still written so cache keys can be computed without external API calls. Image responses carry `Cache-Control: public, max-age=3600, stale-while-revalidate=86400`, so Cloudflare caches them at the edge for an hour and revalidates in the background
-- Note: the Rust original's `ENABLE_CDN_REDIRECTS` (content-addressed `/c/` redirects) is **not implemented** in the Go port — a CDN caches per-URL, so identical settings under different API keys produce separate edge entries
+- **CDN content-addressed redirects** are supported (same as the Rust original): the image endpoint issues a 302 to `/c/{settings_hash}/...` when `ENABLE_CDN_REDIRECTS=true`, so a CDN can dedupe cache entries across all users with identical settings (only the hash matters for the cache key, not the API key or path). Skipped for the free key (settings are public and would leak).
 
 Use the same Caddy + OpenPosterDB compose setup from the [reverse proxy section](#reverse-proxy-with-caddy), adding the flag and bumping the in-memory cache. The key changes to the `openposterdb` environment:
 
