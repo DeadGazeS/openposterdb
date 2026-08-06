@@ -210,17 +210,17 @@ func TestApplyQueryOverridesBadgeWidthHeight(t *testing.T) {
 	}
 }
 
-func TestFreeKeySettingsFromRender(t *testing.T) {
+func TestSettingsResponseMap(t *testing.T) {
 	s := services.DefaultRenderSettings()
-	resp := freeKeySettingsFromRender(&s)
-	if resp.ImageSource != "t" {
-		t.Error("wrong image_source")
+	resp := services.SettingsResponseMap(&s)
+	if resp["image_source"] != "t" {
+		t.Errorf("wrong image_source: %v", resp["image_source"])
 	}
-	if resp.Lang != "en" {
-		t.Error("wrong lang")
+	if resp["lang"] != "en" {
+		t.Errorf("wrong lang: %v", resp["lang"])
 	}
-	if resp.RatingsLimit != 3 {
-		t.Error("wrong ratings_limit")
+	if resp["ratings_limit"] != int32(3) {
+		t.Errorf("wrong ratings_limit: %v", resp["ratings_limit"])
 	}
 }
 

@@ -385,6 +385,75 @@ func RenderSettingsToMap(s *RenderSettings) map[string]string {
 	return m
 }
 
+// SettingsResponseMap returns the canonical settings fields as a map suitable
+// for HTTP JSON responses. Shared by HandleGetSettings (admin) and
+// HandleFreeKeySettings so the per-field enumeration lives in one place.
+// Returned types match the existing wire format: strings for badge/label/direction
+// styles, int32 for percentage/scale fields, layouts pre-marshalled to JSON,
+// colors in the {"color_<source>_accent/value/border/text": "..."} form.
+func SettingsResponseMap(s *RenderSettings) map[string]any {
+	m := map[string]any{
+		"image_source":             string(s.ImageSource),
+		"lang":                     s.Lang,
+		"textless":                 s.Textless,
+		"ratings_limit":            s.RatingsLimit,
+		"ratings_order":            s.RatingsOrder,
+		"ratings_exclude":          s.RatingsExclude,
+		"poster_layout":            mustMarshalLayout(&s.PosterLayout),
+		"logo_ratings_limit":       s.LogoRatingsLimit,
+		"backdrop_ratings_limit":   s.BackdropRatingsLimit,
+		"poster_badge_style":       string(s.PosterBadgeStyle),
+		"logo_badge_style":         string(s.LogoBadgeStyle),
+		"backdrop_badge_style":     string(s.BackdropBadgeStyle),
+		"poster_label_style":       string(s.PosterLabelStyle),
+		"logo_label_style":         string(s.LogoLabelStyle),
+		"backdrop_label_style":     string(s.BackdropLabelStyle),
+		"poster_badge_direction":   string(s.PosterBadgeDirection),
+		"poster_fit":               string(s.PosterFit),
+		"poster_text_size":         int32(s.PosterTextSize),
+		"logo_text_size":           int32(s.LogoTextSize),
+		"backdrop_text_size":       int32(s.BackdropTextSize),
+		"poster_badge_size":        int32(s.PosterBadgeSize),
+		"logo_badge_size":          int32(s.LogoBadgeSize),
+		"backdrop_badge_size":      int32(s.BackdropBadgeSize),
+		"poster_badge_width":       int32(s.PosterBadgeWidth),
+		"poster_badge_height":      int32(s.PosterBadgeHeight),
+		"logo_badge_width":         int32(s.LogoBadgeWidth),
+		"logo_badge_height":        int32(s.LogoBadgeHeight),
+		"backdrop_badge_width":     int32(s.BackdropBadgeWidth),
+		"backdrop_badge_height":    int32(s.BackdropBadgeHeight),
+		"episode_badge_width":      int32(s.EpisodeBadgeWidth),
+		"episode_badge_height":     int32(s.EpisodeBadgeHeight),
+		"poster_logo_size":         int32(s.PosterLogoSize),
+		"logo_logo_size":           int32(s.LogoLogoSize),
+		"backdrop_logo_size":       int32(s.BackdropLogoSize),
+		"logo_layout":              mustMarshalLayout(&s.LogoLayout),
+		"backdrop_layout":          mustMarshalLayout(&s.BackdropLayout),
+		"backdrop_badge_direction": string(s.BackdropBadgeDirection),
+		"backdrop_edge_inset_x":    s.BackdropEdgeInsetX,
+		"backdrop_edge_inset_y":    s.BackdropEdgeInsetY,
+		"episode_ratings_limit":    s.EpisodeRatingsLimit,
+		"episode_badge_style":      string(s.EpisodeBadgeStyle),
+		"episode_label_style":      string(s.EpisodeLabelStyle),
+		"episode_text_size":        int32(s.EpisodeTextSize),
+		"episode_badge_size":       int32(s.EpisodeBadgeSize),
+		"episode_logo_size":        int32(s.EpisodeLogoSize),
+		"episode_layout":           mustMarshalLayout(&s.EpisodeLayout),
+		"episode_badge_direction":  string(s.EpisodeBadgeDirection),
+		"episode_blur":             s.EpisodeBlur,
+		"poster_badge_shape":       string(s.PosterBadgeShape),
+		"logo_badge_shape":         string(s.LogoBadgeShape),
+		"backdrop_badge_shape":     string(s.BackdropBadgeShape),
+		"episode_badge_shape":      string(s.EpisodeBadgeShape),
+		"poster_badge_alpha":       int32(s.PosterBadgeAlpha),
+		"logo_badge_alpha":         int32(s.LogoBadgeAlpha),
+		"backdrop_badge_alpha":     int32(s.BackdropBadgeAlpha),
+		"episode_badge_alpha":      int32(s.EpisodeBadgeAlpha),
+		"colors":                   EffectiveSourceColors(s),
+	}
+	return m
+}
+
 // ValidateRenderSettings validates the effective render settings, returning an
 // error string suitable for a 400 response.
 func ValidateRenderSettings(s *RenderSettings) error {

@@ -111,68 +111,12 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 		}
 		s := services.ParseGlobalRenderSettings(globals)
 
-		httpx.WriteJSON(w, 200, map[string]any{
-			"image_source":             string(s.ImageSource),
-			"lang":                     s.Lang,
-			"textless":                 s.Textless,
-			"fanart_available":         fanartAvailable,
-			"ratings_limit":            s.RatingsLimit,
-			"ratings_order":            s.RatingsOrder,
-			"ratings_exclude":          s.RatingsExclude,
-			"free_api_key_enabled":     freeKeyEnabled,
-			"free_api_key_locked":      freeKeyLocked,
-			"poster_layout":            marshalLayoutResponse(s.PosterLayout),
-			"logo_ratings_limit":       s.LogoRatingsLimit,
-			"backdrop_ratings_limit":   s.BackdropRatingsLimit,
-			"poster_badge_style":       string(s.PosterBadgeStyle),
-			"logo_badge_style":         string(s.LogoBadgeStyle),
-			"backdrop_badge_style":     string(s.BackdropBadgeStyle),
-			"poster_label_style":       string(s.PosterLabelStyle),
-			"logo_label_style":         string(s.LogoLabelStyle),
-			"backdrop_label_style":     string(s.BackdropLabelStyle),
-			"poster_badge_direction":   string(s.PosterBadgeDirection),
-			"poster_fit":               string(s.PosterFit),
-			"poster_text_size":         int32(s.PosterTextSize),
-			"logo_text_size":           int32(s.LogoTextSize),
-			"backdrop_text_size":       int32(s.BackdropTextSize),
-			"poster_badge_size":        int32(s.PosterBadgeSize),
-			"poster_badge_width":       int32(s.PosterBadgeWidth),
-			"poster_badge_height":      int32(s.PosterBadgeHeight),
-			"logo_badge_size":          int32(s.LogoBadgeSize),
-			"logo_badge_width":         int32(s.LogoBadgeWidth),
-			"logo_badge_height":        int32(s.LogoBadgeHeight),
-			"backdrop_badge_size":      int32(s.BackdropBadgeSize),
-			"backdrop_badge_width":     int32(s.BackdropBadgeWidth),
-			"backdrop_badge_height":    int32(s.BackdropBadgeHeight),
-			"poster_logo_size":         int32(s.PosterLogoSize),
-			"logo_logo_size":           int32(s.LogoLogoSize),
-			"backdrop_logo_size":       int32(s.BackdropLogoSize),
-			"logo_layout":              marshalLayoutResponse(s.LogoLayout),
-			"backdrop_layout":          marshalLayoutResponse(s.BackdropLayout),
-			"backdrop_badge_direction": string(s.BackdropBadgeDirection),
-			"backdrop_edge_inset_x":    s.BackdropEdgeInsetX,
-			"backdrop_edge_inset_y":    s.BackdropEdgeInsetY,
-			"episode_ratings_limit":    s.EpisodeRatingsLimit,
-			"episode_badge_style":      string(s.EpisodeBadgeStyle),
-			"episode_label_style":      string(s.EpisodeLabelStyle),
-			"episode_text_size":        int32(s.EpisodeTextSize),
-			"episode_badge_size":       int32(s.EpisodeBadgeSize),
-			"episode_badge_width":      int32(s.EpisodeBadgeWidth),
-			"episode_badge_height":     int32(s.EpisodeBadgeHeight),
-			"episode_logo_size":        int32(s.EpisodeLogoSize),
-			"episode_layout":           marshalLayoutResponse(s.EpisodeLayout),
-			"episode_badge_direction":  string(s.EpisodeBadgeDirection),
-			"episode_blur":             s.EpisodeBlur,
-			"poster_badge_shape":       string(s.PosterBadgeShape),
-			"logo_badge_shape":         string(s.LogoBadgeShape),
-			"backdrop_badge_shape":     string(s.BackdropBadgeShape),
-			"episode_badge_shape":      string(s.EpisodeBadgeShape),
-			"poster_badge_alpha":       int32(s.PosterBadgeAlpha),
-			"logo_badge_alpha":         int32(s.LogoBadgeAlpha),
-			"backdrop_badge_alpha":     int32(s.BackdropBadgeAlpha),
-			"episode_badge_alpha":      int32(s.EpisodeBadgeAlpha),
-			"colors":                   services.EffectiveSourceColors(&s),
-		})
+		resp := services.SettingsResponseMap(&s)
+		resp["fanart_available"] = fanartAvailable
+		resp["free_api_key_enabled"] = freeKeyEnabled
+		resp["free_api_key_locked"] = freeKeyLocked
+
+		httpx.WriteJSON(w, 200, resp)
 	}
 }
 
