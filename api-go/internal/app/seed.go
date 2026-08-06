@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"log/slog"
 
-	"openposterdb/internal/handlers"
 	"openposterdb/internal/services"
 )
 
@@ -23,7 +22,7 @@ func SeedAdminIfNeeded(db *sql.DB, username, password string) {
 		slog.Debug("Admin user already exists, skipping seed")
 		return
 	}
-	hash, err := handlers.HashPassword(password)
+	hash, err := services.HashPassword(password)
 	if err != nil {
 		slog.Error("Failed to hash admin password", "error", err)
 		return

@@ -8,11 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/argon2"
 
 	"openposterdb/internal/services"
 )
@@ -20,7 +18,7 @@ import (
 var dummyHash = hashPasswordDummy()
 
 func hashPasswordDummy() string {
-	h, _ := HashPassword("openposterdb-dummy-timing-pad")
+	h, _ := services.HashPassword("openposterdb-dummy-timing-pad")
 	return h
 }
 
@@ -37,34 +35,6 @@ type Claims struct {
 type APIKeyClaims struct {
 	KeyID int64 `json:"key_id"`
 	jwt.RegisteredClaims
-}
-
-func HashPassword(password string) (string, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
-	return fmt.Sprintf("%x:%x", salt, hash), nil
-}
-
-func VerifyPassword(password, storedHash string) (bool, error) {
-	before, after, ok := strings.Cut(storedHash, ":")
-	if !ok {
-		return false, fmt.Errorf("invalid hash format")
-	}
-	saltHex := before
-	hashHex := after
-	salt, err := hex.DecodeString(saltHex)
-	if err != nil {
-		return false, err
-	}
-	expectedHash, err := hex.DecodeString(hashHex)
-	if err != nil {
-		return false, err
-	}
-	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
-	return hex.EncodeToString(hash) == hex.EncodeToString(expectedHash), nil
 }
 
 func CreateToken(username string, secret []byte) (string, error) {
@@ -176,7 +146,7 @@ func SetupHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, pa
 		return 400, map[string]string{"error": err.Error()}, nil
 	}
 
-	passwordHash, err := HashPassword(password)
+	passwordHash, err := services.HashPassword(password)
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
 		return 400, map[string]string{"error": "Account operation failed"}, nil
@@ -202,12 +172,12 @@ func SetupHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, pa
 func LoginHandler(db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, any, []*http.Cookie) {
 	userID, returnedUsername, passwordHash, err := services.FindAdminUserByUsername(db, username)
 	if err != nil || returnedUsername == "" {
-		VerifyPassword(password, dummyHash)
+		services.VerifyPassword(password, dummyHash)
 		slog.Warn("Login failed: unknown username")
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 
-	ok, err := VerifyPassword(password, passwordHash)
+	ok, err := services.VerifyPassword(password, passwordHash)
 	if err != nil || !ok {
 		slog.Warn("Login failed: incorrect password")
 		return 401, map[string]string{"error": "Unauthorized"}, nil

@@ -1,9 +1,14 @@
 package services
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"golang.org/x/crypto/argon2"
 )
 
 func CountAdminUsers(db *sql.DB) (int64, error) {
@@ -97,4 +102,39 @@ func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
 	}
 	_, err = db.Exec("UPDATE admin_users SET prefs = ? WHERE username = ?", string(raw), username)
 	return err
+}
+
+// --- Password hashing ---
+
+// HashPassword returns an argon2id hash of password in the project's
+// canonical "hex(salt):hex(hash)" format. The salt is 16 random bytes and the
+// hash uses argon2id with parameters matching the Rust port: time=1,
+// memory=64MiB, threads=4, keyLen=32.
+func HashPassword(password string) (string, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+	return fmt.Sprintf("%x:%x", salt, hash), nil
+}
+
+// VerifyPassword checks password against a storedHash produced by
+// HashPassword. Returns false (not an error) when the password doesn't match;
+// returns an error only on malformed stored hash.
+func VerifyPassword(password, storedHash string) (bool, error) {
+	before, after, ok := strings.Cut(storedHash, ":")
+	if !ok {
+		return false, fmt.Errorf("invalid hash format")
+	}
+	salt, err := hex.DecodeString(before)
+	if err != nil {
+		return false, err
+	}
+	expectedHash, err := hex.DecodeString(after)
+	if err != nil {
+		return false, err
+	}
+	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+	return hex.EncodeToString(hash) == hex.EncodeToString(expectedHash), nil
 }

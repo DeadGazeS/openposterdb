@@ -54,11 +54,11 @@ func TestGenerateAPIKey(t *testing.T) {
 }
 
 func TestHashPassword(t *testing.T) {
-	h1, err := HashPassword("testpassword")
+	h1, err := services.HashPassword("testpassword")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h2, _ := HashPassword("testpassword")
+	h2, _ := services.HashPassword("testpassword")
 	// Passwords should hash differently due to random salt
 	if h1 == h2 {
 		t.Error("same password should produce different hashes due to salt")
@@ -66,12 +66,12 @@ func TestHashPassword(t *testing.T) {
 }
 
 func TestVerifyPassword(t *testing.T) {
-	hash, _ := HashPassword("correctpass")
-	ok, _ := VerifyPassword("correctpass", hash)
+	hash, _ := services.HashPassword("correctpass")
+	ok, _ := services.VerifyPassword("correctpass", hash)
 	if !ok {
 		t.Error("correct password should verify")
 	}
-	ok, _ = VerifyPassword("wrongpass", hash)
+	ok, _ = services.VerifyPassword("wrongpass", hash)
 	if ok {
 		t.Error("wrong password should not verify")
 	}
