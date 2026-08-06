@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"openposterdb/internal/httpx"
 )
 
 // KeyRecorder is satisfied by anything that can remember an api_keys ID for
@@ -64,13 +66,13 @@ func RequireAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
 			if token == "" {
-				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
 			}
 
 			claims, err := ParseJWT(token, jwtSecret)
 			if err != nil || claims.Username == "" {
-				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
 			}
 
@@ -84,13 +86,13 @@ func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder) func(http.Handler)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
 			if token == "" {
-				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
 			}
 
 			claims, err := ParseAPIKeyJWT(token, jwtSecret)
 			if err != nil || claims.KeyID == 0 {
-				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
 			}
 
@@ -109,7 +111,7 @@ func RequireAnyAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
 			if token == "" {
-				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
 			}
 
@@ -122,7 +124,7 @@ func RequireAnyAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 				return
 			}
 
-			http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 		})
 	}
 }
