@@ -344,7 +344,7 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	badges := p.demoBadges("poster")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
+	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
 		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
@@ -463,7 +463,7 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 
 	badges := p.demoBadges("logo")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
+	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
 		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
@@ -582,7 +582,7 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 	}
 	badges := p.demoBadges("backdrop")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
+	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
 		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
@@ -697,7 +697,7 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	}
 	badges := p.demoBadges("episode")
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
+	labelFace, valueFace := image.GetFontFacesAt(float64(textSize))
 	if valueFace == nil || labelFace == nil {
 		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
 		return
