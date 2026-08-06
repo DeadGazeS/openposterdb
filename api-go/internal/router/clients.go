@@ -159,9 +159,3 @@ func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {
 		Inflight:            s.Inflight,
 	}
 }
-
-// lastUsed returns the flusher that records api_keys.last_used_at on every
-// authenticated key request. May be nil in tests that don't wire one up.
-func (s *AppState) lastUsed() handlers.KeyRecorder {
-	return s.LastUsedFlusher
-}

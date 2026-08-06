@@ -9,25 +9,6 @@ import (
 	"openposterdb/internal/services"
 )
 
-func resolveFreeSettings(db *sql.DB, isFreeAPIKeyEnabled func() bool, globalsCache *services.RenderSettings) (*services.RenderSettings, error) {
-	if !isFreeAPIKeyEnabled() {
-		return nil, nil
-	}
-
-	if globalsCache != nil {
-		settings := *globalsCache
-		return &settings, nil
-	}
-
-	globals, err := services.GetGlobalSettings(db)
-	if err != nil {
-		defaults := services.DefaultRenderSettings()
-		return &defaults, nil
-	}
-	settings := services.ParseGlobalRenderSettings(globals)
-	return &settings, nil
-}
-
 type FreeKeySettingsResponse struct {
 	ImageSource            string `json:"image_source"`
 	Lang                   string `json:"lang"`

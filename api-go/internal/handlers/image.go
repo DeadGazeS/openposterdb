@@ -47,22 +47,6 @@ type ImageDeps struct {
 	CDNHashes *services.HashRegistry
 }
 
-// ImageQuery represents all query parameters for image endpoints.
-func resolveSettings(db *sql.DB, apiKey string, isFreeAPIKeyEnabled func() bool, globalsCache *services.RenderSettings) (*services.RenderSettings, error) {
-	if apiKey == freeAPIKey {
-		return resolveFreeSettings(db, isFreeAPIKeyEnabled, globalsCache)
-	}
-
-	keyHash := services.HashAPIKey(apiKey)
-	k, err := services.FindAPIKeyByHash(db, keyHash)
-	if err != nil || k == nil {
-		return nil, err
-	}
-
-	s := services.GetEffectiveRenderSettings(db, k.ID, globalsCache)
-	return &s, nil
-}
-
 // HandleImage serves the public image endpoints. deps is a per-request
 // resolver that returns the current rating-provider client snapshot — callers
 // MUST pass a resolver (not a snapshot value) so a TMDB/OMDB/etc key
