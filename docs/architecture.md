@@ -152,7 +152,7 @@ imdb/tt0959621@i.slr.lt.dd.blur.zm
 
 ### Cross-ID cache
 
-**Not implemented in the Go port.** The Rust original wrote rendered images to the filesystem cache under all resolved alternate IDs (IMDB, TMDB, TVDB) so the same content requested via a different ID type skipped regeneration. The Go implementation caches only under the requested ID; a request via another ID type re-resolves and regenerates. (Listed in the repo notes as an open parity gap.)
+After a successful render, the Go implementation copies the rendered bytes to the filesystem cache under every resolved alternate ID form (IMDB, TMDB, TVDB) via a fire-and-forget goroutine (`internal/image/crossid.go`, `writeCrossIDCache`). The episode-uplift case is included: a poster rendered via a series-level request also writes the episode-level key when applicable. Skipped when `EXTERNAL_CACHE_ONLY=true` and for episodes (which always uplift). Subsequent requests via any of those IDs hit the same cache entry and skip regeneration.
 
 ### Staleness and background refresh
 
@@ -161,13 +161,11 @@ Rendered-image cache entries are checked for staleness based on the film's relea
 - **Recent films**: linearly increasing stale time from `RATINGS_STALE_SECS` to `RATINGS_MAX_AGE_SECS`
 - **Old films** (age > `RATINGS_MAX_AGE_SECS`): never stale (ratings are stable)
 
-When a cached entry is stale, the Go implementation **re-fetches and re-renders inline** on the next request (the request blocks until the fresh image is ready). The Rust original spawned a background refresh and coalesced concurrent identical requests — **neither is implemented in the Go port** (open parity gaps).
+When a cached entry is stale, the Go implementation serves the stale bytes immediately and spawns a **background refresh** (`internal/image/serve.go:refreshStale`) that re-fetches ratings + re-renders through the `InflightSet` so concurrent identical requests coalesce to a single regeneration (mirrors the Rust `image_inflight` + `check_caches` behavior). Rating changes therefore propagate through a hot in-memory entry within about a minute (the mem-cache `revalidateAfter` window, default 60s).
 
 ### CDN caching
 
-**Not implemented in the Go port.** The Rust original redirected authenticated poster requests to content-addressed `/c/{settings_hash}/...` URLs so a CDN could deduplicate cache entries across users with identical settings. The Go implementation serves images directly at the requested URL (the `ENABLE_CDN_REDIRECTS` flag did nothing in Go and has been removed), so a CDN caches per-URL — two users with identical settings but different API keys produce separate edge cache entries.
-
-Image responses carry a fixed `Cache-Control: public, max-age=3600, stale-while-revalidate=86400` header; preview responses use `public, max-age=60`. A CDN in front can still cache and serve these normally (see [Deployment](deployment.md#cloudflare)).
+When `ENABLE_CDN_REDIRECTS=true`, the public image endpoint registers the effective render settings under a stable content hash via the in-memory `HashRegistry` and issues a 302 to `/c/{hash}/...` (`internal/handlers/image.go`, `internal/handlers/cdn.go`). The CDN-cached endpoint serves the rendered bytes from the filesystem cache, so a CDN can deduplicate cache entries across all users with identical settings (only the settings hash matters for the cache key, not the API key or path). Image responses carry `Cache-Control: public, max-age=3600, stale-while-revalidate=86400`; preview responses use `public, max-age=60`. The redirect is skipped for the free key (settings are public and would leak) and when CDN redirects are disabled.
 
 ### External cache only
 
