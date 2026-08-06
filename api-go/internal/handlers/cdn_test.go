@@ -121,7 +121,7 @@ func TestCDNHandler_HashMiss(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
-		HandleCDNImage(*deps, reg)(w, r)
+		HandleCDNImage(func() ImageDeps { return *deps }, reg)(w, r)
 	})
 	req := httptest.NewRequest("GET", "/c/deadbeef/imdb/poster-default/tt999.jpg", nil)
 	rec := httptest.NewRecorder()
@@ -147,7 +147,7 @@ func TestCDNHandler_HashHit(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
-		HandleCDNImage(*deps, reg)(w, r)
+		HandleCDNImage(func() ImageDeps { return *deps }, reg)(w, r)
 	})
 	req := httptest.NewRequest("GET", "/c/"+hash+"/imdb/poster-default/tt999.jpg", nil)
 	rec := httptest.NewRecorder()
@@ -170,7 +170,7 @@ func TestCDNHandler_MethodNotAllowed(t *testing.T) {
 	reg := services.NewHashRegistry(0)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
-		HandleCDNImage(ImageDeps{}, reg)(w, r)
+		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
 	})
 	req := httptest.NewRequest("POST", "/c/abc/imdb/poster-default/x.jpg", nil)
 	rec := httptest.NewRecorder()
@@ -188,7 +188,7 @@ func TestCDNHandler_InvalidID(t *testing.T) {
 	hash := reg.Register(settings)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
-		HandleCDNImage(ImageDeps{}, reg)(w, r)
+		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
 	})
 	req := httptest.NewRequest("GET", "/c/"+hash+"/imdb/poster-default/..jpg", nil)
 	rec := httptest.NewRecorder()

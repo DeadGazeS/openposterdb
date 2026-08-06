@@ -341,11 +341,11 @@ func (r *Router) registerImageRoutes() {
 
 	// Content-addressed CDN route: /c/{hash}/{rest...}. Resolves the hash to
 	// settings via the registry populated by HandleImage's redirect.
-	cdnHandler := handlers.HandleCDNImage(s.imageDeps(), s.hashes())
+	cdnHandler := handlers.HandleCDNImage(s.imageDeps, s.hashes())
 	r.mux.Handle("/c/{hash}/{rest...}", cdnRateLimit(http.HandlerFunc(cdnHandler)))
 
 	// Image/isValid routes via catch-all
-	imageHandler := handlers.HandleImage(s.imageDeps(), s.isFreeAPIKeyEnabled)
+	imageHandler := handlers.HandleImage(s.imageDeps, s.isFreeAPIKeyEnabled)
 	isValidHandler := handlers.HandleIsValid(s.DB, s.isFreeAPIKeyEnabled)
 	r.mux.Handle("/{apiKey}/{rest...}", imageRateLimit(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		rest := req.PathValue("rest")

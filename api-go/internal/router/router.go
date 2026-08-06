@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"openposterdb/internal/config"
 	"openposterdb/internal/handlers"
@@ -29,6 +30,11 @@ type AppState struct {
 	Inflight        *image.InflightSet
 	JWTSecret       []byte
 	LastUsedFlusher *services.LastUsedFlusher
+
+	// clientsMu protects the rating-provider client fields (TMDB/OMDB/MDBList/
+	// Fanart/Trakt). Setup* and RefreshClientsFromKeys write; imageDeps() and
+	// previewConfig() read. Read+write never block each other across readers.
+	clientsMu sync.RWMutex
 }
 
 func New(state *AppState) *Router {

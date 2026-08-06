@@ -26,12 +26,18 @@ type CDNLookup interface {
 // cached file is missing, the request gets a 404 — the edge should retry the
 // original authenticated URL so HandleImage re-registers the hash and
 // re-populates the cache.
-func HandleCDNImage(deps ImageDeps, registry CDNLookup) http.HandlerFunc {
+//
+// deps is a per-request resolver (matching HandleImage) so that updates to
+// ImageServeConfig (CacheDir / ImageStaleSecs) are visible to in-flight
+// requests without restarting the server.
+func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpx.WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
 			return
 		}
+
+		d := deps()
 
 		hash := r.PathValue("hash")
 		rest := r.PathValue("rest")
@@ -95,18 +101,18 @@ func HandleCDNImage(deps ImageDeps, registry CDNLookup) http.HandlerFunc {
 		variant := ""
 		cacheValue := idValue + variant + suffix
 		cacheKey := idTypeStr + "/" + cacheValue
-		cachePath, err := services.TypedCachePath(deps.Config.CacheDir, services.ImageSubdir(kind), idTypeStr, cacheValue, services.ImageExt(kind))
+		cachePath, err := services.TypedCachePath(d.Config.CacheDir, services.ImageSubdir(kind), idTypeStr, cacheValue, services.ImageExt(kind))
 		if err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		entry, err := services.ReadCache(cachePath, deps.Config.ImageStaleSecs)
+		entry, err := services.ReadCache(cachePath, d.Config.ImageStaleSecs)
 		if err != nil || entry.IsStale {
 			httpx.WriteError(w, http.StatusNotFound, "cached image not found")
 			return
 		}
-		if _, err := deps.DB.Exec(`UPDATE image_meta SET updated_at = ? WHERE cache_key = ?`, time.Now().Unix(), cacheKey); err != nil {
+		if _, err := d.DB.Exec(`UPDATE image_meta SET updated_at = ? WHERE cache_key = ?`, time.Now().Unix(), cacheKey); err != nil {
 			// best-effort; cache hit is unaffected
 			_ = err
 		}

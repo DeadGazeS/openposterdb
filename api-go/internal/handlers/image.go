@@ -63,14 +63,21 @@ func resolveSettings(db *sql.DB, apiKey string, isFreeAPIKeyEnabled func() bool,
 	return &s, nil
 }
 
-func HandleImage(deps ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
+// HandleImage serves the public image endpoints. deps is a per-request
+// resolver that returns the current rating-provider client snapshot — callers
+// MUST pass a resolver (not a snapshot value) so a TMDB/OMDB/etc key
+// rotation in the admin UI reaches in-flight requests on the next call
+// (without the resolver the handler closure captures one snapshot and never
+// sees the new clients — bug fixed 2026-08-06).
+func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
-		if deps.TMDB == nil {
+		d := deps()
+		if d.TMDB == nil {
 			httpx.WriteError(w, 503, "TMDB API key not configured — image generation unavailable")
 			return
 		}
@@ -132,17 +139,17 @@ func HandleImage(deps ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFu
 
 		var settings *services.RenderSettings
 		if apiKey == freeAPIKey {
-			globals, _ := services.GetGlobalSettings(deps.DB)
+			globals, _ := services.GetGlobalSettings(d.DB)
 			s := services.ParseGlobalRenderSettings(globals)
 			settings = &s
 		} else {
 			keyHash := services.HashAPIKey(apiKey)
-			k, err := services.FindAPIKeyByHash(deps.DB, keyHash)
+			k, err := services.FindAPIKeyByHash(d.DB, keyHash)
 			if err != nil || k == nil {
 				httpx.WriteError(w, 401, "invalid api key")
 				return
 			}
-			s := services.GetEffectiveRenderSettings(deps.DB, k.ID, nil)
+			s := services.GetEffectiveRenderSettings(d.DB, k.ID, nil)
 			settings = &s
 		}
 
@@ -160,8 +167,8 @@ func HandleImage(deps ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFu
 		// hash and 302 to /c/{hash}/... so a CDN edge can deduplicate across
 		// users. Free-key requests skip the redirect (the free key is public
 		// and the hash registry is small; we don't want to leak free settings).
-		if deps.Config.EnableCDNRedirects && apiKey != freeAPIKey && deps.CDNHashes != nil {
-			if hash := deps.CDNHashes.Register(settings); hash != "" {
+		if d.Config.EnableCDNRedirects && apiKey != freeAPIKey && d.CDNHashes != nil {
+			if hash := d.CDNHashes.Register(settings); hash != "" {
 				ext := ".jpg"
 				if kind == "logo" {
 					ext = ".png"
@@ -175,14 +182,14 @@ func HandleImage(deps ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFu
 		}
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
-			DB: deps.DB, TMDB: deps.TMDB, OMDB: deps.OMDB, MDBList: deps.MDBList, Trakt: deps.Trakt, Fanart: deps.Fanart,
+			DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
 			IDType: idTypeStr, IDValue: idValue, Kind: kind,
 			Settings: settings, RatingsLimit: query.RatingsLimit,
-			CacheDir: deps.Config.CacheDir, ExternalCacheOnly: deps.Config.ExternalCacheOnly,
-			RatingsMinStaleSecs: deps.Config.RatingsMinStaleSecs, RatingsMaxAgeSecs: deps.Config.RatingsMaxAgeSecs,
-			ImageStaleSecs: deps.Config.ImageStaleSecs, Quality: deps.Config.ImageQuality,
-			ImageSizeStr: query.ImageSize, Caches: deps.Config.Caches,
-			Inflight: deps.Config.Inflight,
+			CacheDir: d.Config.CacheDir, ExternalCacheOnly: d.Config.ExternalCacheOnly,
+			RatingsMinStaleSecs: d.Config.RatingsMinStaleSecs, RatingsMaxAgeSecs: d.Config.RatingsMaxAgeSecs,
+			ImageStaleSecs: d.Config.ImageStaleSecs, Quality: d.Config.ImageQuality,
+			ImageSizeStr: query.ImageSize, Caches: d.Config.Caches,
+			Inflight: d.Config.Inflight,
 		})
 		if err != nil {
 			if appErr, ok := err.(*errors.AppError); ok {
