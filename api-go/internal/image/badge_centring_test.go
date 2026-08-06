@@ -13,7 +13,7 @@ import (
 // horizontalValueSection returns the value section x-range [x0,x1) for a
 // rendered horizontal badge, mirroring renderBadgeInner's layout math.
 func horizontalValueSection(badge *services.RatingBadge, style services.BadgeStyle, labelFontFace, valueFontFace font.Face, labelStyle services.LabelStyle, dims scaledDims, textScale float32) (x0, x1 int) {
-	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, 1.0)
+	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale)
 	maxValueW := baseTextWidth(badge.Value, valueFontFace, textScale)
 	labelSectionW := 0
 	if labelStyle.UsesIcon() {
@@ -225,7 +225,7 @@ func TestOversizedValueClippedToValueSection(t *testing.T) {
 
 	// Both badges share the same label section width.
 	dims := newScaledDims(1.0)
-	labelSectionW := int(labelWidthForStyle(&services.RatingBadge{Source: services.SourceImdb}, services.LabelStyleText, labelFace, dims, 2.0, 1.0)) + 2*int(dims.textLabelPadH)
+	labelSectionW := int(labelWidthForStyle(&services.RatingBadge{Source: services.SourceImdb}, services.LabelStyleText, labelFace, dims, 2.0)) + 2*int(dims.textLabelPadH)
 	if labelSectionW > full.Bounds().Dx() || labelSectionW > control.Bounds().Dx() {
 		t.Fatalf("label section %d exceeds badge widths %d/%d", labelSectionW, full.Bounds().Dx(), control.Bounds().Dx())
 	}
@@ -358,7 +358,7 @@ func TestUniformRowValueTextCentred(t *testing.T) {
 	dims := newScaledDims(1.0)
 	var maxLabelW, maxValueW int
 	for i := range row {
-		if w := labelWidthForStyle(&row[i], services.LabelStyleText, lf, dims, 1.0, 1.0); w > maxLabelW {
+		if w := labelWidthForStyle(&row[i], services.LabelStyleText, lf, dims, 1.0); w > maxLabelW {
 			maxLabelW = w
 		}
 		if w := baseTextWidth(row[i].Value, vf, 1.0); w > maxValueW {
@@ -646,7 +646,7 @@ func TestBadgeBoxScalesPerAxis(t *testing.T) {
 	// only the value section widens. Compute the fixed label and base value
 	// widths from the same layout math used by renderBadgeInner.
 	dims := newScaledDims(1.0)
-	labelSectionW := int(labelWidthForStyle(&badge, services.LabelStyleText, lf, dims, 1.0, 1.0)) + 2*int(dims.textLabelPadH)
+	labelSectionW := int(labelWidthForStyle(&badge, services.LabelStyleText, lf, dims, 1.0)) + 2*int(dims.textLabelPadH)
 	valueSectionW := baseTextWidth(badge.Value, vf, 1.0) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
 
 	if expectedWideW := labelSectionW + 2*valueSectionW; ww != expectedWideW {

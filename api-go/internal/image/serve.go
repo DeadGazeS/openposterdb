@@ -81,18 +81,6 @@ func GetFontFacesAt(textSizePct float64) (font.Face, font.Face) {
 		newFace(valueFontFaceSize * textSizePct / 100.0)
 }
 
-func loadFontFromData(data []byte) (font.Face, error) {
-	f, err := sfnt.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return opentype.NewFace(f, &opentype.FaceOptions{
-		Size:    26,
-		DPI:     72,
-		Hinting: font.HintingNone,
-	})
-}
-
 func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize) ([]byte, error) {
 	targetW := uint32(580)
 	badgeScale := float32(1.0)
@@ -269,26 +257,6 @@ func EnsureCacheDir(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0755)
 }
 
-func ReadFileCache(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-func WriteFileCache(path string, data []byte) error {
-	if err := EnsureCacheDir(path); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func StripImageExt(idValue, kind string) string {
-	switch kind {
-	case "logo":
-		return strings.TrimSuffix(idValue, ".png")
-	default:
-		return strings.TrimSuffix(idValue, ".jpg")
-	}
-}
-
 func ImageDbValue(kind string) string {
 	switch kind {
 	case "logo":
@@ -300,18 +268,6 @@ func ImageDbValue(kind string) string {
 	default:
 		return "p"
 	}
-}
-
-func newFontFace(data []byte) font.Face {
-	f, err := sfnt.Parse(data)
-	if err != nil {
-		return nil
-	}
-	face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: 26, DPI: 72, Hinting: font.HintingNone})
-	if err != nil {
-		return nil
-	}
-	return face
 }
 
 // ratingsLimitForKind returns the number of ratings to fetch for a kind: the
@@ -859,8 +815,4 @@ func badgeSourceString(badges []services.RatingBadge) string {
 		keys[i] = b.Source.Key
 	}
 	return strings.Join(keys, ",")
-}
-
-func RenderImageWithFont(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize, fontData []byte) ([]byte, error) {
-	return GenerateImage(imageBytes, badges, settings, kind, quality, imageSize)
 }

@@ -669,8 +669,7 @@ func renderBadgeInner(badge *services.RatingBadge, fontFace, labelFontFace font.
 // labelWidthForStyle returns the base (100%) label-section width, independent
 // of text_size/logo_size, so the badge box stays fixed. Oversized content is
 // clipped at the badge edges.
-func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims, textScale float32, logoScale float32) int {
-	_ = logoScale
+func labelWidthForStyle(badge *services.RatingBadge, labelStyle services.LabelStyle, labelFontFace font.Face, dims scaledDims, textScale float32) int {
 	switch labelStyle {
 	case services.LabelStyleOfficial, services.LabelStyleHighRes:
 		return int(dims.iconHeight)
@@ -696,7 +695,7 @@ func baseTextWidth(text string, face font.Face, textScale float32) int {
 
 func RenderBadge(badge *services.RatingBadge, fontFace, labelFontFace font.Face, labelStyle services.LabelStyle, appearance services.BadgeAppearance, badgeScale float32, textScale float32, logoScale float32, colors map[string]services.SourceColorSet) *image.RGBA {
 	dims := newScaledDims(badgeScale)
-	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, logoScale)
+	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale)
 	maxValueW := baseTextWidth(badge.Value, fontFace, textScale)
 	return renderBadgeInner(badge, fontFace, labelFontFace, maxLabelW, maxValueW, labelStyle, appearance, dims, textScale, logoScale, colors)
 }
@@ -709,7 +708,7 @@ func RenderBadgesUniform(badges []services.RatingBadge, fontFace, labelFontFace 
 	dims := newScaledDims(badgeScale)
 	var maxLabelW, maxValueW int
 	for _, b := range badges {
-		if w := labelWidthForStyle(&b, labelStyle, labelFontFace, dims, textScale, logoScale); w > maxLabelW {
+		if w := labelWidthForStyle(&b, labelStyle, labelFontFace, dims, textScale); w > maxLabelW {
 			maxLabelW = w
 		}
 		if w := baseTextWidth(b.Value, fontFace, textScale); w > maxValueW {
