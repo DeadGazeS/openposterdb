@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { IMAGE_LIST_KINDS, IMAGE_LIST_TITLES } from '@/lib/api'
 
 export async function routeGuard(to: RouteLocationNormalized) {
   const auth = useAuthStore()
@@ -85,29 +86,37 @@ const router = createRouter({
           component: () => import('@/views/DashboardView.vue'),
           meta: { title: 'Dashboard' },
         },
+        // Admin image gallery — one route per kind, all sharing the
+        // AdminListView wrapper + the per-kind config table in @/lib/api.
+        // Route name + path are kept plural for backward compatibility with
+        // existing router.push({ name: 'posters' }) callers.
         {
           path: 'posters',
           name: 'posters',
-          component: () => import('@/views/PostersView.vue'),
-          meta: { title: 'Posters' },
+          component: () => import('@/views/AdminListView.vue'),
+          props: { kind: 'poster' },
+          meta: { title: IMAGE_LIST_TITLES.poster },
         },
         {
           path: 'logos',
           name: 'logos',
-          component: () => import('@/views/LogosView.vue'),
-          meta: { title: 'Logos' },
+          component: () => import('@/views/AdminListView.vue'),
+          props: { kind: 'logo' },
+          meta: { title: IMAGE_LIST_TITLES.logo },
         },
         {
           path: 'backdrops',
           name: 'backdrops',
-          component: () => import('@/views/BackdropsView.vue'),
-          meta: { title: 'Backdrops' },
+          component: () => import('@/views/AdminListView.vue'),
+          props: { kind: 'backdrop' },
+          meta: { title: IMAGE_LIST_TITLES.backdrop },
         },
         {
           path: 'episodes',
           name: 'episodes',
-          component: () => import('@/views/EpisodesView.vue'),
-          meta: { title: 'Episodes' },
+          component: () => import('@/views/AdminListView.vue'),
+          props: { kind: 'episode' },
+          meta: { title: IMAGE_LIST_TITLES.episode },
         },
         {
           path: 'keys',

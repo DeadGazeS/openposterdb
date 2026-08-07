@@ -9,35 +9,49 @@ export function setOnAuthFailure(callback: () => void) {
   _onAuthFailure = callback
 }
 
-async function request(path: string, options: RequestInit = {}): Promise<Response> {
-  const auth = useAuthStore()
+// authRequest is the shared fetcher for both the admin (JWT cookie) and
+// self (API-key) callers. Sets Authorization Bearer when a token is
+// provided, sets Content-Type when a body is present, and forwards
+// `credentials: 'include'` only when `withCredentials` is true
+// (cookie-based JWT auth) — API-key auth doesn't need cookies.
+async function authRequest(
+  path: string,
+  options: RequestInit,
+  token: string | null | undefined,
+  withCredentials: boolean,
+): Promise<Response> {
   const headers = new Headers(options.headers)
-
-  if (auth.token) {
-    headers.set('Authorization', `Bearer ${auth.token}`)
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
   }
-
   if (options.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
+  return fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers,
+    ...(withCredentials ? { credentials: 'include' as RequestCredentials } : {}),
+  })
+}
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: 'include' })
+// Admin (JWT cookie-based) — wraps authRequest and adds a 401-refresh-retry
+// loop. On 401, tries to refresh the token; if that succeeds, re-sends the
+// request with the new token; if not, clears credentials and returns the
+// original 401.
+async function request(path: string, options: RequestInit = {}): Promise<Response> {
+  const auth = useAuthStore()
+  const token = auth.token
+  let res = await authRequest(path, options, token, true)
 
-  if (res.status === 401 && auth.token) {
-    // Try refreshing the token
+  if (res.status === 401 && token) {
     const refreshed = await auth.refresh()
     if (refreshed) {
-      const retryHeaders = new Headers(options.headers)
-      retryHeaders.set('Authorization', `Bearer ${auth.token}`)
-      if (options.body && !retryHeaders.has('Content-Type')) {
-        retryHeaders.set('Content-Type', 'application/json')
-      }
-      return fetch(`${BASE_URL}${path}`, { ...options, headers: retryHeaders, credentials: 'include' })
+      res = await authRequest(path, options, auth.token, true)
+    } else {
+      // Refresh failed — clear credentials and redirect without retrying
+      auth.logout()
+      _onAuthFailure?.()
     }
-    // Refresh failed — clear credentials and redirect without retrying
-    auth.logout()
-    _onAuthFailure?.()
-    return res
   }
 
   return res
@@ -192,21 +206,11 @@ export const adminApi = {
 
 // --- Self-service API (API key session JWT auth) ---
 
-const KEY_BASE_URL = import.meta.env.VITE_API_URL || ''
-
-function keyRequest(path: string, options: RequestInit = {}): Promise<Response> {
+// Self (API-key based) — no retry, no cookies, just an Authorization
+// header from the apiKeyToken.
+async function keyRequest(path: string, options: RequestInit = {}): Promise<Response> {
   const auth = useAuthStore()
-  const headers = new Headers(options.headers)
-
-  if (auth.apiKeyToken) {
-    headers.set('Authorization', `Bearer ${auth.apiKeyToken}`)
-  }
-
-  if (options.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json')
-  }
-
-  return fetch(`${KEY_BASE_URL}${path}`, { ...options, headers })
+  return authRequest(path, options, auth.apiKeyToken, false)
 }
 
 export const selfApi = {
@@ -230,4 +234,60 @@ export const keysApi = {
   getSettings: (id: number): Promise<Response> => get(`/api/keys/${id}/settings`),
   updateSettings: (id: number, settings: SaveSettingsPayload): Promise<Response> => put(`/api/keys/${id}/settings`, settings),
   deleteSettings: (id: number): Promise<Response> => del(`/api/keys/${id}/settings`),
+}
+
+/** Kinds supported by ImageListView — single source of truth (admin gallery). */
+export type ImageListKind = 'poster' | 'logo' | 'backdrop' | 'episode'
+
+const IMAGE_LIST_CONFIGS: Record<ImageListKind, {
+  listFn: (page: number, pageSize: number) => Promise<Response>
+  imageFn: (key: string) => Promise<Response>
+  fetchFn: (idType: string, idValue: string) => Promise<Response>
+  deleteFn: (idType: string, idValue: string, scope: PurgeScope) => Promise<Response>
+  clearAllFn: () => Promise<Response>
+}> = {
+  poster: {
+    listFn: adminApi.getPosters,
+    imageFn: adminApi.getPosterImage,
+    fetchFn: adminApi.fetchPoster,
+    deleteFn: adminApi.purgePoster,
+    clearAllFn: adminApi.clearPosters,
+  },
+  logo: {
+    listFn: adminApi.getLogos,
+    imageFn: adminApi.getLogoImage,
+    fetchFn: adminApi.fetchLogo,
+    deleteFn: adminApi.purgeLogo,
+    clearAllFn: adminApi.clearLogos,
+  },
+  backdrop: {
+    listFn: adminApi.getBackdrops,
+    imageFn: adminApi.getBackdropImage,
+    fetchFn: adminApi.fetchBackdrop,
+    deleteFn: adminApi.purgeBackdrop,
+    clearAllFn: adminApi.clearBackdrops,
+  },
+  episode: {
+    listFn: adminApi.getEpisodes,
+    imageFn: adminApi.getEpisodeImage,
+    fetchFn: adminApi.fetchEpisode,
+    deleteFn: adminApi.purgeEpisode,
+    clearAllFn: adminApi.clearEpisodes,
+  },
+}
+
+/** Per-kind ImageListView props lookup — lets a single wrapper render the
+ *  right admin functions without 4 near-identical view stubs. */
+export function imageListConfig(kind: ImageListKind) {
+  return IMAGE_LIST_CONFIGS[kind]
+}
+
+export const IMAGE_LIST_KINDS = Object.keys(IMAGE_LIST_CONFIGS) as ImageListKind[]
+
+/** Display title for each kind (capitalised). */
+export const IMAGE_LIST_TITLES: Record<ImageListKind, string> = {
+  poster: 'Posters',
+  logo: 'Logos',
+  backdrop: 'Backdrops',
+  episode: 'Episodes',
 }
