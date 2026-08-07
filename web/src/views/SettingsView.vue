@@ -4,9 +4,10 @@ import { useRoute } from 'vue-router'
 import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
 import { useSavedFlash } from '@/composables/useSavedFlash'
+import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
 import { parseApiError } from '@/lib/api-error'
 import { adminApi } from '@/lib/api'
-import type { SaveSettingsPayload } from '@/lib/settings'
+import type { RenderSettings, SaveSettingsPayload } from '@/lib/settings'
 import { FREE_API_KEY } from '@/lib/constants'
 import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
@@ -24,7 +25,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import type { RenderSettings } from '@/lib/settings'
 
 const route = useRoute()
 
@@ -208,21 +208,17 @@ watch(settings, (s) => {
   if (s) freeApiKeyEnabled.value = s.free_api_key_enabled
 }, { immediate: true })
 
-async function loadSettings(): Promise<RenderSettings | null> {
-  const res = await adminApi.getSettings()
-  if (!res.ok) return null
-  return res.json()
-}
-
-async function saveSettings(s: SaveSettingsPayload): Promise<string | null> {
-  const res = await adminApi.updateSettings({
-    ...s,
-    free_api_key_enabled: freeApiKeyEnabled.value,
-  })
-  if (res.ok) return null
-  const data = await res.json().catch(() => null)
-  return data?.error || 'Failed to save settings'
-}
+// Shared load/save/reset pattern — same composable the key view uses. The
+// onSave hook merges the transient free_api_key_enabled flag into the
+// payload before POST so this view doesn't need its own saveSettings shape.
+const { loadSettings, saveSettings } = useRenderSettingsForm<SaveSettingsPayload>({
+  api: {
+    load: () => adminApi.getSettings(),
+    save: (p) => adminApi.updateSettings(p as SaveSettingsPayload),
+  },
+  onSave: (s) => ({ ...s, free_api_key_enabled: freeApiKeyEnabled.value }),
+  saveErrorMessage: 'Failed to save settings',
+})
 
 function toggleFreeApiKey() {
   if (!settings.value || settings.value.free_api_key_locked) return
