@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 
 	"openposterdb/internal/httpx"
@@ -22,7 +23,10 @@ func HandleFreeKeySettings(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.Han
 			return
 		}
 
-		globals, _ := services.GetGlobalSettings(db)
+		globals, err := services.GetGlobalSettings(db)
+		if err != nil {
+			slog.Warn("free-key GetGlobalSettings failed; falling back to defaults", "error", err)
+		}
 		var settings services.RenderSettings
 		if len(globals) > 0 {
 			settings = services.ParseGlobalRenderSettings(globals)

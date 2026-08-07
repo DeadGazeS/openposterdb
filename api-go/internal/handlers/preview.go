@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"golang.org/x/image/font"
@@ -230,7 +231,11 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 
 		if badges := p.fetchDemoRatings(idValue); len(badges) > 0 {
 			if encoded := services.MarshalRatingBadges(badges); encoded != "" {
-				_ = services.UpsertAvailableRatings(p.db, idKey, encoded, nil)
+				// Best-effort cache of preview-renderable ratings; the preview
+				// itself doesn't depend on this row.
+				if err := services.UpsertAvailableRatings(p.db, idKey, encoded, nil); err != nil {
+					slog.Warn("preview upsert available ratings failed", "id_key", idKey, "error", err)
+				}
 			}
 			return badges
 		}

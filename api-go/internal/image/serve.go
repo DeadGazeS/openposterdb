@@ -742,7 +742,11 @@ func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient
 				return entry.Bytes
 			}
 			if bytes, err := fanart.FetchPosterBytes(selected.URL); err == nil {
-				_ = services.WriteCache(basePath, bytes)
+				// Fire-and-forget cache write — log on failure but don't block the
+				// refresh; the bytes are already returned to the caller.
+				if err := services.WriteCache(basePath, bytes); err != nil {
+					slog.Warn("fanart cache write failed", "base_path", basePath, "error", err)
+				}
 				return bytes
 			}
 			return nil

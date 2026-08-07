@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -113,8 +114,8 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 			return
 		}
 		if _, err := d.DB.Exec(`UPDATE image_meta SET updated_at = ? WHERE cache_key = ?`, time.Now().Unix(), cacheKey); err != nil {
-			// best-effort; cache hit is unaffected
-			_ = err
+			// best-effort; cache hit is unaffected — log so we can spot a stuck row
+			slog.Warn("image_meta touched_at update failed", "cache_key", cacheKey, "error", err)
 		}
 
 		// CDN-cached for a long time; the settings hash is the cache key, so

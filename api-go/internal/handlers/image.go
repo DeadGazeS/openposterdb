@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -123,7 +124,10 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 
 		var settings *services.RenderSettings
 		if apiKey == freeAPIKey {
-			globals, _ := services.GetGlobalSettings(d.DB)
+			globals, err := services.GetGlobalSettings(d.DB)
+			if err != nil {
+				slog.Warn("free-key GetGlobalSettings failed; falling back to defaults", "error", err)
+			}
 			s := services.ParseGlobalRenderSettings(globals)
 			settings = &s
 		} else {

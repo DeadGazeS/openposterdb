@@ -75,7 +75,10 @@ func HandleFetchImage(deps ImageDeps, imageType, idType, idValue string) http.Ha
 
 		slog.Debug("admin fetch requested", "kind", kind, "id", idType+"/"+idValue)
 
-		globals, _ := services.GetGlobalSettings(deps.DB)
+		globals, err := services.GetGlobalSettings(deps.DB)
+		if err != nil {
+			slog.Warn("admin fetch GetGlobalSettings failed", "error", err)
+		}
 		settings := services.ParseGlobalRenderSettings(globals)
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
