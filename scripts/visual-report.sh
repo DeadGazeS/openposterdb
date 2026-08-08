@@ -29,7 +29,8 @@ fetch_image() {
     local ext="$4"
     # Sanitise label for filename
     local filename
-    filename="$(echo "$label" | tr ' /=' '_' | tr -cd 'a-zA-Z0-9_-').${ext}"
+    filename="${label//[\/= ]/_}"
+    filename="${filename//[^a-zA-Z0-9_-]/}.${ext}"
     local id_type="${5:-imdb}"
     local id_value="${6:-$IMDB_ID}"
     local url="${BASE_URL}/${API_KEY}/${id_type}/${endpoint}/${id_value}.${ext}"
