@@ -9,8 +9,6 @@ import (
 	"openposterdb/internal/services"
 )
 
-type FreeKeySettingsResponse = map[string]any
-
 func HandleFreeKeySettings(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

@@ -47,15 +47,6 @@ var OMDBRetry = RetryConfig{
 	ServiceName: "omdb",
 }
 
-func NewRetryConfig(maxRetries uint32, baseDelay, maxDelay time.Duration, serviceName string) RetryConfig {
-	return RetryConfig{
-		MaxRetries:  maxRetries,
-		BaseDelay:   baseDelay,
-		MaxDelay:    maxDelay,
-		ServiceName: serviceName,
-	}
-}
-
 var MDBListRetry = RetryConfig{
 	MaxRetries:  1,
 	BaseDelay:   2 * time.Second,

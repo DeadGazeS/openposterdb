@@ -18,31 +18,10 @@ func TestIDNotFoundIs404(t *testing.T) {
 	}
 }
 
-func TestUnauthorizedIs401(t *testing.T) {
-	err := NewUnauthorized()
-	if err.Status != 401 {
-		t.Errorf("expected 401, got %d", err.Status)
-	}
-}
-
-func TestForbiddenIs403(t *testing.T) {
-	err := NewForbidden("x")
-	if err.Status != 403 {
-		t.Errorf("expected 403, got %d", err.Status)
-	}
-}
-
 func TestBadRequestIs400(t *testing.T) {
 	err := NewBadRequest("x")
 	if err.Status != 400 {
 		t.Errorf("expected 400, got %d", err.Status)
-	}
-}
-
-func TestDBErrorIs500(t *testing.T) {
-	err := NewDBError("connection refused")
-	if err.Status != 500 {
-		t.Errorf("expected 500, got %d", err.Status)
 	}
 }
 
@@ -53,18 +32,16 @@ func TestOtherIs500(t *testing.T) {
 	}
 }
 
-func TestJSONRedactsDetailsOn500(t *testing.T) {
-	err := NewDBError("connection refused to 10.0.0.5:5432")
-	body := string(err.JSON())
-	if body == "" {
-		t.Fatal("expected JSON body")
+func TestClientMessageRedactsDetailsOn500(t *testing.T) {
+	err := NewOther("connection refused to 10.0.0.5:5432")
+	if msg := err.ClientMessage(); msg != "Internal server error" {
+		t.Errorf("expected 'Internal server error', got %q", msg)
 	}
 }
 
-func TestJSONClientErrorsPreserveMessage(t *testing.T) {
+func TestClientMessagePreservesMessageOn400(t *testing.T) {
 	err := NewBadRequest("missing field")
-	body := string(err.JSON())
-	if body == "" {
-		t.Fatal("expected JSON body")
+	if msg := err.ClientMessage(); msg != "missing field" {
+		t.Errorf("expected passthrough, got %q", msg)
 	}
 }
