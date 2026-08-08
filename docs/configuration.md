@@ -8,7 +8,7 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 
 | Variable | Default | Description |
 |---|---|---|
-| `TMDB_API_KEY` | *required* | [TMDB](https://www.themoviedb.org/settings/api) API v3 key |
+| `TMDB_API_KEY` | — | [TMDB](https://www.themoviedb.org/settings/api) API v3 key. Recommended for artwork; without it, posters/badges/logos/etc. fall back to Fanart.tv or MDBList image sources and some rating fetches are skipped |
 | `JWT_SECRET` | *required* | 32-byte hex string (`openssl rand -hex 32`) |
 | `MDBLIST_API_KEY` | — | [MDBList](https://mdblist.com/preferences/) key — preferred, covers all 9 rating sources (IMDb, RT Critics, RT Audience, Metacritic, Trakt, Letterboxd, MAL, MDBList score, Roger Ebert) |
 | `OMDB_API_KEY` | — | [OMDb](https://www.omdbapi.com/apikey.aspx) key (IMDb, RT Critics, Metacritic only). Also required for IMDB episode ratings |
@@ -45,6 +45,14 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 | `RATINGS_MAX_AGE_SECS` | `31536000` | Film age after which ratings stop refreshing |
 | `IMAGE_STALE_SECS` | `0` | Base image cache lifetime (0 = never re-fetch) |
 | `EXTERNAL_CACHE_ONLY` | `false` | Skip image file writes to disk; rely on a CDN for caching. SQLite metadata is still written (see [Architecture](architecture.md#external-cache-only)) |
+| `ENABLE_CDN_REDIRECTS` | `false` | When `true`, the public image endpoint responds with a 302 to `/c/{settings_hash}/...` so a CDN can dedupe cache entries across all users with identical settings (only the hash matters for the cache key, not the API key). Skipped for the free key (settings are public and would leak). |
+
+## Rate limiting
+
+| Variable | Default | Description |
+|---|---|---|
+| `RATE_LIMIT_RPM` | `60` | Per-key requests-per-minute cap on the admin routes (all `/api/admin/*` + per-key `/api/key/me/*`). |
+| `RATE_LIMIT_CDN_RPM` | `240` | Per-key requests-per-minute cap on the CDN redirect endpoint (`/c/...`). Higher default than the admin cap because the CDN edge retries on transient failures. |
 
 ## Logging
 

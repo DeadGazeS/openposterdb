@@ -129,25 +129,25 @@ Settings are stored as short single-character or two-character codes:
 
 ```
 # TMDB poster, 3 ratings (MAL, IMDb, Letterboxd), default everything, medium image
-imdb/tt0111161@mil.slr.lt.dd.shp.ba80.zm
+imdb/tt0111161@mil.lr.lo.h.shr.ba80.zm
 
 # Same poster at large image size with larger text (145%)
-imdb/tt0111161@mil.slr.lt.dd.ts145.zl
+imdb/tt0111161@mil.lr.lo.h.ts145.zl
 
 # Fanart textless poster
-imdb/tt0111161_f_tl@mil.slr.lt.dd.zm
+imdb/tt0111161_f_tl@mil.lr.lo.h.shr.ba80.zm
 
 # Logo from TMDB with English language, 3 ratings, icon labels
-imdb/tt0111161_l_t_en@mil.slr.li.zm
+imdb/tt0111161_l_t_en@mil.lr.lo.li.shr.ba80.zm
 
 # Logo from Fanart.tv with English language
-imdb/tt0111161_l_f_en@mil.slr.lt.zm
+imdb/tt0111161_l_f_en@mil.lr.lo.shr.ba80.zm
 
 # Backdrop from TMDB, text labels, 150% text size, edge insets, large image
-imdb/tt0111161_b_t@mil.slr.lt.dd.ts150.eh8.ev3.zl
+imdb/tt0111161_b_t@mil.lr.lo.h.ts150.eh8.ev3.shr.ba80.zl
 
 # Episode with 1 rating, blur enabled, default text size, medium image
-imdb/tt0959621@i.slr.lt.dd.blur.zm
+imdb/tt0959621@i.lr.lo.h.shr.ba80.blur.zm
 ```
 
 ### Cross-ID cache

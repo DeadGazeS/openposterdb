@@ -8,7 +8,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 
 - [Website](https://openposterdb.com)
 - [GitHub](https://github.com/DeadGazeS/openposterdb)
-- [Docker Hub](https://hub.docker.com/r/pnrxa/openposterdb)
+- [Container Image (ghcr.io)](https://github.com/DeadGazeS/openposterdb/pkgs/container/openposterdb)
 - [Documentation](docs/README.md)
 
 ---
