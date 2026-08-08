@@ -32,7 +32,9 @@ func (c *TmdbClient) Get(path string, params map[string]string, target any) erro
 		url.WriteString(fmt.Sprintf("&%s=%s", k, v))
 	}
 
-	resp, err := httpGet(c.HTTP, url.String())
+	start := time.Now()
+	resp, err := httpGet(c.HTTP, &TMDBAPIRetry, url.String())
+	logSlow("TMDB API", time.Since(start).Milliseconds())
 	if err != nil {
 		return errors.NewAPIError(err)
 	}
@@ -51,7 +53,9 @@ func (c *TmdbClient) Get(path string, params map[string]string, target any) erro
 
 func (c *TmdbClient) FetchImageBytes(filePath, size string) ([]byte, error) {
 	url := fmt.Sprintf("https://image.tmdb.org/t/p/%s%s", size, filePath)
-	resp, err := httpGet(c.HTTP, url)
+	start := time.Now()
+	resp, err := httpGet(c.HTTP, &TMDBCDNRetry, url)
+	logSlow("TMDB CDN", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}
@@ -218,22 +222,28 @@ func selectImageRanked(images []TmdbImage, lang string, textless bool, hasTarget
 	return nil
 }
 
-func httpGet(client *http.Client, url string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "openposterdb/1.2.1")
-	resp, err := client.Do(req)
-	if err != nil {
-		// The url.Error carries the full URL, including the api_key query
-		// param — redact it so keys never reach logs.
-		return nil, errors.RedactURLSecrets(err)
-	}
-	return resp, nil
+func httpGet(client *http.Client, config *RetryConfig, url string) (*http.Response, error) {
+	return SendWithRetry(config, func() (*http.Response, error) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "openposterdb/1.2.1")
+		resp, err := client.Do(req)
+		if err != nil {
+			// The url.Error carries the full URL, including the api_key query
+			// param — redact it so keys never reach logs.
+			return nil, errors.RedactURLSecrets(err)
+		}
+		return resp, nil
+	})
 }
 
-// Log helper for slow operations
+// logSlow logs a warning when an operation takes longer than 2 seconds. It's
+// not currently called from anywhere — kept around as a useful per-call
+// timing helper. Wire it up at the relevant call sites (TmdbClient.Get +
+// FetchImageBytes, for instance) if you want slow-TMDB warnings back in
+// the logs.
 func logSlow(label string, ms int64) {
 	if ms > 2000 {
 		slog.Warn("slow "+label, "ms", ms)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"openposterdb/internal/errors"
 
@@ -70,11 +71,13 @@ func (c *MdblistClient) fetch(url string) (*MdblistResponse, error) {
 
 	fullURL := fmt.Sprintf("%s?apikey=%s", url, apiKey)
 
+	start := time.Now()
 	resp, err := SendWithRetry(&MDBListRetry, func() (*http.Response, error) {
 		req, _ := http.NewRequest("GET", fullURL, nil)
 		req.Header.Set("User-Agent", "openposterdb/1.2.1")
 		return c.HTTP.Do(req)
 	})
+	logSlow("MDBList", time.Since(start).Milliseconds())
 
 	if err != nil {
 		return nil, errors.NewAPIError(err)

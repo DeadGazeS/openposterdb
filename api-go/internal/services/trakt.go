@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"openposterdb/internal/errors"
 )
@@ -45,9 +46,11 @@ func (c *TraktClient) getRating(url string) (*TraktRatingsResponse, error) {
 		return nil, errors.NewAPIError(err)
 	}
 
+	start := time.Now()
 	resp, err := SendWithRetry(&TraktRetry, func() (*http.Response, error) {
 		return c.HTTP.Do(req)
 	})
+	logSlow("Trakt", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}

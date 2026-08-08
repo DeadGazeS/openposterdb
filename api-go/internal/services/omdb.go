@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"openposterdb/internal/errors"
 )
@@ -36,9 +37,11 @@ func (c *OmdbClient) GetRatings(imdbID string) (*OmdbResponse, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", apiKey, imdbID)
 
+	start := time.Now()
 	resp, err := SendWithRetry(&OMDBRetry, func() (*http.Response, error) {
 		return c.HTTP.Get(url)
 	})
+	logSlow("OMDb", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}

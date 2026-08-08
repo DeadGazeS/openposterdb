@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"openposterdb/internal/errors"
 )
@@ -58,9 +59,11 @@ func (c *FanartClient) GetMovieImages(tmdbID uint64) (*FanartImages, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	url := fmt.Sprintf("https://webservice.fanart.tv/v3/movies/%d?api_key=%s", tmdbID, apiKey)
 
+	start := time.Now()
 	resp, err := SendWithRetry(&FanartRetry, func() (*http.Response, error) {
 		return c.HTTP.Get(url)
 	})
+	logSlow("Fanart movie images", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}
@@ -89,9 +92,11 @@ func (c *FanartClient) GetTVImages(id uint64) (*FanartImages, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	url := fmt.Sprintf("https://webservice.fanart.tv/v3/tv/%d?api_key=%s", id, apiKey)
 
+	start := time.Now()
 	resp, err := SendWithRetry(&FanartRetry, func() (*http.Response, error) {
 		return c.HTTP.Get(url)
 	})
+	logSlow("Fanart TV images", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}
@@ -117,9 +122,11 @@ func (c *FanartClient) GetTVImages(id uint64) (*FanartImages, error) {
 }
 
 func (c *FanartClient) FetchPosterBytes(url string) ([]byte, error) {
+	start := time.Now()
 	resp, err := SendWithRetry(&FanartRetry, func() (*http.Response, error) {
 		return c.HTTP.Get(url)
 	})
+	logSlow("Fanart CDN", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}
