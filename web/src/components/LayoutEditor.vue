@@ -12,32 +12,29 @@ import {
 import type { ImageLayout, SideSlot } from '@/lib/layout'
 import { layoutTotal } from '@/lib/layout'
 
+const model = defineModel<ImageLayout>({ required: true })
+
 const props = withDefaults(defineProps<{
-  modelValue: ImageLayout
   kind: string
   testPrefix?: string
 }>(), {
   testPrefix: '',
 })
 
-const emit = defineEmits<{
-  (e: 'update:modelValue', value: ImageLayout): void
-}>()
-
-const total = computed(() => layoutTotal(props.modelValue))
+const total = computed(() => layoutTotal(model.value))
 
 function setSlot(side: 'top' | 'right' | 'bottom' | 'left', slot: SideSlot) {
-  emit('update:modelValue', { ...props.modelValue, [side]: slot })
+  model.value = { ...model.value, [side]: slot }
 }
 
 function setField(side: 'top' | 'right' | 'bottom' | 'left', field: 'per_row' | 'rows' | 'start', value: number | string) {
-  const cur = { ...props.modelValue[side] }
+  const cur = { ...model.value[side] }
   ;(cur as Record<string, unknown>)[field] = value
   setSlot(side, cur)
 }
 
 function slotValue(side: 'top' | 'right' | 'bottom' | 'left'): SideSlot {
-  return props.modelValue[side]
+  return model.value[side]
 }
 
 // start anchor options depend on the side axis.

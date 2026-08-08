@@ -151,17 +151,50 @@ function previewQuery(p: PreviewParams): Record<string, string | number | undefi
   }
 }
 
+// Per-kind endpoint config — the only thing that varies between kinds is
+// the URL path (plural form) and whether the image endpoint appends
+// "/image" (poster + episode) or not (logo + backdrop).
+interface AdminImageEndpoints {
+  plural: string         // 'posters' | 'logos' | 'backdrops' | 'episodes'
+  imageSuffix: string    // '/image' for poster/episode, '' for logo/backdrop
+}
+
+const ADMIN_IMAGE_ENDPOINTS: Record<ImageListKind, AdminImageEndpoints> = {
+  poster:   { plural: 'posters',   imageSuffix: '/image' },
+  logo:     { plural: 'logos',     imageSuffix: '' },
+  backdrop: { plural: 'backdrops', imageSuffix: '' },
+  episode:  { plural: 'episodes',  imageSuffix: '/image' },
+}
+
+interface AdminImageApi {
+  clear: () => Promise<Response>
+  list: (page: number, pageSize: number) => Promise<Response>
+  image: (key: string) => Promise<Response>
+  fetch: (idType: string, idValue: string) => Promise<Response>
+  purge: (idType: string, idValue: string, scope?: PurgeScope) => Promise<Response>
+}
+
+// makeAdminImageApi builds the 5 per-kind endpoints from the per-kind path
+// config. Adding a new ImageListKind is a 1-line ADMIN_IMAGE_ENDPOINTS
+// entry + a makeAdminImageApi(...) call.
+function makeAdminImageApi(cfg: AdminImageEndpoints): AdminImageApi {
+  return {
+    clear: () => del(`/api/admin/${cfg.plural}`),
+    list: (page, pageSize) => get(`/api/admin/${cfg.plural}?page=${page}&page_size=${pageSize}`),
+    image: (key) => get(`/api/admin/${cfg.plural}/${key}${cfg.imageSuffix}`),
+    fetch: (idType, idValue) => post(`/api/admin/${cfg.plural}/${idType}/${idValue}/fetch`),
+    purge: (idType, idValue, scope = 'title') => del(purgeUrl(cfg.plural, idType, idValue, scope)),
+  }
+}
+
+const POSTER_API = makeAdminImageApi(ADMIN_IMAGE_ENDPOINTS.poster)
+const LOGO_API = makeAdminImageApi(ADMIN_IMAGE_ENDPOINTS.logo)
+const BACKDROP_API = makeAdminImageApi(ADMIN_IMAGE_ENDPOINTS.backdrop)
+const EPISODE_API = makeAdminImageApi(ADMIN_IMAGE_ENDPOINTS.episode)
+
 export const adminApi = {
   getStats: (): Promise<Response> => get('/api/admin/stats'),
   purgeAll: (): Promise<Response> => post('/api/admin/cache/purge'),
-  clearPosters: (): Promise<Response> => del('/api/admin/posters'),
-  clearLogos: (): Promise<Response> => del('/api/admin/logos'),
-  clearBackdrops: (): Promise<Response> => del('/api/admin/backdrops'),
-  clearEpisodes: (): Promise<Response> => del('/api/admin/episodes'),
-  getPosters: (page: number, pageSize: number): Promise<Response> =>
-    get(`/api/admin/posters?page=${page}&page_size=${pageSize}`),
-  getPosterImage: (key: string): Promise<Response> =>
-    get(`/api/admin/posters/${key}/image`),
   getSettings: (): Promise<Response> => get('/api/admin/settings'),
   updateSettings: (settings: Partial<SaveSettingsPayload> & { image_source: string; free_api_key_enabled?: boolean }): Promise<Response> => put('/api/admin/settings', settings),
   getPrefs: (): Promise<Response> => get('/api/admin/prefs'),
@@ -172,36 +205,31 @@ export const adminApi = {
     post('/api/admin/settings/import', payload),
   getServiceKeys: (): Promise<Response> => get('/api/admin/settings/services'),
   updateServiceKeys: (keys: Record<string, string | null>): Promise<Response> => put('/api/admin/settings/services', keys),
-  fetchPoster: (idType: string, idValue: string): Promise<Response> =>
-    post(`/api/admin/posters/${idType}/${idValue}/fetch`),
-  purgePoster: (idType: string, idValue: string, scope: PurgeScope = 'title'): Promise<Response> =>
-    del(purgeUrl('posters', idType, idValue, scope)),
-  getLogos: (page: number, pageSize: number): Promise<Response> =>
-    get(`/api/admin/logos?page=${page}&page_size=${pageSize}`),
-  getLogoImage: (key: string): Promise<Response> =>
-    get(`/api/admin/logos/${key}`),
-  fetchLogo: (idType: string, idValue: string): Promise<Response> =>
-    post(`/api/admin/logos/${idType}/${idValue}/fetch`),
-  purgeLogo: (idType: string, idValue: string, scope: PurgeScope = 'title'): Promise<Response> =>
-    del(purgeUrl('logos', idType, idValue, scope)),
-  getBackdrops: (page: number, pageSize: number): Promise<Response> =>
-    get(`/api/admin/backdrops?page=${page}&page_size=${pageSize}`),
-  getBackdropImage: (key: string): Promise<Response> =>
-    get(`/api/admin/backdrops/${key}`),
-  fetchBackdrop: (idType: string, idValue: string): Promise<Response> =>
-    post(`/api/admin/backdrops/${idType}/${idValue}/fetch`),
-  purgeBackdrop: (idType: string, idValue: string, scope: PurgeScope = 'title'): Promise<Response> =>
-    del(purgeUrl('backdrops', idType, idValue, scope)),
-  getEpisodes: (page: number, pageSize: number): Promise<Response> =>
-    get(`/api/admin/episodes?page=${page}&page_size=${pageSize}`),
-  getEpisodeImage: (key: string): Promise<Response> =>
-    get(`/api/admin/episodes/${key}/image`),
-  fetchEpisode: (idType: string, idValue: string): Promise<Response> =>
-    post(`/api/admin/episodes/${idType}/${idValue}/fetch`),
-  purgeEpisode: (idType: string, idValue: string, scope: PurgeScope = 'title'): Promise<Response> =>
-    del(purgeUrl('episodes', idType, idValue, scope)),
   preview: (kind: PreviewKind, params: PreviewParams): Promise<Response> =>
     get(buildUrl(`/api/admin/preview/${kind}`, previewQuery(params))),
+
+  // Per-kind endpoints — generated by makeAdminImageApi from
+  // ADMIN_IMAGE_ENDPOINTS. Adding a new kind is a 1-line entry there.
+  clearPosters: POSTER_API.clear,
+  getPosters: POSTER_API.list,
+  getPosterImage: POSTER_API.image,
+  fetchPoster: POSTER_API.fetch,
+  purgePoster: POSTER_API.purge,
+  clearLogos: LOGO_API.clear,
+  getLogos: LOGO_API.list,
+  getLogoImage: LOGO_API.image,
+  fetchLogo: LOGO_API.fetch,
+  purgeLogo: LOGO_API.purge,
+  clearBackdrops: BACKDROP_API.clear,
+  getBackdrops: BACKDROP_API.list,
+  getBackdropImage: BACKDROP_API.image,
+  fetchBackdrop: BACKDROP_API.fetch,
+  purgeBackdrop: BACKDROP_API.purge,
+  clearEpisodes: EPISODE_API.clear,
+  getEpisodes: EPISODE_API.list,
+  getEpisodeImage: EPISODE_API.image,
+  fetchEpisode: EPISODE_API.fetch,
+  purgeEpisode: EPISODE_API.purge,
 }
 
 // --- Self-service API (API key session JWT auth) ---
@@ -239,41 +267,25 @@ export const keysApi = {
 /** Kinds supported by ImageListView — single source of truth (admin gallery). */
 export type ImageListKind = 'poster' | 'logo' | 'backdrop' | 'episode'
 
-const IMAGE_LIST_CONFIGS: Record<ImageListKind, {
-  listFn: (page: number, pageSize: number) => Promise<Response>
-  imageFn: (key: string) => Promise<Response>
-  fetchFn: (idType: string, idValue: string) => Promise<Response>
-  deleteFn: (idType: string, idValue: string, scope: PurgeScope) => Promise<Response>
-  clearAllFn: () => Promise<Response>
-}> = {
-  poster: {
-    listFn: adminApi.getPosters,
-    imageFn: adminApi.getPosterImage,
-    fetchFn: adminApi.fetchPoster,
-    deleteFn: adminApi.purgePoster,
-    clearAllFn: adminApi.clearPosters,
-  },
-  logo: {
-    listFn: adminApi.getLogos,
-    imageFn: adminApi.getLogoImage,
-    fetchFn: adminApi.fetchLogo,
-    deleteFn: adminApi.purgeLogo,
-    clearAllFn: adminApi.clearLogos,
-  },
-  backdrop: {
-    listFn: adminApi.getBackdrops,
-    imageFn: adminApi.getBackdropImage,
-    fetchFn: adminApi.fetchBackdrop,
-    deleteFn: adminApi.purgeBackdrop,
-    clearAllFn: adminApi.clearBackdrops,
-  },
-  episode: {
-    listFn: adminApi.getEpisodes,
-    imageFn: adminApi.getEpisodeImage,
-    fetchFn: adminApi.fetchEpisode,
-    deleteFn: adminApi.purgeEpisode,
-    clearAllFn: adminApi.clearEpisodes,
-  },
+// buildImageListConfig re-projects an AdminImageApi into the prop shape
+// the ImageListView expects (clearAllFn instead of clear, deleteFn
+// instead of purge). One call per kind — no parallel function list to
+// drift.
+function buildImageListConfig(api: AdminImageApi) {
+  return {
+    listFn: api.list,
+    imageFn: api.image,
+    fetchFn: api.fetch,
+    deleteFn: api.purge,
+    clearAllFn: api.clear,
+  }
+}
+
+const IMAGE_LIST_CONFIGS: Record<ImageListKind, ReturnType<typeof buildImageListConfig>> = {
+  poster: buildImageListConfig(POSTER_API),
+  logo: buildImageListConfig(LOGO_API),
+  backdrop: buildImageListConfig(BACKDROP_API),
+  episode: buildImageListConfig(EPISODE_API),
 }
 
 /** Per-kind ImageListView props lookup — lets a single wrapper render the

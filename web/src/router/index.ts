@@ -86,38 +86,17 @@ const router = createRouter({
           component: () => import('@/views/DashboardView.vue'),
           meta: { title: 'Dashboard' },
         },
-        // Admin image gallery — one route per kind, all sharing the
+        // Admin image gallery — single route per kind, all sharing the
         // AdminListView wrapper + the per-kind config table in @/lib/api.
-        // Route name + path are kept plural for backward compatibility with
+        // Route name + path are kept plural for backward compat with
         // existing router.push({ name: 'posters' }) callers.
-        {
-          path: 'posters',
-          name: 'posters',
+        ...IMAGE_LIST_KINDS.map((kind) => ({
+          path: `${kind === 'logo' ? 'logo' : kind}s`,
+          name: `${kind === 'logo' ? 'logo' : kind}s`,
           component: () => import('@/views/AdminListView.vue'),
-          props: { kind: 'poster' },
-          meta: { title: IMAGE_LIST_TITLES.poster },
-        },
-        {
-          path: 'logos',
-          name: 'logos',
-          component: () => import('@/views/AdminListView.vue'),
-          props: { kind: 'logo' },
-          meta: { title: IMAGE_LIST_TITLES.logo },
-        },
-        {
-          path: 'backdrops',
-          name: 'backdrops',
-          component: () => import('@/views/AdminListView.vue'),
-          props: { kind: 'backdrop' },
-          meta: { title: IMAGE_LIST_TITLES.backdrop },
-        },
-        {
-          path: 'episodes',
-          name: 'episodes',
-          component: () => import('@/views/AdminListView.vue'),
-          props: { kind: 'episode' },
-          meta: { title: IMAGE_LIST_TITLES.episode },
-        },
+          props: { kind },
+          meta: { title: IMAGE_LIST_TITLES[kind] },
+        })),
         {
           path: 'keys',
           redirect: { name: 'settings-api' },
