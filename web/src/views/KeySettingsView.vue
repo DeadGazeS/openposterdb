@@ -25,7 +25,7 @@ const initError = ref('')
 const { loadSettings, saveSettings, resetSettings } = useRenderSettingsForm<SaveSettingsPayload>({
   api: {
     load: () => selfApi.getSettings(),
-    save: (p) => selfApi.updateSettings(p as SaveSettingsPayload),
+    save: (p) => selfApi.updateSettings(p),
     reset: () => selfApi.resetSettings(),
   },
   onLoad: (data) => { settings.value = data },

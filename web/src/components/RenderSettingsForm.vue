@@ -19,6 +19,7 @@ import type { PreviewKind, PreviewParams, RenderSettings, SaveSettingsPayload, S
 import { LANGUAGES, ALL_RATING_SOURCES, RATING_COLOR_ROWS, SOURCE_BADGE_SAMPLES, parseRatingsOrder, parseRatingsExclude } from '@/lib/constants'
 import type { ImageLayout } from '@/lib/layout'
 import { parseLayout, layoutToJSON, layoutTotal } from '@/lib/layout'
+import { colorsQuery } from '@/lib/api'
 
 
 
@@ -618,11 +619,8 @@ function buildGalleryParams(): string {
   p.set('badge_alpha', String(editPosterBadgeAlpha.value))
   p.set('badge_shape', editPosterBadgeShape.value)
   p.set('label_style', editPosterLabelStyle.value)
-  const compact: Record<string, SourceColors> = {}
-  for (const [k, c] of Object.entries(editColors.value)) {
-    if (c.accent || c.value || c.border || c.text) compact[k] = c
-  }
-  if (Object.keys(compact).length) p.set('colors', JSON.stringify(compact))
+  const colors = colorsQuery(editColors.value)
+  if (colors) p.set('colors', colors)
   return p.toString()
 }
 

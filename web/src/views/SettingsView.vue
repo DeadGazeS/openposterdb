@@ -5,7 +5,7 @@ import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
 import { useSavedFlash } from '@/composables/useSavedFlash'
 import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
-import { parseApiError } from '@/lib/api-error'
+import { parseApiError, okOrThrow } from '@/lib/api-error'
 import { adminApi } from '@/lib/api'
 import type { RenderSettings, SaveSettingsPayload } from '@/lib/settings'
 import { FREE_API_KEY } from '@/lib/constants'
@@ -29,7 +29,7 @@ import {
 const route = useRoute()
 
 // The active section is derived from the route — each section is its own page
-// (Settings → API / Global Image / Backup).
+// (Settings → API / Global Image Settings / Backup).
 const section = computed(() => {
   switch (route.name) {
     case 'settings-backup':
@@ -75,11 +75,7 @@ const {
   refetch: refetchServiceKeys,
 } = useQuery<ServiceKeysResponse>({
   queryKey: ['service-keys'],
-  queryFn: async () => {
-    const res = await adminApi.getServiceKeys()
-    if (!res.ok) throw new Error('Failed to fetch service keys')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<ServiceKeysResponse>(await adminApi.getServiceKeys(), 'Failed to fetch service keys'),
 })
 
 // Seed the chips from the server's real keys once loaded.
@@ -197,11 +193,7 @@ const {
   // edits survive Refresh. A fresh reference re-applies the saved config
   // (same path as discard, plus pulling the latest save).
   structuralSharing: false,
-  queryFn: async () => {
-    const res = await adminApi.getSettings()
-    if (!res.ok) throw new Error('Failed to fetch settings')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<SettingsResponse>(await adminApi.getSettings(), 'Failed to fetch settings'),
 })
 
 watch(settings, (s) => {
@@ -214,7 +206,7 @@ watch(settings, (s) => {
 const { loadSettings, saveSettings } = useRenderSettingsForm<SaveSettingsPayload>({
   api: {
     load: () => adminApi.getSettings(),
-    save: (p) => adminApi.updateSettings(p as SaveSettingsPayload),
+    save: (p) => adminApi.updateSettings(p),
   },
   onSave: (s) => ({ ...s, free_api_key_enabled: freeApiKeyEnabled.value }),
   saveErrorMessage: 'Failed to save settings',

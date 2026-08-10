@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useSavedFlash } from '@/composables/useSavedFlash'
-import { parseApiError } from '@/lib/api-error'
+import { parseApiError, okOrThrow } from '@/lib/api-error'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { keysApi, adminApi } from '@/lib/api'
 import type { SaveSettingsPayload } from '@/lib/settings'
@@ -23,11 +23,7 @@ const queryClient = useQueryClient()
 
 const { data: keys = ref([]) } = useQuery<ApiKey[]>({
   queryKey: ['api-keys'],
-  queryFn: async () => {
-    const res = await keysApi.list()
-    if (!res.ok) throw new Error('Failed to fetch keys')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<ApiKey[]>(await keysApi.list(), 'Failed to fetch keys'),
   initialData: [],
 })
 

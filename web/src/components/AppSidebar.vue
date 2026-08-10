@@ -37,7 +37,7 @@ const items = [
 
 const settingsItems = [
   { title: 'API', to: '/admin/settings/api' },
-  { title: 'Global Image', to: '/admin/settings/image' },
+  { title: 'Global Image Settings', to: '/admin/settings/image' },
   { title: 'Backup', to: '/admin/settings/backup' },
 ]
 

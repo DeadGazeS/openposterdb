@@ -11,14 +11,14 @@
 
 import type { RenderSettings } from '@/lib/settings'
 
-export interface SettingsFormApi {
+export interface SettingsFormApi<T = unknown> {
   load(): Promise<Response>
-  save(payload: unknown): Promise<Response>
+  save(payload: T): Promise<Response>
   reset?: () => Promise<Response>
 }
 
 export interface SettingsFormOptions<T = unknown> {
-  api: SettingsFormApi
+  api: SettingsFormApi<T>
   /** Side effect after a successful load (e.g. mirror to a local ref). */
   onLoad?: (data: RenderSettings) => void
   /** Mutate the payload before POST (e.g. merge free_api_key_enabled). */

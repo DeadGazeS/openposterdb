@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { adminApi } from '@/lib/api'
+import { okOrThrow } from '@/lib/api-error'
 import RefreshButton from '@/components/RefreshButton.vue'
 import ClearCacheButton from '@/components/ClearCacheButton.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,11 +19,7 @@ interface Stats {
 
 const { data: stats, isPending, refetch } = useQuery<Stats>({
   queryKey: ['admin', 'stats'],
-  queryFn: async () => {
-    const res = await adminApi.getStats()
-    if (!res.ok) throw new Error('Failed to fetch stats')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<Stats>(await adminApi.getStats(), 'Failed to fetch stats'),
 })
 
 // True only while a user-initiated Refresh click is in flight — the query's

@@ -121,7 +121,7 @@ const router = createRouter({
           path: 'settings/image',
           name: 'settings-image',
           component: () => import('@/views/SettingsView.vue'),
-          meta: { title: 'Global Image' },
+          meta: { title: 'Global Image Settings' },
         },
       ],
     },

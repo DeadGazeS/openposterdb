@@ -117,7 +117,7 @@ function purgeUrl(kind: string, idType: string, idValue: string, scope: PurgeSco
 }
 
 /** Serialize non-default color overrides into a compact JSON query value. */
-function colorsQuery(colors?: Record<string, SourceColors>): string | undefined {
+export function colorsQuery(colors?: Record<string, SourceColors>): string | undefined {
   if (!colors) return undefined
   const compact: Record<string, SourceColors> = {}
   for (const [k, c] of Object.entries(colors)) {
