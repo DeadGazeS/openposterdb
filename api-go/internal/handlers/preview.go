@@ -56,71 +56,6 @@ func sampleBadges() []services.RatingBadge {
 	}
 }
 
-func previewRenderSettings(
-	kind string,
-	badgeStyle services.BadgeStyle,
-	labelStyle services.LabelStyle,
-	textSize services.ScalePercent,
-	badgeSize services.ScalePercent,
-	logoSize services.ScalePercent,
-	layout services.ImageLayout,
-	badgeDirection services.BadgeDirection,
-	appearance services.BadgeAppearance,
-	ratingsLimit int32,
-	ratingsOrder string,
-	ratingsExclude string,
-) *services.RenderSettings {
-	s := services.DefaultRenderSettings()
-	s.RatingsOrder = ratingsOrder
-	s.RatingsExclude = ratingsExclude
-
-	switch kind {
-	case "poster":
-		s.RatingsLimit = ratingsLimit
-		s.PosterBadgeStyle = badgeStyle
-		s.PosterLabelStyle = labelStyle
-		s.PosterTextSize = textSize
-		s.PosterBadgeSize = badgeSize
-		s.PosterLogoSize = logoSize
-		s.PosterLayout = layout
-		s.PosterBadgeDirection = badgeDirection
-		s.PosterBadgeShape = appearance.Shape
-		s.PosterBadgeAlpha = appearance.Alpha
-	case "logo":
-		s.LogoRatingsLimit = ratingsLimit
-		s.LogoBadgeStyle = badgeStyle
-		s.LogoLabelStyle = labelStyle
-		s.LogoTextSize = textSize
-		s.LogoBadgeSize = badgeSize
-		s.LogoLogoSize = logoSize
-		s.LogoBadgeShape = appearance.Shape
-		s.LogoBadgeAlpha = appearance.Alpha
-	case "backdrop":
-		s.BackdropRatingsLimit = ratingsLimit
-		s.BackdropBadgeStyle = badgeStyle
-		s.BackdropLabelStyle = labelStyle
-		s.BackdropTextSize = textSize
-		s.BackdropBadgeSize = badgeSize
-		s.BackdropLogoSize = logoSize
-		s.BackdropLayout = layout
-		s.BackdropBadgeDirection = badgeDirection
-		s.BackdropBadgeShape = appearance.Shape
-		s.BackdropBadgeAlpha = appearance.Alpha
-	case "episode":
-		s.EpisodeRatingsLimit = ratingsLimit
-		s.EpisodeBadgeStyle = badgeStyle
-		s.EpisodeLabelStyle = labelStyle
-		s.EpisodeTextSize = textSize
-		s.EpisodeBadgeSize = badgeSize
-		s.EpisodeLogoSize = logoSize
-		s.EpisodeLayout = layout
-		s.EpisodeBadgeDirection = badgeDirection
-		s.EpisodeBadgeShape = appearance.Shape
-		s.EpisodeBadgeAlpha = appearance.Alpha
-	}
-	return &s
-}
-
 // previewLayout returns the layout from the query, falling back to the kind
 // default.
 func previewLayout(query *ImageQuery, kind string) services.ImageLayout {
@@ -303,7 +238,7 @@ type previewBuild struct {
 	textScale       float32
 
 	// Ratings: limit, order, exclude, layout, badge style/label/shape/alpha
-	// appearance — all the args previewRenderSettings needs.
+	// appearance — resolved once here and passed through RenderParams.
 	ratingsLimit   int32
 	ratingsOrder   string
 	ratingsExclude string
@@ -479,9 +414,6 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		posterFit = services.PosterFit(*b.query.Fit)
 	}
 
-	settings := previewRenderSettings("poster", b.badgeStyle, b.labelStyle, b.textSize, b.badgeSize, b.logoSize, b.layout, services.BadgeDirectionDefault.ResolveDefault(), b.appearance, b.ratingsLimit, b.ratingsOrder, b.ratingsExclude)
-	settings.PosterFit = posterFit
-
 	posterBytes, err := p.demoArtworkBytes("poster")
 	if err != nil {
 		httpx.WriteAppError(w, err)
@@ -520,9 +452,6 @@ func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// previewRenderSettings is a no-op for the logo branch (settings.PosterFit
-	// and friends don't apply); omit the call to keep the handler small.
-
 	logoBytes, err := p.demoArtworkBytes("logo")
 	if err != nil {
 		httpx.WriteAppError(w, err)
@@ -559,8 +488,6 @@ func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) 
 		edgeInsetY = *b.query.EdgeInsetY
 	}
 
-	// previewRenderSettings is unused for the backdrop branch.
-
 	backdropBytes, err := p.demoArtworkBytes("backdrop")
 	if err != nil {
 		httpx.WriteAppError(w, err)
@@ -592,8 +519,6 @@ func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
 	if b.query.Blur != nil {
 		blur = *b.query.Blur
 	}
-
-	// previewRenderSettings is unused for the episode branch.
 
 	episodeBytes, err := p.demoArtworkBytes("episode")
 	if err != nil {

@@ -44,29 +44,89 @@ func (q *ImageQuery) HasOverrides() bool {
 		q.EdgeInsetX != nil || q.EdgeInsetY != nil
 }
 
+// kindRenderRefs points at the per-kind RenderSettings fields a query override
+// can touch. Resolving the kind once — instead of re-deriving it in a
+// `switch kind` per field — means a newly added per-kind field is wired up in
+// exactly one place, and a field can't silently miss a kind arm (the struct
+// literal per kind is exhaustive or it doesn't compile). This is the drift that
+// produced the 2026-08-04 badge-width bug, where a new per-kind field reached
+// some sites and not others.
+//
+// badgeDirection is nil for logo: the logo badge layout is direction-agnostic,
+// so ?badge_direction has never applied there.
+type kindRenderRefs struct {
+	ratingsLimit   *int32
+	badgeStyle     *services.BadgeStyle
+	labelStyle     *services.LabelStyle
+	textSize       *services.ScalePercent
+	badgeSize      *services.ScalePercent
+	badgeWidth     *services.ScalePercent
+	badgeHeight    *services.ScalePercent
+	logoSize       *services.ScalePercent
+	badgeShape     *services.BadgeShape
+	badgeAlpha     *services.BadgeAlpha
+	layout         *services.ImageLayout
+	badgeDirection *services.BadgeDirection
+}
+
+// kindRenderRefsFor returns the field set for kind, or nil for an unrecognised
+// kind (in which case per-kind overrides are skipped entirely).
+func kindRenderRefsFor(s *services.RenderSettings, kind string) *kindRenderRefs {
+	switch kind {
+	case "poster":
+		return &kindRenderRefs{
+			ratingsLimit: &s.RatingsLimit, badgeStyle: &s.PosterBadgeStyle,
+			labelStyle: &s.PosterLabelStyle, textSize: &s.PosterTextSize,
+			badgeSize: &s.PosterBadgeSize, badgeWidth: &s.PosterBadgeWidth,
+			badgeHeight: &s.PosterBadgeHeight, logoSize: &s.PosterLogoSize,
+			badgeShape: &s.PosterBadgeShape, badgeAlpha: &s.PosterBadgeAlpha,
+			layout: &s.PosterLayout, badgeDirection: &s.PosterBadgeDirection,
+		}
+	case "logo":
+		return &kindRenderRefs{
+			ratingsLimit: &s.LogoRatingsLimit, badgeStyle: &s.LogoBadgeStyle,
+			labelStyle: &s.LogoLabelStyle, textSize: &s.LogoTextSize,
+			badgeSize: &s.LogoBadgeSize, badgeWidth: &s.LogoBadgeWidth,
+			badgeHeight: &s.LogoBadgeHeight, logoSize: &s.LogoLogoSize,
+			badgeShape: &s.LogoBadgeShape, badgeAlpha: &s.LogoBadgeAlpha,
+			layout: &s.LogoLayout, badgeDirection: nil,
+		}
+	case "backdrop":
+		return &kindRenderRefs{
+			ratingsLimit: &s.BackdropRatingsLimit, badgeStyle: &s.BackdropBadgeStyle,
+			labelStyle: &s.BackdropLabelStyle, textSize: &s.BackdropTextSize,
+			badgeSize: &s.BackdropBadgeSize, badgeWidth: &s.BackdropBadgeWidth,
+			badgeHeight: &s.BackdropBadgeHeight, logoSize: &s.BackdropLogoSize,
+			badgeShape: &s.BackdropBadgeShape, badgeAlpha: &s.BackdropBadgeAlpha,
+			layout: &s.BackdropLayout, badgeDirection: &s.BackdropBadgeDirection,
+		}
+	case "episode":
+		return &kindRenderRefs{
+			ratingsLimit: &s.EpisodeRatingsLimit, badgeStyle: &s.EpisodeBadgeStyle,
+			labelStyle: &s.EpisodeLabelStyle, textSize: &s.EpisodeTextSize,
+			badgeSize: &s.EpisodeBadgeSize, badgeWidth: &s.EpisodeBadgeWidth,
+			badgeHeight: &s.EpisodeBadgeHeight, logoSize: &s.EpisodeLogoSize,
+			badgeShape: &s.EpisodeBadgeShape, badgeAlpha: &s.EpisodeBadgeAlpha,
+			layout: &s.EpisodeLayout, badgeDirection: &s.EpisodeBadgeDirection,
+		}
+	}
+	return nil
+}
+
 func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, kind string) *services.RenderSettings {
 	if !query.HasOverrides() {
 		return settings
 	}
 
-	s := *settings
-
+	// An out-of-range ?ratings_limit rejects the whole override set, before
+	// anything is mutated.
 	if query.RatingsLimit != nil {
-		limit := *query.RatingsLimit
-		if err := services.ValidateRatingsLimit(limit); err != nil {
+		if err := services.ValidateRatingsLimit(*query.RatingsLimit); err != nil {
 			return settings
 		}
-		switch kind {
-		case "poster":
-			s.RatingsLimit = limit
-		case "logo":
-			s.LogoRatingsLimit = limit
-		case "backdrop":
-			s.BackdropRatingsLimit = limit
-		case "episode":
-			s.EpisodeRatingsLimit = limit
-		}
 	}
+
+	s := *settings
 
 	if query.RatingsOrder != nil {
 		if err := services.ValidateRatingsOrder(*query.RatingsOrder); err == nil {
@@ -80,179 +140,64 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 	}
 
-	if query.BadgeStyle != nil {
-		style := services.ParseBadgeStyle(*query.BadgeStyle)
-		switch kind {
-		case "poster":
-			s.PosterBadgeStyle = style
-		case "logo":
-			s.LogoBadgeStyle = style
-		case "backdrop":
-			s.BackdropBadgeStyle = style
-		case "episode":
-			s.EpisodeBadgeStyle = style
+	if k := kindRenderRefsFor(&s, kind); k != nil {
+		if query.RatingsLimit != nil {
+			*k.ratingsLimit = *query.RatingsLimit
+		}
+		if query.BadgeStyle != nil {
+			*k.badgeStyle = services.ParseBadgeStyle(*query.BadgeStyle)
+		}
+		if query.LabelStyle != nil {
+			*k.labelStyle = services.LabelStyle(*query.LabelStyle)
+		}
+		if query.TextSize != nil {
+			*k.textSize = services.ClampScalePercent(*query.TextSize)
+		}
+		if query.BadgeSize != nil {
+			*k.badgeSize = services.ClampScalePercent(*query.BadgeSize)
+		}
+		if query.BadgeWidth != nil {
+			*k.badgeWidth = services.ClampScalePercent(*query.BadgeWidth)
+		}
+		if query.BadgeHeight != nil {
+			*k.badgeHeight = services.ClampScalePercent(*query.BadgeHeight)
+		}
+		if query.LogoSize != nil {
+			*k.logoSize = services.ClampScalePercent(*query.LogoSize)
+		}
+		if query.BadgeShape != nil {
+			*k.badgeShape = services.BadgeShape(*query.BadgeShape)
+		}
+		if query.BadgeAlpha != nil {
+			*k.badgeAlpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
+		}
+		if query.Layout != nil {
+			def := services.DefaultLayout(kind)
+			*k.layout = services.UnmarshalLayout(*query.Layout, &def)
+		}
+		if query.BadgeDirection != nil && k.badgeDirection != nil {
+			*k.badgeDirection = services.BadgeDirection(*query.BadgeDirection)
 		}
 	}
 
-	if query.LabelStyle != nil {
-		style := services.LabelStyle(*query.LabelStyle)
-		switch kind {
-		case "poster":
-			s.PosterLabelStyle = style
-		case "logo":
-			s.LogoLabelStyle = style
-		case "backdrop":
-			s.BackdropLabelStyle = style
-		case "episode":
-			s.EpisodeLabelStyle = style
-		}
-	}
-
-	if query.TextSize != nil {
-		size := services.ClampScalePercent(*query.TextSize)
-		switch kind {
-		case "poster":
-			s.PosterTextSize = size
-		case "logo":
-			s.LogoTextSize = size
-		case "backdrop":
-			s.BackdropTextSize = size
-		case "episode":
-			s.EpisodeTextSize = size
-		}
-	}
-
-	if query.BadgeSize != nil {
-		size := services.ClampScalePercent(*query.BadgeSize)
-		switch kind {
-		case "poster":
-			s.PosterBadgeSize = size
-		case "logo":
-			s.LogoBadgeSize = size
-		case "backdrop":
-			s.BackdropBadgeSize = size
-		case "episode":
-			s.EpisodeBadgeSize = size
-		}
-	}
-
-	if query.BadgeWidth != nil {
-		width := services.ClampScalePercent(*query.BadgeWidth)
-		switch kind {
-		case "poster":
-			s.PosterBadgeWidth = width
-		case "logo":
-			s.LogoBadgeWidth = width
-		case "backdrop":
-			s.BackdropBadgeWidth = width
-		case "episode":
-			s.EpisodeBadgeWidth = width
-		}
-	}
-
-	if query.BadgeHeight != nil {
-		height := services.ClampScalePercent(*query.BadgeHeight)
-		switch kind {
-		case "poster":
-			s.PosterBadgeHeight = height
-		case "logo":
-			s.LogoBadgeHeight = height
-		case "backdrop":
-			s.BackdropBadgeHeight = height
-		case "episode":
-			s.EpisodeBadgeHeight = height
-		}
-	}
-
-	if query.LogoSize != nil {
-		size := services.ClampScalePercent(*query.LogoSize)
-		switch kind {
-		case "poster":
-			s.PosterLogoSize = size
-		case "logo":
-			s.LogoLogoSize = size
-		case "backdrop":
-			s.BackdropLogoSize = size
-		case "episode":
-			s.EpisodeLogoSize = size
-		}
-	}
-
-	if query.BadgeShape != nil {
-		shape := services.BadgeShape(*query.BadgeShape)
-		switch kind {
-		case "poster":
-			s.PosterBadgeShape = shape
-		case "logo":
-			s.LogoBadgeShape = shape
-		case "backdrop":
-			s.BackdropBadgeShape = shape
-		case "episode":
-			s.EpisodeBadgeShape = shape
-		}
-	}
-
-	if query.BadgeAlpha != nil {
-		alpha := services.ClampBadgeAlpha(*query.BadgeAlpha)
-		switch kind {
-		case "poster":
-			s.PosterBadgeAlpha = alpha
-		case "logo":
-			s.LogoBadgeAlpha = alpha
-		case "backdrop":
-			s.BackdropBadgeAlpha = alpha
-		case "episode":
-			s.EpisodeBadgeAlpha = alpha
-		}
-	}
-
-	if query.Layout != nil {
-		def := services.DefaultLayout(kind)
-		l := services.UnmarshalLayout(*query.Layout, &def)
-		switch kind {
-		case "poster":
-			s.PosterLayout = l
-		case "logo":
-			s.LogoLayout = l
-		case "backdrop":
-			s.BackdropLayout = l
-		case "episode":
-			s.EpisodeLayout = l
-		}
-	}
-
-	if kind == "poster" {
-		if query.BadgeDirection != nil {
-			s.PosterBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
-		}
+	// Kind-exclusive overrides: each applies to exactly one kind, so they stay
+	// outside the shared per-kind table.
+	switch kind {
+	case "poster":
 		if query.Fit != nil {
 			s.PosterFit = services.PosterFit(*query.Fit)
 		}
 		if query.Textless != nil {
 			s.Textless = *query.Textless
 		}
-	}
-
-	if kind == "backdrop" {
-		if query.BadgeDirection != nil {
-			s.BackdropBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
-		}
+	case "backdrop":
 		if query.EdgeInsetX != nil {
 			s.BackdropEdgeInsetX = services.ClampEdgeInset(*query.EdgeInsetX)
 		}
 		if query.EdgeInsetY != nil {
 			s.BackdropEdgeInsetY = services.ClampEdgeInset(*query.EdgeInsetY)
 		}
-	}
-
-	if kind == "logo" {
-		// no per-kind logo query params beyond the shared layout
-	}
-
-	if kind == "episode" {
-		if query.BadgeDirection != nil {
-			s.EpisodeBadgeDirection = services.BadgeDirection(*query.BadgeDirection)
-		}
+	case "episode":
 		if query.Blur != nil {
 			s.EpisodeBlur = *query.Blur
 		}

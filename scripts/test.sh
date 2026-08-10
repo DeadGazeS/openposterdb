@@ -19,6 +19,9 @@ fi
 echo "=== Backend tests ==="
 (cd api-go && go test -coverprofile=coverage.out -covermode=atomic ./...)
 (cd api-go && go tool cover -func=coverage.out | tail -1)
+coverage=$(cd api-go && go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+awk -v c="$coverage" 'BEGIN { exit (c < 35) ? 1 : 0 }' \
+  || (echo "Coverage $coverage% < 35% (regression)" && exit 1)
 
 echo ""
 echo "=== Frontend unit tests ==="
