@@ -85,11 +85,10 @@ done
 echo ""
 echo "=== Preview Images ==="
 echo "These use the preview endpoint (no real movies needed)."
-echo -n "Enter full 64-character API key (or press Enter to skip): "
-read -r API_KEY
+API_KEY="${API_KEY:-${REGEN_API_KEY:-}}"
 
 if [[ -z "$API_KEY" ]]; then
-  echo "Skipping preview images."
+  echo "Skipping preview images (set API_KEY or REGEN_API_KEY env var to enable)."
   exit 0
 fi
 

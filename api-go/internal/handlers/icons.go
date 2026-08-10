@@ -53,7 +53,7 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		globals, err := services.GetGlobalSettings(db)
+		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
 			httpx.WriteError(w, 500, "failed to load settings")
 			return

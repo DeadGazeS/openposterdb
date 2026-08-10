@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -384,7 +385,7 @@ type FetchRatingsResult struct {
 	Badges  []RatingBadge
 }
 
-func FetchRatings(clients RatingsClients, q RatingsQuery) FetchRatingsResult {
+func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery) FetchRatingsResult {
 
 	type tmdbResult struct {
 		badge *RatingBadge
@@ -405,14 +406,14 @@ func FetchRatings(clients RatingsClients, q RatingsQuery) FetchRatingsResult {
 	traktCh := make(chan traktResult, 1)
 
 	go func() {
-		badge := fetchTmdbRating(clients.TMDB, q.ResolvedTMDbID, q.MediaType, q.EpisodeShowTMDbID, q.EpisodeSeason, q.EpisodeEpisode)
+		badge := fetchTmdbRatingCtx(ctx, clients.TMDB, q.ResolvedTMDbID, q.MediaType, q.EpisodeShowTMDbID, q.EpisodeSeason, q.EpisodeEpisode)
 		tmdbCh <- tmdbResult{badge}
 	}()
 
 	go func() {
 		var resp *OmdbResponse
 		if clients.OMDB != nil && q.IMDbID != nil {
-			if r, err := clients.OMDB.GetRatings(*q.IMDbID); err == nil {
+			if r, err := clients.OMDB.GetRatingsCtx(ctx, *q.IMDbID); err == nil {
 				resp = r
 			}
 		}
@@ -423,11 +424,11 @@ func FetchRatings(clients RatingsClients, q RatingsQuery) FetchRatingsResult {
 		var resp *MdblistResponse
 		if clients.MDBList != nil && q.MediaType != "episode" {
 			if q.IMDbID != nil && *q.IMDbID != "" {
-				if r, err := clients.MDBList.GetRatings(*q.IMDbID, q.MediaType); err == nil {
+				if r, err := clients.MDBList.GetRatingsCtx(ctx, *q.IMDbID, q.MediaType); err == nil {
 					resp = r
 				}
 			} else {
-				if r, err := clients.MDBList.GetRatingsByTMDB(q.ResolvedTMDbID, q.MediaType); err == nil {
+				if r, err := clients.MDBList.GetRatingsByTMDBCtx(ctx, q.ResolvedTMDbID, q.MediaType); err == nil {
 					resp = r
 				}
 			}
@@ -441,13 +442,13 @@ func FetchRatings(clients RatingsClients, q RatingsQuery) FetchRatingsResult {
 			switch q.MediaType {
 			case "movie":
 				if q.IMDbID != nil && *q.IMDbID != "" {
-					if r, err := clients.Trakt.GetMovieRating(*q.IMDbID); err == nil && r != nil {
+					if r, err := clients.Trakt.GetMovieRatingCtx(ctx, *q.IMDbID); err == nil && r != nil {
 						b = TraktBadge(r.Rating, r.Votes)
 					}
 				}
 			case "tv":
 				if q.IMDbID != nil && *q.IMDbID != "" {
-					if r, err := clients.Trakt.GetShowRating(*q.IMDbID); err == nil && r != nil {
+					if r, err := clients.Trakt.GetShowRatingCtx(ctx, *q.IMDbID); err == nil && r != nil {
 						b = TraktBadge(r.Rating, r.Votes)
 					}
 				}
@@ -536,7 +537,7 @@ func FetchRatings(clients RatingsClients, q RatingsQuery) FetchRatingsResult {
 // matching the Rust ratings_cache). A nil cache bypasses caching. Only the
 // badge list is cached; the auxiliary responses are refetched on a hit but are
 // unused by all current callers.
-func FetchRatingsCached(cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
+func FetchRatingsCachedCtx(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
 	if cache != nil {
 		key := fmt.Sprintf("%d/%s", q.ResolvedTMDbID, q.MediaType)
 		if q.MediaType == "episode" {
@@ -545,15 +546,22 @@ func FetchRatingsCached(cache *MemCache, clients RatingsClients, q RatingsQuery)
 		if v, ok := cache.Get(key); ok {
 			return v.([]RatingBadge)
 		}
-		result := FetchRatings(clients, q)
+		result := FetchRatingsCtx(ctx, clients, q)
 		cache.Set(key, result.Badges, int64(len(result.Badges))*100+64)
 		return result.Badges
 	}
-	result := FetchRatings(clients, q)
-	return result.Badges
+	return FetchRatingsCtx(ctx, clients, q).Badges
+}
+
+func FetchRatingsCached(cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
+	return FetchRatingsCachedCtx(context.Background(), cache, clients, q)
 }
 
 func fetchTmdbRating(tmdb *TmdbClient, tmdbID uint64, mediaType string, showID uint64, season, episode uint32) *RatingBadge {
+	return fetchTmdbRatingCtx(context.Background(), tmdb, tmdbID, mediaType, showID, season, episode)
+}
+
+func fetchTmdbRatingCtx(ctx context.Context, tmdb *TmdbClient, tmdbID uint64, mediaType string, showID uint64, season, episode uint32) *RatingBadge {
 	path := fmt.Sprintf("/%s/%d", mediaType, tmdbID)
 	if mediaType == "episode" {
 		path = fmt.Sprintf("/tv/%d/season/%d/episode/%d", showID, season, episode)
@@ -562,7 +570,7 @@ func fetchTmdbRating(tmdb *TmdbClient, tmdbID uint64, mediaType string, showID u
 	var result struct {
 		VoteAverage *float64 `json:"vote_average"`
 	}
-	if err := tmdb.Get(path, nil, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, path, nil, &result); err != nil {
 		return nil
 	}
 	if result.VoteAverage == nil || *result.VoteAverage <= 0 {

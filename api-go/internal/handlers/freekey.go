@@ -21,7 +21,7 @@ func HandleFreeKeySettings(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.Han
 			return
 		}
 
-		globals, err := services.GetGlobalSettings(db)
+		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
 			slog.Warn("free-key GetGlobalSettings failed; falling back to defaults", "error", err)
 		}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -170,6 +171,7 @@ func parsePreviewImageSize(raw *string, kind string) (*services.ImageSize, error
 }
 
 type PreviewHandler struct {
+	ctx context.Context
 	db  *sql.DB
 	cfg *PreviewConfig
 }
@@ -192,7 +194,7 @@ func (p *PreviewHandler) demoArtworkBytes(kind string) ([]byte, error) {
 	if p.cfg.TMDB == nil {
 		return sampleArtwork(kind), nil
 	}
-	bytes, err := image.DemoArtwork(p.cfg.TMDB, p.cfg.CacheDir, p.cfg.ExternalCacheOnly, 0, kind, services.ImageSizeMedium)
+	bytes, err := image.DemoArtworkCtx(p.ctx, p.cfg.TMDB, p.cfg.CacheDir, p.cfg.ExternalCacheOnly, 0, kind, services.ImageSizeMedium)
 	if err != nil || len(bytes) == 0 {
 		return sampleArtwork(kind), nil
 	}
@@ -223,7 +225,7 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 	idKey := "imdb/" + idValue
 
 	if p.cfg.TMDB != nil {
-		if sources, _, _, err := services.ReadAvailableRatings(p.db, idKey); err == nil {
+		if sources, _, _, err := services.ReadAvailableRatingsCtx(p.ctx, p.db, idKey); err == nil {
 			if badges := services.UnmarshalRatingBadges(sources); len(badges) > 0 {
 				return badges
 			}
@@ -233,7 +235,7 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 			if encoded := services.MarshalRatingBadges(badges); encoded != "" {
 				// Best-effort cache of preview-renderable ratings; the preview
 				// itself doesn't depend on this row.
-				if err := services.UpsertAvailableRatings(p.db, idKey, encoded, nil); err != nil {
+				if err := services.UpsertAvailableRatingsCtx(p.ctx, p.db, idKey, encoded, nil); err != nil {
 					slog.Warn("preview upsert available ratings failed", "id_key", idKey, "error", err)
 				}
 			}
@@ -245,7 +247,7 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 }
 
 func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge {
-	resolved, err := services.ResolveID(services.IDTypeIMDB, idValue, p.cfg.TMDB)
+	resolved, err := services.ResolveIDCtx(p.ctx, services.IDTypeIMDB, idValue, p.cfg.TMDB)
 	if err != nil {
 		return nil
 	}
@@ -267,7 +269,8 @@ func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge
 		season = resolved.Episode.SeasonNumber
 		episode = resolved.Episode.EpisodeNumber
 	}
-	result := services.FetchRatings(
+	result := services.FetchRatingsCtx(
+		p.ctx,
 		services.RatingsClients{TMDB: p.cfg.TMDB, OMDB: p.cfg.OMDB, MDBList: p.cfg.MDBList, Trakt: p.cfg.Trakt},
 		services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
 			EpisodeShowTMDbID: showID, EpisodeSeason: season, EpisodeEpisode: episode},
@@ -275,8 +278,8 @@ func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge
 	return result.Badges
 }
 
-func NewPreviewHandler(db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
-	return &PreviewHandler{db: db, cfg: cfg}
+func NewPreviewHandler(ctx context.Context, db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
+	return &PreviewHandler{ctx: ctx, db: db, cfg: cfg}
 }
 
 // previewBuild is the shared prologue across HandlePoster/Logo/Backdrop/Episode.
@@ -645,7 +648,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			}
 		}
 
-		metaDeleted, _ := services.DeleteImageMetaByKind(db, imageType)
+		metaDeleted, _ := services.DeleteImageMetaByKindCtx(r.Context(), db, imageType)
 
 		// The kind isn't recoverable from the mem cache keys cheaply, so a
 		// per-kind purge drops the whole image mem cache (rare admin action).
@@ -689,14 +692,14 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 
 		var metaDeleted int64 = 0
 		if scope == "variant" {
-			metaDeleted, _ = services.DeleteImageMetaExact(db, imageType, idType+"/"+idValue)
+			metaDeleted, _ = services.DeleteImageMetaExactCtx(r.Context(), db, imageType, idType+"/"+idValue)
 		} else {
-			metaDeleted, _ = services.DeleteImageMetaForTitle(db, imageType, idType, idValue)
+			metaDeleted, _ = services.DeleteImageMetaForTitleCtx(r.Context(), db, imageType, idType, idValue)
 		}
 
 		idKey := idType + "/" + idValue
 		if scope != "variant" {
-			services.DeleteAvailableRatings(db, idKey)
+			services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
 		}
 
 		// Invalidate the matching in-memory entries so the purge is visible

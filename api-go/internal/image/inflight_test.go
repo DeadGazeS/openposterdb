@@ -9,6 +9,22 @@ import (
 	"time"
 )
 
+// waitForTotalCalls polls until the inflight set has been entered at least
+// `want` times, or fails the test after `deadline`. Replaces a fixed
+// time.Sleep that pessimistically waited for followers to enter
+// RunCoalesced before the leader released.
+func waitForTotalCalls(t *testing.T, set *InflightSet, want int64, deadline time.Duration) {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		if set.TotalCalls() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("inflight total calls %d < %d after %v", set.TotalCalls(), want, deadline)
+}
+
 func TestInflightSet_DedupsConcurrentCalls(t *testing.T) {
 	set := NewInflightSet()
 	var runs atomic.Int64
@@ -34,7 +50,7 @@ func TestInflightSet_DedupsConcurrentCalls(t *testing.T) {
 	}
 
 	<-started
-	time.Sleep(100 * time.Millisecond) // give every worker time to join
+	waitForTotalCalls(t, set, 20, 2*time.Second) // all 20 workers entered RunCoalesced
 	close(release)
 	wg.Wait()
 
@@ -81,7 +97,7 @@ func TestInflightSet_PropagatesLeaderResult(t *testing.T) {
 			return []byte("never-called"), nil
 		})
 	}()
-	time.Sleep(100 * time.Millisecond) // let the follower join the in-flight run
+	waitForTotalCalls(t, set, 2, 2*time.Second) // leader + follower both entered
 	close(release)
 	<-followerDone
 	<-leaderDone
@@ -124,7 +140,7 @@ func TestInflightSet_PropagatesLeaderError(t *testing.T) {
 		}(i)
 	}
 	<-started
-	time.Sleep(100 * time.Millisecond)
+	waitForTotalCalls(t, set, 4, 2*time.Second) // all 4 workers entered
 	close(release)
 	wg.Wait()
 
@@ -208,8 +224,8 @@ func TestRunCoalescedPanicRecovers(t *testing.T) {
 		waiterDone <- err
 	}()
 
-	time.Sleep(100 * time.Millisecond) // let the waiter join the in-flight run
-	close(release)                     // trigger the leader's panic
+	waitForTotalCalls(t, set, 2, 2*time.Second) // leader + waiter both entered
+	close(release)                              // trigger the leader's panic
 
 	timeout := time.After(2 * time.Second)
 	collected := 0

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,25 +48,33 @@ type MdblistRating struct {
 	Votes  *int64   `json:"votes"`
 }
 
-func (c *MdblistClient) GetRatings(imdbID, mediaType string) (*MdblistResponse, error) {
+func (c *MdblistClient) GetRatingsCtx(ctx context.Context, imdbID, mediaType string) (*MdblistResponse, error) {
 	kind, err := mdblistKind(mediaType)
 	if err != nil {
 		return nil, err
 	}
 	url := fmt.Sprintf("https://api.mdblist.com/imdb/%s/%s", kind, imdbID)
-	return c.fetch(url)
+	return c.fetchCtx(ctx, url)
 }
 
-func (c *MdblistClient) GetRatingsByTMDB(tmdbID uint64, mediaType string) (*MdblistResponse, error) {
+func (c *MdblistClient) GetRatings(imdbID, mediaType string) (*MdblistResponse, error) {
+	return c.GetRatingsCtx(context.Background(), imdbID, mediaType)
+}
+
+func (c *MdblistClient) GetRatingsByTMDBCtx(ctx context.Context, tmdbID uint64, mediaType string) (*MdblistResponse, error) {
 	kind, err := mdblistKind(mediaType)
 	if err != nil {
 		return nil, err
 	}
 	url := fmt.Sprintf("https://api.mdblist.com/tmdb/%s/%d", kind, tmdbID)
-	return c.fetch(url)
+	return c.fetchCtx(ctx, url)
 }
 
-func (c *MdblistClient) fetch(url string) (*MdblistResponse, error) {
+func (c *MdblistClient) GetRatingsByTMDB(tmdbID uint64, mediaType string) (*MdblistResponse, error) {
+	return c.GetRatingsByTMDBCtx(context.Background(), tmdbID, mediaType)
+}
+
+func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistResponse, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	keyHash := c.KeyPool.ActiveKeyHash()
 
@@ -73,7 +82,7 @@ func (c *MdblistClient) fetch(url string) (*MdblistResponse, error) {
 
 	start := time.Now()
 	resp, err := SendWithRetry(&MDBListRetry, func() (*http.Response, error) {
-		req, _ := http.NewRequest("GET", fullURL, nil)
+		req, _ := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 		req.Header.Set("User-Agent", "openposterdb/1.2.1")
 		return c.HTTP.Do(req)
 	})
@@ -102,6 +111,10 @@ func (c *MdblistClient) fetch(url string) (*MdblistResponse, error) {
 		return nil, errors.NewAPIError(err)
 	}
 	return &result, nil
+}
+
+func (c *MdblistClient) fetch(url string) (*MdblistResponse, error) {
+	return c.fetchCtx(context.Background(), url)
 }
 
 func mdblistKind(mediaType string) (string, error) {

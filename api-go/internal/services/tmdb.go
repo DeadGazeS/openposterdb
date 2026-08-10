@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,7 +26,7 @@ func NewTmdbClient(apiKey string, httpClient *http.Client) *TmdbClient {
 	}
 }
 
-func (c *TmdbClient) Get(path string, params map[string]string, target any) error {
+func (c *TmdbClient) GetCtx(ctx context.Context, path string, params map[string]string, target any) error {
 	var url strings.Builder
 	url.WriteString(fmt.Sprintf("https://api.themoviedb.org/3%s?api_key=%s", path, c.APIKey))
 	for k, v := range params {
@@ -33,7 +34,7 @@ func (c *TmdbClient) Get(path string, params map[string]string, target any) erro
 	}
 
 	start := time.Now()
-	resp, err := httpGet(c.HTTP, &TMDBAPIRetry, url.String())
+	resp, err := httpGetCtx(ctx, c.HTTP, &TMDBAPIRetry, url.String())
 	logSlow("TMDB API", time.Since(start).Milliseconds())
 	if err != nil {
 		return errors.NewAPIError(err)
@@ -51,10 +52,14 @@ func (c *TmdbClient) Get(path string, params map[string]string, target any) erro
 	return nil
 }
 
-func (c *TmdbClient) FetchImageBytes(filePath, size string) ([]byte, error) {
+func (c *TmdbClient) Get(path string, params map[string]string, target any) error {
+	return c.GetCtx(context.Background(), path, params, target)
+}
+
+func (c *TmdbClient) FetchImageBytesCtx(ctx context.Context, filePath, size string) ([]byte, error) {
 	url := fmt.Sprintf("https://image.tmdb.org/t/p/%s%s", size, filePath)
 	start := time.Now()
-	resp, err := httpGet(c.HTTP, &TMDBCDNRetry, url)
+	resp, err := httpGetCtx(ctx, c.HTTP, &TMDBCDNRetry, url)
 	logSlow("TMDB CDN", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
@@ -67,14 +72,22 @@ func (c *TmdbClient) FetchImageBytes(filePath, size string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (c *TmdbClient) FetchPosterBytes(posterPath, tmdbSize string) ([]byte, error) {
-	return c.FetchImageBytes(posterPath, tmdbSize)
+func (c *TmdbClient) FetchImageBytes(filePath, size string) ([]byte, error) {
+	return c.FetchImageBytesCtx(context.Background(), filePath, size)
 }
 
-func (c *TmdbClient) FetchPosterBytesConditional(posterPath, tmdbSize string, ifModifiedSince *time.Time) ([]byte, bool, error) {
+func (c *TmdbClient) FetchPosterBytes(posterPath, tmdbSize string) ([]byte, error) {
+	return c.FetchPosterBytesCtx(context.Background(), posterPath, tmdbSize)
+}
+
+func (c *TmdbClient) FetchPosterBytesCtx(ctx context.Context, posterPath, tmdbSize string) ([]byte, error) {
+	return c.FetchImageBytesCtx(ctx, posterPath, tmdbSize)
+}
+
+func (c *TmdbClient) FetchPosterBytesConditionalCtx(ctx context.Context, posterPath, tmdbSize string, ifModifiedSince *time.Time) ([]byte, bool, error) {
 	url := fmt.Sprintf("https://image.tmdb.org/t/p/%s%s", tmdbSize, posterPath)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, false, errors.NewAPIError(err)
 	}
@@ -103,7 +116,11 @@ func (c *TmdbClient) FetchPosterBytesConditional(posterPath, tmdbSize string, if
 	return bytes, false, nil
 }
 
-func (c *TmdbClient) GetImages(mediaType string, tmdbID uint64, lang string) (*TmdbImagesResponse, error) {
+func (c *TmdbClient) FetchPosterBytesConditional(posterPath, tmdbSize string, ifModifiedSince *time.Time) ([]byte, bool, error) {
+	return c.FetchPosterBytesConditionalCtx(context.Background(), posterPath, tmdbSize, ifModifiedSince)
+}
+
+func (c *TmdbClient) GetImagesCtx(ctx context.Context, mediaType string, tmdbID uint64, lang string) (*TmdbImagesResponse, error) {
 	base := LangBase(lang)
 	includeLang := "null"
 	if base != "" {
@@ -111,10 +128,14 @@ func (c *TmdbClient) GetImages(mediaType string, tmdbID uint64, lang string) (*T
 	}
 	path := fmt.Sprintf("/%s/%d/images", mediaType, tmdbID)
 	var result TmdbImagesResponse
-	if err := c.Get(path, map[string]string{"include_image_language": includeLang}, &result); err != nil {
+	if err := c.GetCtx(ctx, path, map[string]string{"include_image_language": includeLang}, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
+}
+
+func (c *TmdbClient) GetImages(mediaType string, tmdbID uint64, lang string) (*TmdbImagesResponse, error) {
+	return c.GetImagesCtx(context.Background(), mediaType, tmdbID, lang)
 }
 
 type TmdbImage struct {
@@ -222,9 +243,9 @@ func selectImageRanked(images []TmdbImage, lang string, textless bool, hasTarget
 	return nil
 }
 
-func httpGet(client *http.Client, config *RetryConfig, url string) (*http.Response, error) {
+func httpGetCtx(ctx context.Context, client *http.Client, config *RetryConfig, url string) (*http.Response, error) {
 	return SendWithRetry(config, func() (*http.Response, error) {
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -237,6 +258,10 @@ func httpGet(client *http.Client, config *RetryConfig, url string) (*http.Respon
 		}
 		return resp, nil
 	})
+}
+
+func httpGet(client *http.Client, config *RetryConfig, url string) (*http.Response, error) {
+	return httpGetCtx(context.Background(), client, config, url)
 }
 
 // logSlow logs a warning when an operation takes longer than 2 seconds. It's

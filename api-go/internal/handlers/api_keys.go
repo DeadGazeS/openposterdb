@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -18,7 +19,7 @@ func HandleListKeys(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		keys, err := services.ListAPIKeys(db)
+		keys, err := services.ListAPIKeysCtx(r.Context(), db)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to list keys")
 			return
@@ -69,7 +70,7 @@ func HandleCreateKey(db *sql.DB) http.HandlerFunc {
 		raw, hash, prefix := services.GenerateAPIKey()
 
 		var createdBy int64 = 1
-		id, err := services.CreateAPIKey(db, body.Name, hash, prefix, createdBy)
+		id, err := services.CreateAPIKeyCtx(r.Context(), db, body.Name, hash, prefix, createdBy)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to create key")
 			return
@@ -98,7 +99,7 @@ func HandleDeleteKey(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := services.DeleteAPIKey(db, id); err != nil {
+		if err := services.DeleteAPIKeyCtx(r.Context(), db, id); err != nil {
 			httpx.WriteError(w, 500, "Failed to delete key")
 			return
 		}
@@ -129,7 +130,7 @@ func HandleGetKeySettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 			return
 		}
 
-		settings := services.GetEffectiveRenderSettings(db, id, nil)
+		settings := services.GetEffectiveRenderSettingsCtx(r.Context(), db, id, nil)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
@@ -212,8 +213,8 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 // settings row. The JSON tags align between the two structs, and
 // APIKeySettings' UnmarshalJSON normalises the layout objects to their stored
 // JSON-string form.
-func apiKeySettingsFromEffective(db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
-	eff := services.GetEffectiveRenderSettings(db, apiKeyID, nil)
+func apiKeySettingsFromEffective(ctx context.Context, db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
+	eff := services.GetEffectiveRenderSettingsCtx(ctx, db, apiKeyID, nil)
 	data, err := json.Marshal(&eff)
 	if err != nil {
 		return nil, err
@@ -228,13 +229,13 @@ func apiKeySettingsFromEffective(db *sql.DB, apiKeyID int64) (*services.APIKeySe
 // loadKeySettingsBase returns the stored settings row for a key, or the
 // effective (globals-derived) defaults when no row exists yet, so omitted
 // optional fields on a first save get meaningful values instead of zeroes.
-func loadKeySettingsBase(db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
-	base, err := services.GetAPIKeySettings(db, apiKeyID)
+func loadKeySettingsBase(ctx context.Context, db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
+	base, err := services.GetAPIKeySettingsCtx(ctx, db, apiKeyID)
 	if err != nil {
 		return nil, err
 	}
 	if base == nil {
-		return apiKeySettingsFromEffective(db, apiKeyID)
+		return apiKeySettingsFromEffective(ctx, db, apiKeyID)
 	}
 	return base, nil
 }
@@ -404,7 +405,7 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
-		base, err := loadKeySettingsBase(db, id)
+		base, err := loadKeySettingsBase(r.Context(), db, id)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
@@ -415,7 +416,7 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, err.Error())
 			return
 		}
-		if err := services.UpsertAPIKeySettings(db, &merged); err != nil {
+		if err := services.UpsertAPIKeySettingsCtx(r.Context(), db, &merged); err != nil {
 			httpx.WriteError(w, 500, "Failed to update settings")
 			return
 		}
@@ -438,7 +439,7 @@ func HandleResetKeySettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := services.DeleteAPIKeySettings(db, id); err != nil {
+		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, id); err != nil {
 			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
@@ -460,7 +461,7 @@ func HandleSelfKeyInfo(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		k, err := services.FindAPIKeyByID(db, apiUser.KeyID)
+		k, err := services.FindAPIKeyByIDCtx(r.Context(), db, apiUser.KeyID)
 		if err != nil || k == nil {
 			httpx.WriteError(w, 404, "Not found")
 			return
@@ -486,7 +487,7 @@ func HandleSelfSettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 			return
 		}
 
-		settings := services.GetEffectiveRenderSettings(db, apiUser.KeyID, nil)
+		settings := services.GetEffectiveRenderSettingsCtx(r.Context(), db, apiUser.KeyID, nil)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
@@ -510,7 +511,7 @@ func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
-		base, err := loadKeySettingsBase(db, apiUser.KeyID)
+		base, err := loadKeySettingsBase(r.Context(), db, apiUser.KeyID)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
@@ -521,7 +522,7 @@ func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, err.Error())
 			return
 		}
-		if err := services.UpsertAPIKeySettings(db, &merged); err != nil {
+		if err := services.UpsertAPIKeySettingsCtx(r.Context(), db, &merged); err != nil {
 			httpx.WriteError(w, 500, "Failed to update settings")
 			return
 		}
@@ -543,7 +544,7 @@ func HandleResetSelfSettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := services.DeleteAPIKeySettings(db, apiUser.KeyID); err != nil {
+		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, apiUser.KeyID); err != nil {
 			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}

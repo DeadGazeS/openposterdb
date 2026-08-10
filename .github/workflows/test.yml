@@ -32,7 +32,20 @@ jobs:
 
       - name: Run tests
         working-directory: api-go
-        run: go test ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Coverage summary
+        working-directory: api-go
+        if: ${{ !cancelled() }}
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: api-go/coverage.out
+          retention-days: 7
 
   frontend-unit:
     name: Frontend unit tests
@@ -116,7 +129,7 @@ jobs:
         working-directory: web
         env:
           CI: true
-        run: npx playwright test --project=setup --project=chromium --project=live
+        run: npx playwright test --project=setup --project=settings --project=chromium --project=live
 
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}

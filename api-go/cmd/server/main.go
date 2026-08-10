@@ -130,10 +130,17 @@ func main() {
 	// CDN content-addressed settings hash registry. Entries expire after 5 min
 	// (matches the documented settings-hash TTL); a janitor sweeps them up.
 	state.CDNHashes = services.NewHashRegistry(5 * time.Minute)
+	cdnSweeperDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
-		for range ticker.C {
-			state.CDNHashes.SweepExpired()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				state.CDNHashes.SweepExpired()
+			case <-cdnSweeperDone:
+				return
+			}
 		}
 	}()
 
@@ -167,6 +174,8 @@ func main() {
 	slog.Info("shutdown signal received, flushing pending last_used updates")
 
 	flusher.Flush()
+	flusher.Stop()
+	close(cdnSweeperDone)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

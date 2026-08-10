@@ -75,14 +75,14 @@ func HandleFetchImage(deps ImageDeps, imageType, idType, idValue string) http.Ha
 
 		slog.Debug("admin fetch requested", "kind", kind, "id", idType+"/"+idValue)
 
-		globals, err := services.GetGlobalSettings(deps.DB)
+		globals, err := services.GetGlobalSettingsCtx(r.Context(), deps.DB)
 		if err != nil {
 			slog.Warn("admin fetch GetGlobalSettings failed", "error", err)
 		}
 		settings := services.ParseGlobalRenderSettings(globals)
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
-			DB: deps.DB, TMDB: deps.TMDB, OMDB: deps.OMDB, MDBList: deps.MDBList, Trakt: deps.Trakt, Fanart: deps.Fanart,
+			Context: r.Context(), DB: deps.DB, TMDB: deps.TMDB, OMDB: deps.OMDB, MDBList: deps.MDBList, Trakt: deps.Trakt, Fanart: deps.Fanart,
 			IDType: idType, IDValue: idValue, Kind: kind,
 			Settings: &settings,
 			CacheDir: deps.Config.CacheDir, ExternalCacheOnly: deps.Config.ExternalCacheOnly,

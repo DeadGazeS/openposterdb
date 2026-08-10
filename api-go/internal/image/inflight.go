@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 )
 
 // InflightSet deduplicates concurrent renders of the same cache key: the
@@ -16,8 +17,9 @@ import (
 // entry, so the next request starts a fresh attempt. The set is safe for
 // concurrent use.
 type InflightSet struct {
-	mu sync.Mutex
-	m  map[string]*inflightEntry
+	mu         sync.Mutex
+	m          map[string]*inflightEntry
+	totalCalls atomic.Int64 // diagnostic/test helper: counts RunCoalesced invocations (leaders + waiters)
 }
 
 type inflightEntry struct {
@@ -35,6 +37,7 @@ func NewInflightSet() *InflightSet {
 // multiple times across different keys (concurrent leaders) — callers are
 // responsible for any per-key side effects (e.g. cache writes) inside fn.
 func (s *InflightSet) RunCoalesced(key string, fn func() ([]byte, error)) ([]byte, error) {
+	s.totalCalls.Add(1)
 	s.mu.Lock()
 	if e, ok := s.m[key]; ok {
 		s.mu.Unlock()
@@ -72,4 +75,14 @@ func (s *InflightSet) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.m)
+}
+
+// TotalCalls returns the cumulative count of RunCoalesced invocations
+// (leaders and waiters). Diagnostic/test helper — useful for asserting that
+// N concurrent callers all entered the function before the leader returned.
+func (s *InflightSet) TotalCalls() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.totalCalls.Load()
 }

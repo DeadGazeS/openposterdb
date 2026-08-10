@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -392,7 +393,7 @@ func TestLogoutRevokesRefreshTokens(t *testing.T) {
 	}
 
 	// Logout.
-	if err := LogoutHandler(db, "admin"); err != nil {
+	if err := LogoutHandler(context.Background(), db, "admin"); err != nil {
 		t.Fatalf("LogoutHandler: %v", err)
 	}
 

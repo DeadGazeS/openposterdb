@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"maps"
@@ -168,9 +169,9 @@ func (s *APIKeySettings) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
+func GetAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 	var s APIKeySettings
-	err := db.QueryRow(`SELECT
+	err := db.QueryRowContext(ctx, `SELECT
 		api_key_id, image_source, lang, textless, ratings_limit, ratings_order, ratings_exclude,
 		poster_layout, logo_ratings_limit, backdrop_ratings_limit,
 		poster_badge_style, logo_badge_style, backdrop_badge_style,
@@ -217,8 +218,12 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 	return &s, err
 }
 
-func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
-	_, err := db.Exec(`INSERT INTO api_key_settings (
+func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
+	return GetAPIKeySettingsCtx(context.Background(), db, apiKeyID)
+}
+
+func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings) error {
+	_, err := db.ExecContext(ctx, `INSERT INTO api_key_settings (
 		api_key_id, image_source, lang, textless, ratings_limit, ratings_order, ratings_exclude,
 		poster_layout, logo_ratings_limit, backdrop_ratings_limit,
 		poster_badge_style, logo_badge_style, backdrop_badge_style,
@@ -320,16 +325,24 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 	return err
 }
 
-func DeleteAPIKeySettings(db *sql.DB, apiKeyID int64) error {
-	_, err := db.Exec("DELETE FROM api_key_settings WHERE api_key_id = ?", apiKeyID)
+func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
+	return UpsertAPIKeySettingsCtx(context.Background(), db, s)
+}
+
+func DeleteAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) error {
+	_, err := db.ExecContext(ctx, "DELETE FROM api_key_settings WHERE api_key_id = ?", apiKeyID)
 	return err
+}
+
+func DeleteAPIKeySettings(db *sql.DB, apiKeyID int64) error {
+	return DeleteAPIKeySettingsCtx(context.Background(), db, apiKeyID)
 }
 
 // --- Effective render settings ---
 
-func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *RenderSettings) RenderSettings {
+func GetEffectiveRenderSettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64, cachedGlobals *RenderSettings) RenderSettings {
 	defaults := DefaultRenderSettings()
-	perKey, err := GetAPIKeySettings(db, apiKeyID)
+	perKey, err := GetAPIKeySettingsCtx(ctx, db, apiKeyID)
 	if err == nil && perKey != nil {
 		// Effective colours: the global effective colours (the stored globals,
 		// or the caller's cached globals) overlaid with the key's own overrides,
@@ -337,7 +350,7 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 		base := defaults
 		if cachedGlobals != nil {
 			base = *cachedGlobals
-		} else if globals, gerr := GetGlobalSettings(db); gerr == nil {
+		} else if globals, gerr := GetGlobalSettingsCtx(ctx, db); gerr == nil {
 			base = ParseGlobalRenderSettings(globals)
 		}
 		colors := EffectiveSourceColors(&base)
@@ -413,11 +426,15 @@ func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *Rende
 		return *cachedGlobals
 	}
 
-	globals, err := GetGlobalSettings(db)
+	globals, err := GetGlobalSettingsCtx(ctx, db)
 	if err != nil {
 		return DefaultRenderSettings()
 	}
 	return ParseGlobalRenderSettings(globals)
+}
+
+func GetEffectiveRenderSettings(db *sql.DB, apiKeyID int64, cachedGlobals *RenderSettings) RenderSettings {
+	return GetEffectiveRenderSettingsCtx(context.Background(), db, apiKeyID, cachedGlobals)
 }
 
 // --- Available ratings ---

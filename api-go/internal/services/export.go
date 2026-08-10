@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -63,11 +64,11 @@ func HashAPIKey(raw string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// BuildExportPayload collects the current settings into an export payload.
+// BuildExportPayloadCtx collects the current settings into an export payload.
 // Service keys are decrypted and included only when includeServiceKeys is set;
 // API keys (name + per-key settings) only when includeAPIKeys is set.
-func BuildExportPayload(db *sql.DB, keys *ServiceKeyManager, includeServiceKeys, includeAPIKeys bool) (*ExportPayload, error) {
-	globals, err := GetGlobalSettings(db)
+func BuildExportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyManager, includeServiceKeys, includeAPIKeys bool) (*ExportPayload, error) {
+	globals, err := GetGlobalSettingsCtx(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -88,13 +89,13 @@ func BuildExportPayload(db *sql.DB, keys *ServiceKeyManager, includeServiceKeys,
 		p.ServiceKeys = keys.PlaintextKeys()
 	}
 	if includeAPIKeys {
-		apiKeys, err := ListAPIKeys(db)
+		apiKeys, err := ListAPIKeysCtx(ctx, db)
 		if err != nil {
 			return nil, err
 		}
 		for _, k := range apiKeys {
 			ek := ExportedAPIKey{Name: k.Name}
-			if s, err := GetAPIKeySettings(db, k.ID); err == nil && s != nil {
+			if s, err := GetAPIKeySettingsCtx(ctx, db, k.ID); err == nil && s != nil {
 				ek.Settings = s
 			}
 			p.APIKeys = append(p.APIKeys, ek)
@@ -103,12 +104,19 @@ func BuildExportPayload(db *sql.DB, keys *ServiceKeyManager, includeServiceKeys,
 	return p, nil
 }
 
-// ApplyImportPayload restores a settings export. Global settings are upserted
+// BuildExportPayload collects the current settings into an export payload.
+// Service keys are decrypted and included only when includeServiceKeys is set;
+// API keys (name + per-key settings) only when includeAPIKeys is set.
+func BuildExportPayload(db *sql.DB, keys *ServiceKeyManager, includeServiceKeys, includeAPIKeys bool) (*ExportPayload, error) {
+	return BuildExportPayloadCtx(context.Background(), db, keys, includeServiceKeys, includeAPIKeys)
+}
+
+// ApplyImportPayloadCtx restores a settings export. Global settings are upserted
 // (service_key_* rows are ignored — they're handled below), service keys are
 // re-encrypted and stored for non-env-locked services, and each exported API
 // key is matched by name (updating its settings) or recreated with a fresh key
 // value. Returns a summary including any regenerated key values.
-func ApplyImportPayload(db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (ImportResult, error) {
+func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (ImportResult, error) {
 	var result ImportResult
 	if p == nil {
 		return result, nil
@@ -122,7 +130,7 @@ func ApplyImportPayload(db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (
 			}
 			batch[k] = v
 		}
-		if err := SetGlobalSettingsBatch(db, batch); err != nil {
+		if err := SetGlobalSettingsBatchCtx(ctx, db, batch); err != nil {
 			return result, err
 		}
 		result.RestoredSettings = len(batch)
@@ -152,7 +160,7 @@ func ApplyImportPayload(db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (
 	}
 
 	for _, ek := range p.APIKeys {
-		existing, err := FindAPIKeyByName(db, ek.Name)
+		existing, err := FindAPIKeyByNameCtx(ctx, db, ek.Name)
 		if err != nil {
 			return result, err
 		}
@@ -161,7 +169,7 @@ func ApplyImportPayload(db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (
 			id = existing.ID
 		} else {
 			raw, hash, prefix := GenerateAPIKey()
-			newID, err := CreateAPIKey(db, ek.Name, hash, prefix, 1)
+			newID, err := CreateAPIKeyCtx(ctx, db, ek.Name, hash, prefix, 1)
 			if err != nil {
 				return result, err
 			}
@@ -170,11 +178,20 @@ func ApplyImportPayload(db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (
 		}
 		if ek.Settings != nil {
 			ek.Settings.APIKeyID = id
-			if err := UpsertAPIKeySettings(db, ek.Settings); err != nil {
+			if err := UpsertAPIKeySettingsCtx(ctx, db, ek.Settings); err != nil {
 				return result, err
 			}
 		}
 	}
 
 	return result, nil
+}
+
+// ApplyImportPayload restores a settings export. Global settings are upserted
+// (service_key_* rows are ignored — they're handled below), service keys are
+// re-encrypted and stored for non-env-locked services, and each exported API
+// key is matched by name (updating its settings) or recreated with a fresh key
+// value. Returns a summary including any regenerated key values.
+func ApplyImportPayload(db *sql.DB, keys *ServiceKeyManager, p *ExportPayload) (ImportResult, error) {
+	return ApplyImportPayloadCtx(context.Background(), db, keys, p)
 }

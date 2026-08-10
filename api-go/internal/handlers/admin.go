@@ -24,7 +24,7 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
-			prefs, err := services.GetUserPrefs(db, user.Username)
+			prefs, err := services.GetUserPrefsCtx(r.Context(), db, user.Username)
 			if err != nil {
 				httpx.WriteError(w, 500, "Failed to load preferences")
 				return
@@ -36,13 +36,13 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 				httpx.WriteError(w, 400, "Invalid JSON")
 				return
 			}
-			prefs, err := services.GetUserPrefs(db, user.Username)
+			prefs, err := services.GetUserPrefsCtx(r.Context(), db, user.Username)
 			if err != nil {
 				httpx.WriteError(w, 500, "Failed to load preferences")
 				return
 			}
 			maps.Copy(prefs, updates)
-			if err := services.SetUserPrefs(db, user.Username, prefs); err != nil {
+			if err := services.SetUserPrefsCtx(r.Context(), db, user.Username, prefs); err != nil {
 				httpx.WriteError(w, 500, "Failed to save preferences")
 				return
 			}
@@ -60,11 +60,11 @@ func HandleStats(db *sql.DB, cacheDir string, caches *services.MemCacheSet) http
 			return
 		}
 
-		posterCount, _ := services.CountImageMeta(db, "p")
-		logoCount, _ := services.CountImageMeta(db, "l")
-		backdropCount, _ := services.CountImageMeta(db, "b")
-		episodeCount, _ := services.CountImageMeta(db, "e")
-		apiKeyCount, _ := services.CountAPIKeys(db)
+		posterCount, _ := services.CountImageMetaCtx(r.Context(), db, "p")
+		logoCount, _ := services.CountImageMetaCtx(r.Context(), db, "l")
+		backdropCount, _ := services.CountImageMetaCtx(r.Context(), db, "b")
+		episodeCount, _ := services.CountImageMetaCtx(r.Context(), db, "e")
+		apiKeyCount, _ := services.CountAPIKeysCtx(r.Context(), db)
 
 		var memCacheEntries, idCacheEntries, ratingsCacheEntries int64
 		var imageMemCacheMB float64
@@ -104,7 +104,7 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 			return
 		}
 
-		globals, err := services.GetGlobalSettings(db)
+		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
@@ -194,7 +194,7 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 			return
 		}
 
-		globals, err := services.GetGlobalSettings(db)
+		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
@@ -391,11 +391,11 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 			}
 		}
 
-		if err := services.SetGlobalSettingsBatch(db, batch); err != nil {
+		if err := services.SetGlobalSettingsBatchCtx(r.Context(), db, batch); err != nil {
 			httpx.WriteError(w, 500, "Failed to save settings")
 			return
 		}
-		if err := services.PruneStaleColorSettings(db, globals, batch); err != nil {
+		if err := services.PruneStaleColorSettingsCtx(r.Context(), db, globals, batch); err != nil {
 			slog.Warn("failed to prune stale color settings", "error", err)
 		}
 
@@ -414,7 +414,7 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 		page := httpx.ParseIntParam(r, "page", 1)
 		pageSize := httpx.ParseIntParam(r, "page_size", 50)
 
-		items, total, err := services.ListImageMetaByKind(db, imageType, page, pageSize)
+		items, total, err := services.ListImageMetaByKindCtx(r.Context(), db, imageType, page, pageSize)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to list images")
 			return
@@ -443,8 +443,8 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 			go services.RemoveStagedDirs(staged)
 		}
 
-		metaDeleted, _ := services.DeleteAllImageMeta(db)
-		ratingsDeleted, _ := services.DeleteAllAvailableRatings(db)
+		metaDeleted, _ := services.DeleteAllImageMetaCtx(r.Context(), db)
+		ratingsDeleted, _ := services.DeleteAllAvailableRatingsCtx(r.Context(), db)
 
 		// Drop every in-memory entry so a purge is immediately visible.
 		if caches != nil {

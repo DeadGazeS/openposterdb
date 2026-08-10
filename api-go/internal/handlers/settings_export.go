@@ -20,7 +20,7 @@ func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 		includeServiceKeys := q.Get("include_service_keys") == "1" || q.Get("include_service_keys") == "true"
 		includeAPIKeys := q.Get("include_api_keys") == "1" || q.Get("include_api_keys") == "true"
 
-		payload, err := services.BuildExportPayload(db, keys, includeServiceKeys, includeAPIKeys)
+		payload, err := services.BuildExportPayloadCtx(r.Context(), db, keys, includeServiceKeys, includeAPIKeys)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to export settings")
 			return
@@ -52,7 +52,7 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 			return
 		}
 
-		result, err := services.ApplyImportPayload(db, keys, &payload)
+		result, err := services.ApplyImportPayloadCtx(r.Context(), db, keys, &payload)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to import settings")
 			return

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -11,15 +12,19 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-func CountAdminUsers(db *sql.DB) (int64, error) {
+func CountAdminUsersCtx(ctx context.Context, db *sql.DB) (int64, error) {
 	var count int64
-	err := db.QueryRow("SELECT COUNT(*) FROM admin_users").Scan(&count)
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM admin_users").Scan(&count)
 	return count, err
 }
 
-func CreateAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
+func CountAdminUsers(db *sql.DB) (int64, error) {
+	return CountAdminUsersCtx(context.Background(), db)
+}
+
+func CreateAdminUserCtx(ctx context.Context, db *sql.DB, username, passwordHash string) (int64, error) {
 	now := nowUTC()
-	result, err := db.Exec(
+	result, err := db.ExecContext(ctx,
 		"INSERT INTO admin_users (username, password_hash, created_at) VALUES (?, ?, ?)",
 		username, passwordHash, now,
 	)
@@ -29,15 +34,19 @@ func CreateAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
 	return result.LastInsertId()
 }
 
-func CreateFirstAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
-	tx, err := db.Begin()
+func CreateAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
+	return CreateAdminUserCtx(context.Background(), db, username, passwordHash)
+}
+
+func CreateFirstAdminUserCtx(ctx context.Context, db *sql.DB, username, passwordHash string) (int64, error) {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
 	var count int64
-	if err := tx.QueryRow("SELECT COUNT(*) FROM admin_users").Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM admin_users").Scan(&count); err != nil {
 		return 0, err
 	}
 	if count > 0 {
@@ -45,7 +54,7 @@ func CreateFirstAdminUser(db *sql.DB, username, passwordHash string) (int64, err
 	}
 
 	now := nowUTC()
-	result, err := tx.Exec(
+	result, err := tx.ExecContext(ctx,
 		"INSERT INTO admin_users (username, password_hash, created_at) VALUES (?, ?, ?)",
 		username, passwordHash, now,
 	)
@@ -60,25 +69,37 @@ func CreateFirstAdminUser(db *sql.DB, username, passwordHash string) (int64, err
 	return id, nil
 }
 
-func FindAdminUserByUsername(db *sql.DB, username string) (id int64, usernameOut string, passwordHash string, err error) {
-	err = db.QueryRow("SELECT id, username, password_hash FROM admin_users WHERE username = ?", username).
+func CreateFirstAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
+	return CreateFirstAdminUserCtx(context.Background(), db, username, passwordHash)
+}
+
+func FindAdminUserByUsernameCtx(ctx context.Context, db *sql.DB, username string) (id int64, usernameOut string, passwordHash string, err error) {
+	err = db.QueryRowContext(ctx, "SELECT id, username, password_hash FROM admin_users WHERE username = ?", username).
 		Scan(&id, &usernameOut, &passwordHash)
 	return
 }
 
-func FindAdminUserByID(db *sql.DB, id int64) (username string, passwordHash string, err error) {
-	err = db.QueryRow("SELECT username, password_hash FROM admin_users WHERE id = ?", id).
+func FindAdminUserByUsername(db *sql.DB, username string) (id int64, usernameOut string, passwordHash string, err error) {
+	return FindAdminUserByUsernameCtx(context.Background(), db, username)
+}
+
+func FindAdminUserByIDCtx(ctx context.Context, db *sql.DB, id int64) (username string, passwordHash string, err error) {
+	err = db.QueryRowContext(ctx, "SELECT username, password_hash FROM admin_users WHERE id = ?", id).
 		Scan(&username, &passwordHash)
 	return
+}
+
+func FindAdminUserByID(db *sql.DB, id int64) (username string, passwordHash string, err error) {
+	return FindAdminUserByIDCtx(context.Background(), db, id)
 }
 
 // --- Refresh token CRUD ---
 
 // GetUserPrefs returns the admin user's stored UI preferences (JSON map).
 // Unknown/missing prefs come back as an empty map.
-func GetUserPrefs(db *sql.DB, username string) (map[string]string, error) {
+func GetUserPrefsCtx(ctx context.Context, db *sql.DB, username string) (map[string]string, error) {
 	var raw string
-	err := db.QueryRow("SELECT prefs FROM admin_users WHERE username = ?", username).Scan(&raw)
+	err := db.QueryRowContext(ctx, "SELECT prefs FROM admin_users WHERE username = ?", username).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +112,12 @@ func GetUserPrefs(db *sql.DB, username string) (map[string]string, error) {
 	return prefs, nil
 }
 
+func GetUserPrefs(db *sql.DB, username string) (map[string]string, error) {
+	return GetUserPrefsCtx(context.Background(), db, username)
+}
+
 // SetUserPrefs stores the admin user's UI preferences (JSON map).
-func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
+func SetUserPrefsCtx(ctx context.Context, db *sql.DB, username string, prefs map[string]string) error {
 	if prefs == nil {
 		prefs = map[string]string{}
 	}
@@ -100,8 +125,12 @@ func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec("UPDATE admin_users SET prefs = ? WHERE username = ?", string(raw), username)
+	_, err = db.ExecContext(ctx, "UPDATE admin_users SET prefs = ? WHERE username = ?", string(raw), username)
 	return err
+}
+
+func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
+	return SetUserPrefsCtx(context.Background(), db, username, prefs)
 }
 
 // --- Password hashing ---

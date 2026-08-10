@@ -124,7 +124,7 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 
 		var settings *services.RenderSettings
 		if apiKey == freeAPIKey {
-			globals, err := services.GetGlobalSettings(d.DB)
+			globals, err := services.GetGlobalSettingsCtx(r.Context(), d.DB)
 			if err != nil {
 				slog.Warn("free-key GetGlobalSettings failed; falling back to defaults", "error", err)
 			}
@@ -132,12 +132,12 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 			settings = &s
 		} else {
 			keyHash := services.HashAPIKey(apiKey)
-			k, err := services.FindAPIKeyByHash(d.DB, keyHash)
+			k, err := services.FindAPIKeyByHashCtx(r.Context(), d.DB, keyHash)
 			if err != nil || k == nil {
 				httpx.WriteError(w, 401, "invalid api key")
 				return
 			}
-			s := services.GetEffectiveRenderSettings(d.DB, k.ID, nil)
+			s := services.GetEffectiveRenderSettingsCtx(r.Context(), d.DB, k.ID, nil)
 			settings = &s
 		}
 
@@ -170,7 +170,7 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 		}
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
-			DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
+			Context: r.Context(), DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
 			IDType: idTypeStr, IDValue: idValue, Kind: kind,
 			Settings: settings, RatingsLimit: query.RatingsLimit,
 			CacheDir: d.Config.CacheDir, ExternalCacheOnly: d.Config.ExternalCacheOnly,
@@ -217,7 +217,7 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc
 		}
 
 		keyHash := services.HashAPIKey(apiKey)
-		_, err := services.FindAPIKeyByHash(db, keyHash)
+		_, err := services.FindAPIKeyByHashCtx(r.Context(), db, keyHash)
 		if err != nil {
 			httpx.WriteJSON(w, 401, map[string]interface{}{"error": "Invalid or missing API key"})
 			return

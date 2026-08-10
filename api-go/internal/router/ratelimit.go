@@ -5,39 +5,71 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/time/rate"
 )
 
+// rlEntry pairs a token-bucket limiter with the last time it was touched.
+// SweepIdle uses lastSeen to evict entries from clients that haven't made a
+// request in a long time, bounding the map's memory footprint.
+type rlEntry struct {
+	lim      *rate.Limiter
+	lastSeen atomic.Int64 // unix nanos
+}
+
 // rateLimiter holds per-IP token-bucket limiters. Created lazily on first
-// sight of an IP and never freed (small IP space, the map size is bounded by
-// the rate of unique clients; the underlying rate.Limiter is cheap). For very
-// long-running deployments a janitor sweep could be added.
+// sight of an IP and reaped by SweepIdle after idleTimeout without traffic.
 type rateLimiter struct {
-	perMinute uint64
-	limiters  sync.Map // map[string]*rate.Limiter
+	perMinute    uint64
+	limiters     sync.Map // map[string]*rlEntry
+	idleTimeout  time.Duration
 }
 
 func newRateLimiter(perMinute uint64) *rateLimiter {
-	return &rateLimiter{perMinute: perMinute}
+	return &rateLimiter{perMinute: perMinute, idleTimeout: 5 * time.Minute}
 }
 
 // limiter returns (creating on first sight) the per-IP token bucket. The
 // rate is `perMinute / 60` events per second with a burst of `perMinute` so
 // that a freshly seen IP can spend the whole minute's quota in a short burst
-// before being throttled.
+// before being throttled. The lastSeen stamp is updated on every call so
+// active IPs are not reaped.
 func (r *rateLimiter) limiter(ip string) *rate.Limiter {
+	now := time.Now().UnixNano()
 	if v, ok := r.limiters.Load(ip); ok {
-		return v.(*rate.Limiter)
+		e := v.(*rlEntry)
+		e.lastSeen.Store(now)
+		return e.lim
 	}
 	perSec := float64(r.perMinute) / 60.0
 	burst := int(r.perMinute)
 	if burst < 1 {
 		burst = 1
 	}
-	lim := rate.NewLimiter(rate.Limit(perSec), burst)
-	actual, _ := r.limiters.LoadOrStore(ip, lim)
-	return actual.(*rate.Limiter)
+	e := &rlEntry{lim: rate.NewLimiter(rate.Limit(perSec), burst)}
+	e.lastSeen.Store(now)
+	actual, _ := r.limiters.LoadOrStore(ip, e)
+	ae := actual.(*rlEntry)
+	ae.lastSeen.Store(now)
+	return ae.lim
+}
+
+// SweepIdle evicts per-IP entries whose lastSeen is older than the idle
+// timeout. Returns the number of entries removed. Safe to call concurrently.
+func (r *rateLimiter) SweepIdle() int {
+	cutoff := time.Now().Add(-r.idleTimeout).UnixNano()
+	removed := 0
+	r.limiters.Range(func(key, value any) bool {
+		e := value.(*rlEntry)
+		if e.lastSeen.Load() < cutoff {
+			r.limiters.Delete(key)
+			removed++
+		}
+		return true
+	})
+	return removed
 }
 
 // clientIP extracts the best-effort client IP from the request. It honours

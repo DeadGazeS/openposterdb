@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"log/slog"
 	"strconv"
 
@@ -64,6 +65,16 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 	releaseDate := resolved.ReleaseDate
 	imageTypeChar := ImageDbValue(p.Kind)
 	go func() {
+		// Use a background context for the writes so the cross-id cache
+		// population survives a client disconnect on the originating request
+		// (this is server-side cache maintenance, not part of the response).
+		ctx := p.Context
+		if ctx == nil {
+			ctx = context.Background()
+		} else {
+			bg := context.Background()
+			ctx = bg
+		}
 		for _, alt := range alternates {
 			altKey, altPath, err := p.cacheKeyFor(alt.idType, alt.idValue, suffix)
 			if err != nil {
@@ -73,7 +84,7 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 				slog.Warn("cross-id cache write failed", "cache_key", altKey, "error", err)
 				continue
 			}
-			if err := services.UpsertImageMeta(p.DB, altKey, releaseDate, imageTypeChar); err != nil {
+			if err := services.UpsertImageMetaCtx(ctx, p.DB, altKey, releaseDate, imageTypeChar); err != nil {
 				slog.Warn("cross-id meta write failed", "cache_key", altKey, "error", err)
 			}
 		}

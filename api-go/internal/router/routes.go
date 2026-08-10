@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"openposterdb/internal/handlers"
 	"openposterdb/internal/httpx"
@@ -55,7 +56,7 @@ func (r *Router) registerAuthRoutes() {
 	s := r.state
 
 	r.mux.HandleFunc("/api/auth/status", func(w http.ResponseWriter, req *http.Request) {
-		status, resp := handlers.AuthStatus(s.DB, s.isFreeAPIKeyEnabled, s.Config.DisablePublicPages)
+		status, resp := handlers.AuthStatus(req.Context(), s.DB, s.isFreeAPIKeyEnabled, s.Config.DisablePublicPages)
 		httpx.WriteJSON(w, status, resp)
 	})
 
@@ -70,7 +71,7 @@ func (r *Router) registerAuthRoutes() {
 		}
 		_ = httpx.DecodeJSON(req, &body)
 
-		status, resp, cookies := handlers.SetupHandler(s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
+		status, resp, cookies := handlers.SetupHandler(req.Context(), s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
 		for _, c := range cookies {
 			http.SetCookie(w, c)
 		}
@@ -88,7 +89,7 @@ func (r *Router) registerAuthRoutes() {
 		}
 		_ = httpx.DecodeJSON(req, &body)
 
-		status, resp, cookies := handlers.LoginHandler(s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
+		status, resp, cookies := handlers.LoginHandler(req.Context(), s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
 		for _, c := range cookies {
 			http.SetCookie(w, c)
 		}
@@ -105,7 +106,7 @@ func (r *Router) registerAuthRoutes() {
 		if cookie != nil {
 			refreshToken = cookie.Value
 		}
-		status, resp, cookies := handlers.RefreshHandler(s.DB, r.jwtSecret(), s.SecureCookies, refreshToken)
+		status, resp, cookies := handlers.RefreshHandler(req.Context(), s.DB, r.jwtSecret(), s.SecureCookies, refreshToken)
 		for _, c := range cookies {
 			http.SetCookie(w, c)
 		}
@@ -121,7 +122,7 @@ func (r *Router) registerAuthRoutes() {
 		if cookie != nil {
 			claims, err := handlers.ParseJWT(cookie.Value, r.jwtSecret())
 			if err == nil && claims.Username != "" {
-				handlers.LogoutHandler(s.DB, claims.Username)
+				handlers.LogoutHandler(req.Context(), s.DB, claims.Username)
 			}
 		}
 		http.SetCookie(w, &http.Cookie{Name: "token", Value: "", Path: "/", MaxAge: -1})
@@ -138,7 +139,7 @@ func (r *Router) registerAuthRoutes() {
 			APIKey string `json:"api_key"`
 		}
 		_ = httpx.DecodeJSON(req, &body)
-		status, resp := handlers.KeyLoginHandler(s.DB, r.jwtSecret(), body.APIKey)
+		status, resp := handlers.KeyLoginHandler(req.Context(), s.DB, r.jwtSecret(), body.APIKey)
 		httpx.WriteJSON(w, status, resp)
 	})
 }
@@ -237,7 +238,7 @@ func (r *Router) registerAdminRoutes() {
 				if v.value == nil || strings.TrimSpace(*v.value) == "" {
 					continue
 				}
-				if err := services.ValidateServiceKeyString(v.name, *v.value, s.HTTPClient); err != nil {
+				if err := services.ValidateServiceKeyStringCtx(req.Context(), v.name, *v.value, s.HTTPClient); err != nil {
 					httpx.WriteError(w, 400, v.name+": "+err.Error())
 					return
 				}
@@ -315,7 +316,7 @@ func (r *Router) registerPreviewRoutes() {
 
 	for _, kind := range previewKinds {
 		serve := func(w http.ResponseWriter, req *http.Request) {
-			preview := handlers.NewPreviewHandler(s.DB, s.previewConfig())
+			preview := handlers.NewPreviewHandler(req.Context(), s.DB, s.previewConfig())
 			switch kind {
 			case "poster":
 				preview.HandlePoster(w, req)
@@ -335,9 +336,20 @@ func (r *Router) registerPreviewRoutes() {
 func (r *Router) registerImageRoutes() {
 	s := r.state
 
-	// Per-IP rate limiters (0 disables). Constructed once per Router.
-	imageRateLimit := RateLimit(newRateLimiter(s.Config.RateLimitRPM))
-	cdnRateLimit := RateLimit(newRateLimiter(s.Config.RateLimitCDNRPM))
+	// Per-IP rate limiters (0 disables). Constructed once per Router; janitor
+	// sweeps idle IPs every minute so long-running deployments don't grow
+	// the limiters map unboundedly.
+	imageLimiter := newRateLimiter(s.Config.RateLimitRPM)
+	cdnLimiter := newRateLimiter(s.Config.RateLimitCDNRPM)
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		for range ticker.C {
+			imageLimiter.SweepIdle()
+			cdnLimiter.SweepIdle()
+		}
+	}()
+	imageRateLimit := RateLimit(imageLimiter)
+	cdnRateLimit := RateLimit(cdnLimiter)
 
 	// Content-addressed CDN route: /c/{hash}/{rest...}. Resolves the hash to
 	// settings via the registry populated by HandleImage's redirect.

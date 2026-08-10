@@ -13,6 +13,7 @@ import (
 type LastUsedFlusher struct {
 	db       *sql.DB
 	interval time.Duration
+	done     chan struct{} // closed by Stop() to signal the worker to exit
 
 	// Pending holds the api_keys IDs (int64 keys, values ignored) that still
 	// need a last_used_at update.
@@ -20,7 +21,7 @@ type LastUsedFlusher struct {
 }
 
 func NewLastUsedFlusher(db *sql.DB, interval time.Duration) *LastUsedFlusher {
-	return &LastUsedFlusher{db: db, interval: interval}
+	return &LastUsedFlusher{db: db, interval: interval, done: make(chan struct{})}
 }
 
 // Record marks the key as recently used; the next Flush will persist it to
@@ -32,14 +33,33 @@ func (f *LastUsedFlusher) Record(keyID int64) {
 	f.Pending.Store(keyID, struct{}{})
 }
 
-// Start launches the periodic flush worker; it runs until the process exits.
+// Start launches the periodic flush worker; it runs until Stop is called.
 func (f *LastUsedFlusher) Start() {
-	ticker := time.NewTicker(f.interval)
 	go func() {
-		for range ticker.C {
-			f.flush()
+		ticker := time.NewTicker(f.interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				f.flush()
+			case <-f.done:
+				return
+			}
 		}
 	}()
+}
+
+// Stop signals the worker to exit. Safe to call multiple times.
+func (f *LastUsedFlusher) Stop() {
+	if f == nil {
+		return
+	}
+	select {
+	case <-f.done:
+		// already closed
+	default:
+		close(f.done)
+	}
 }
 
 // Flush persists any remaining pending IDs (called on shutdown).

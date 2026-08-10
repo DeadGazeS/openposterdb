@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,40 +45,40 @@ function containerCmd(): string {
 export default async function globalSetup() {
   const cmd = containerCmd()
 
-  // Read real API keys from api/.env (falls back to dummy values if not present)
-  const envFile = parseEnvFile(resolve(PROJECT_ROOT, 'api/.env'))
+  // Read real API keys from .env (falls back to dummy values if not present)
+  const envFile = parseEnvFile(resolve(PROJECT_ROOT, '.env'))
 
-  const tmdbKey = envFile.TMDB_API_KEY || 'test'
-  const omdbKey = envFile.OMDB_API_KEY || ''
-  const mdblistKey = envFile.MDBLIST_API_KEY || 'test'
-  const fanartKey = envFile.FANART_API_KEY || 'test'
-  const jwtSecret = envFile.JWT_SECRET || 'abababababababababababababababababababababababababababababababab'
+  const tmdbKey = envFile.TMDB_API_KEY || process.env.TMDB_API_KEY || 'test'
+  const omdbKey = envFile.OMDB_API_KEY || process.env.OMDB_API_KEY || ''
+  const mdblistKey = envFile.MDBLIST_API_KEY || process.env.MDBLIST_API_KEY || 'test'
+  const fanartKey = envFile.FANART_API_KEY || process.env.FANART_API_KEY || 'test'
+  const jwtSecret = envFile.JWT_SECRET || process.env.JWT_SECRET || 'abababababababababababababababababababababababababababababababab'
 
   const hasRealKeys = tmdbKey !== 'test'
   if (hasRealKeys) {
-    console.log('[e2e] Using real API keys from api/.env')
+    console.log('[e2e] Using real API keys from .env')
   } else {
-    console.log('[e2e] No api/.env found or TMDB_API_KEY not set — using dummy keys')
+    console.log('[e2e] No .env found or TMDB_API_KEY not set — using dummy keys')
   }
 
   console.log(`[e2e] Building container image via "${cmd}"...`)
   execSync(
-    `${cmd} build -t ${IMAGE_NAME} --build-arg CARGO_FEATURES=test-support -f Dockerfile .`,
+    `${cmd} build -t ${IMAGE_NAME} -f Dockerfile .`,
     { cwd: PROJECT_ROOT, stdio: 'inherit' },
   )
 
   console.log('[e2e] Starting container...')
   try { execSync(`${cmd} rm -f ${CONTAINER_NAME}`, { stdio: 'ignore' }) } catch { /* ignore */ }
 
+  // Pass .env through to the container via --env-file so docker/podman
+  // handles quoting/comments (instead of the TS parser constructing flags).
+  const envFileArgs = existsSync(resolve(PROJECT_ROOT, '.env')) ? ['--env-file', '.env'] : []
+
   const envFlags = [
-    `-e TMDB_API_KEY=${tmdbKey}`,
-    `-e MDBLIST_API_KEY=${mdblistKey || 'test'}`,
-    `-e JWT_SECRET=${jwtSecret}`,
+    '-e JWT_SECRET=' + jwtSecret,
     '-e LISTEN_ADDR=0.0.0.0:3000',
     '-e COOKIE_SECURE=false',
-    `-e FANART_API_KEY=${fanartKey}`,
     '-e CACHE_DIR=/tmp/openposterdb-e2e',
-    ...(omdbKey ? [`-e OMDB_API_KEY=${omdbKey}`] : []),
   ]
 
   execSync(
@@ -86,6 +86,7 @@ export default async function globalSetup() {
       `${cmd} run -d --name ${CONTAINER_NAME}`,
       '-p 3333:3000',
       '--tmpfs /tmp/openposterdb-e2e',
+      ...envFileArgs,
       ...envFlags,
       IMAGE_NAME,
     ].join(' '),

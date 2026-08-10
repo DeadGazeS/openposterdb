@@ -17,7 +17,8 @@ else
 fi
 
 echo "=== Backend tests ==="
-(cd api-go && go test ./...)
+(cd api-go && go test -coverprofile=coverage.out -covermode=atomic ./...)
+(cd api-go && go tool cover -func=coverage.out | tail -1)
 
 echo ""
 echo "=== Frontend unit tests ==="
@@ -36,13 +37,10 @@ trap cleanup EXIT INT TERM
 echo "Building container image..."
 $CTR build -t "$IMAGE_NAME" -f Dockerfile .
 
-ENV_ARGS=()
+ENV_FILE_ARGS=()
 if [ -f .env ]; then
     echo "Loading API keys from .env"
-    while IFS='=' read -r key value; do
-        [[ -z "$key" || "$key" == \#* ]] && continue
-        ENV_ARGS+=(-e "$key=$value")
-    done < .env
+    ENV_FILE_ARGS=(--env-file .env)
 fi
 
 echo "Starting container..."
@@ -50,7 +48,7 @@ $CTR rm -f "$CONTAINER_NAME" 2>/dev/null || true
 $CTR run -d --name "$CONTAINER_NAME" \
     -p "${TEST_PORT}:3000" \
     --tmpfs /tmp/openposterdb-e2e \
-    "${ENV_ARGS[@]}" \
+    "${ENV_FILE_ARGS[@]}" \
     -e JWT_SECRET="${TEST_JWT_SECRET}" \
     -e LISTEN_ADDR=0.0.0.0:3000 \
     -e COOKIE_SECURE=false \

@@ -1,15 +1,20 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 )
 
-func CountImageMeta(db *sql.DB, imageType string) (int64, error) {
+func CountImageMetaCtx(ctx context.Context, db *sql.DB, imageType string) (int64, error) {
 	var count int64
-	err := db.QueryRow("SELECT COUNT(*) FROM image_meta WHERE image_type = ?", imageType).Scan(&count)
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM image_meta WHERE image_type = ?", imageType).Scan(&count)
 	return count, err
+}
+
+func CountImageMeta(db *sql.DB, imageType string) (int64, error) {
+	return CountImageMetaCtx(context.Background(), db, imageType)
 }
 
 type ImageMetaItem struct {
@@ -20,14 +25,14 @@ type ImageMetaItem struct {
 	UpdatedAt   int64   `json:"updated_at"`
 }
 
-func ListImageMetaByKind(db *sql.DB, imageType string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
+func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
 	var total int64
-	if err := db.QueryRow("SELECT COUNT(*) FROM image_meta WHERE image_type = ?", imageType).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM image_meta WHERE image_type = ?", imageType).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	offset := (page - 1) * pageSize
-	rows, err := db.Query(
+	rows, err := db.QueryContext(ctx,
 		"SELECT cache_key, release_date, image_type, created_at, updated_at FROM image_meta WHERE image_type = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
 		imageType, pageSize, offset,
 	)
@@ -47,10 +52,14 @@ func ListImageMetaByKind(db *sql.DB, imageType string, page, pageSize int64) ([]
 	return items, total, nil
 }
 
+func ListImageMetaByKind(db *sql.DB, imageType string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
+	return ListImageMetaByKindCtx(context.Background(), db, imageType, page, pageSize)
+}
+
 // --- Global settings ---
 
-func ReadAvailableRatings(db *sql.DB, idKey string) (sources string, updatedAt int64, releaseDate *string, err error) {
-	err = db.QueryRow(
+func ReadAvailableRatingsCtx(ctx context.Context, db *sql.DB, idKey string) (sources string, updatedAt int64, releaseDate *string, err error) {
+	err = db.QueryRowContext(ctx,
 		"SELECT sources, updated_at, release_date FROM available_ratings WHERE id_key = ?",
 		idKey,
 	).Scan(&sources, &updatedAt, &releaseDate)
@@ -60,9 +69,13 @@ func ReadAvailableRatings(db *sql.DB, idKey string) (sources string, updatedAt i
 	return
 }
 
-func UpsertAvailableRatings(db *sql.DB, idKey, sources string, releaseDate *string) error {
+func ReadAvailableRatings(db *sql.DB, idKey string) (sources string, updatedAt int64, releaseDate *string, err error) {
+	return ReadAvailableRatingsCtx(context.Background(), db, idKey)
+}
+
+func UpsertAvailableRatingsCtx(ctx context.Context, db *sql.DB, idKey, sources string, releaseDate *string) error {
 	now := nowUnix()
-	_, err := db.Exec(
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO available_ratings (id_key, sources, updated_at, release_date) VALUES (?, ?, ?, ?)
 		ON CONFLICT(id_key) DO UPDATE SET sources = ?, updated_at = ?, release_date = ?`,
 		idKey, sources, now, releaseDate, sources, now, releaseDate,
@@ -70,8 +83,24 @@ func UpsertAvailableRatings(db *sql.DB, idKey, sources string, releaseDate *stri
 	return err
 }
 
+func UpsertAvailableRatings(db *sql.DB, idKey, sources string, releaseDate *string) error {
+	return UpsertAvailableRatingsCtx(context.Background(), db, idKey, sources, releaseDate)
+}
+
+func DeleteAvailableRatingsCtx(ctx context.Context, db *sql.DB, idKey string) (int64, error) {
+	result, err := db.ExecContext(ctx, "DELETE FROM available_ratings WHERE id_key = ?", idKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func DeleteAvailableRatings(db *sql.DB, idKey string) (int64, error) {
-	result, err := db.Exec("DELETE FROM available_ratings WHERE id_key = ?", idKey)
+	return DeleteAvailableRatingsCtx(context.Background(), db, idKey)
+}
+
+func DeleteAllAvailableRatingsCtx(ctx context.Context, db *sql.DB) (int64, error) {
+	result, err := db.ExecContext(ctx, "DELETE FROM available_ratings")
 	if err != nil {
 		return 0, err
 	}
@@ -79,17 +108,25 @@ func DeleteAvailableRatings(db *sql.DB, idKey string) (int64, error) {
 }
 
 func DeleteAllAvailableRatings(db *sql.DB) (int64, error) {
-	result, err := db.Exec("DELETE FROM available_ratings")
+	return DeleteAllAvailableRatingsCtx(context.Background(), db)
+}
+
+// --- Image meta bulk operations ---
+
+func DeleteImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType string) (int64, error) {
+	result, err := db.ExecContext(ctx, "DELETE FROM image_meta WHERE image_type = ?", imageType)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-// --- Image meta bulk operations ---
-
 func DeleteImageMetaByKind(db *sql.DB, imageType string) (int64, error) {
-	result, err := db.Exec("DELETE FROM image_meta WHERE image_type = ?", imageType)
+	return DeleteImageMetaByKindCtx(context.Background(), db, imageType)
+}
+
+func DeleteAllImageMetaCtx(ctx context.Context, db *sql.DB) (int64, error) {
+	result, err := db.ExecContext(ctx, "DELETE FROM image_meta")
 	if err != nil {
 		return 0, err
 	}
@@ -97,16 +134,12 @@ func DeleteImageMetaByKind(db *sql.DB, imageType string) (int64, error) {
 }
 
 func DeleteAllImageMeta(db *sql.DB) (int64, error) {
-	result, err := db.Exec("DELETE FROM image_meta")
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	return DeleteAllImageMetaCtx(context.Background(), db)
 }
 
-func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType string) error {
+func UpsertImageMetaCtx(ctx context.Context, db *sql.DB, cacheKey string, releaseDate *string, imageType string) error {
 	now := nowUnix()
-	_, err := db.Exec(
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO image_meta (cache_key, release_date, image_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(cache_key) DO UPDATE SET release_date = ?, updated_at = ?`,
 		cacheKey, releaseDate, imageType, now, now, releaseDate, now,
@@ -114,13 +147,21 @@ func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType
 	return err
 }
 
-func ReadImageMeta(db *sql.DB, cacheKey string) (*string, error) {
+func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType string) error {
+	return UpsertImageMetaCtx(context.Background(), db, cacheKey, releaseDate, imageType)
+}
+
+func ReadImageMetaCtx(ctx context.Context, db *sql.DB, cacheKey string) (*string, error) {
 	var releaseDate *string
-	err := db.QueryRow("SELECT release_date FROM image_meta WHERE cache_key = ?", cacheKey).Scan(&releaseDate)
+	err := db.QueryRowContext(ctx, "SELECT release_date FROM image_meta WHERE cache_key = ?", cacheKey).Scan(&releaseDate)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return releaseDate, err
+}
+
+func ReadImageMeta(db *sql.DB, cacheKey string) (*string, error) {
+	return ReadImageMetaCtx(context.Background(), db, cacheKey)
 }
 
 // --- Rating key validation ---
@@ -154,8 +195,8 @@ func ImageExt(key string) string {
 
 // --- Single variant exact delete ---
 
-func DeleteImageMetaExact(db *sql.DB, imageType, cacheKey string) (int64, error) {
-	result, err := db.Exec(
+func DeleteImageMetaExactCtx(ctx context.Context, db *sql.DB, imageType, cacheKey string) (int64, error) {
+	result, err := db.ExecContext(ctx,
 		"DELETE FROM image_meta WHERE cache_key = ? AND image_type = ?",
 		cacheKey, imageType,
 	)
@@ -165,12 +206,16 @@ func DeleteImageMetaExact(db *sql.DB, imageType, cacheKey string) (int64, error)
 	return result.RowsAffected()
 }
 
+func DeleteImageMetaExact(db *sql.DB, imageType, cacheKey string) (int64, error) {
+	return DeleteImageMetaExactCtx(context.Background(), db, imageType, cacheKey)
+}
+
 // --- Title-scoped delete ---
 
-func DeleteImageMetaForTitle(db *sql.DB, imageType, idType, idValue string) (int64, error) {
+func DeleteImageMetaForTitleCtx(ctx context.Context, db *sql.DB, imageType, idType, idValue string) (int64, error) {
 	prefix := idType + "/" + idValue
 
-	rows, err := db.Query(
+	rows, err := db.QueryContext(ctx,
 		"SELECT cache_key FROM image_meta WHERE image_type = ? AND cache_key LIKE ?",
 		imageType, prefix+"%",
 	)
@@ -205,9 +250,13 @@ func DeleteImageMetaForTitle(db *sql.DB, imageType, idType, idValue string) (int
 		"DELETE FROM image_meta WHERE cache_key IN (%s)",
 		strings.Join(placeholders, ","),
 	)
-	result, err := db.Exec(query, args...)
+	result, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+func DeleteImageMetaForTitle(db *sql.DB, imageType, idType, idValue string) (int64, error) {
+	return DeleteImageMetaForTitleCtx(context.Background(), db, imageType, idType, idValue)
 }
