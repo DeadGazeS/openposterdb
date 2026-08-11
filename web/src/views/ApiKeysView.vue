@@ -33,6 +33,18 @@ const error = ref('')
 const loading = ref(false)
 const { active: showCreateCheck, flash: flashCreated } = useSavedFlash()
 
+// Per-row prefix reveal state — mirrors the Source API Keys reveal UX in
+// SettingsView.vue. Each click toggles the prefix between a masked placeholder
+// and the actual `key_prefix` value (the server only stores the prefix, not
+// the full key — that's shown once at creation time via `newKeyValue`).
+const revealedKeyIds = ref<Set<number>>(new Set())
+function toggleKeyReveal(id: number) {
+  const next = new Set(revealedKeyIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  revealedKeyIds.value = next
+}
+
 // Per-key settings state
 const expandedKey = ref<number | null>(null)
 const keySettings = reactive<Record<number, RenderSettings>>({})
@@ -204,7 +216,12 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
           <div class="space-y-1">
             <p class="font-medium text-sm">{{ key.name }}</p>
             <p class="text-xs text-muted-foreground">
-              <span class="font-mono">{{ key.key_prefix }}...</span>
+              <button
+                type="button"
+                class="font-mono hover:underline"
+                :title="revealedKeyIds.has(key.id) ? 'Hide key' : 'Reveal key'"
+                @click="toggleKeyReveal(key.id)"
+              >{{ revealedKeyIds.has(key.id) ? `${key.key_prefix}...` : '••••••••' }}</button>
               &middot; Created {{ key.created_at }}
               <template v-if="key.last_used_at"> &middot; Last used {{ key.last_used_at }}</template>
             </p>

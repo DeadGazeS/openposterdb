@@ -81,6 +81,14 @@ describe('ApiKeysView', () => {
 
     expect(wrapper.text()).toContain('jellyfin-prod')
     expect(wrapper.text()).toContain('plex-dev')
+
+    // The key prefix is masked by default (similar to Source API Keys);
+    // click each Reveal button to make the prefix visible.
+    const revealButtons = wrapper.findAll('button[title="Reveal key"]')
+    expect(revealButtons.length).toBe(sampleKeys.length)
+    for (const btn of revealButtons) await btn.trigger('click')
+    await flushPromises()
+
     expect(wrapper.text()).toContain('opdb_abc')
     expect(wrapper.text()).toContain('opdb_xyz')
   })
