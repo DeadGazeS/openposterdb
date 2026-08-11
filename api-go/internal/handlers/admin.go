@@ -192,10 +192,12 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 			return
 		}
 
-		page := httpx.ParseIntParam(r, "page", 1)
+page := httpx.ParseIntParam(r, "page", 1)
 		pageSize := httpx.ParseIntParam(r, "page_size", 50)
+		sortBy := r.URL.Query().Get("sort_by")
+		sortDir := r.URL.Query().Get("sort_dir")
 
-		items, total, err := services.ListImageMetaByKindCtx(r.Context(), db, imageType, page, pageSize)
+		items, total, err := services.ListImageMetaByKindCtx(r.Context(), db, imageType, sortBy, sortDir, page, pageSize)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to list images")
 			return

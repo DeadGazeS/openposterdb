@@ -13,7 +13,8 @@ var SchemaSQL = []string{
 		cache_key TEXT PRIMARY KEY,
 		release_date TEXT,
 		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL
+		updated_at INTEGER NOT NULL,
+		last_accessed INTEGER NOT NULL DEFAULT 0
 	)`,
 	`CREATE TABLE IF NOT EXISTS admin_users (
 		id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,6 +440,10 @@ var Migrations = []Migration{
 	},
 	{
 		SQL:           "ALTER TABLE admin_users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'",
+		ExpectedError: "duplicate column",
+	},
+	{
+		SQL:           "ALTER TABLE image_meta ADD COLUMN last_accessed INTEGER NOT NULL DEFAULT 0",
 		ExpectedError: "duplicate column",
 	},
 }

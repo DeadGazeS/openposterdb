@@ -18,24 +18,53 @@ func CountImageMeta(db *sql.DB, imageType string) (int64, error) {
 }
 
 type ImageMetaItem struct {
-	CacheKey    string  `json:"cache_key"`
-	ReleaseDate *string `json:"release_date"`
-	ImageType   string  `json:"image_type"`
-	CreatedAt   int64   `json:"created_at"`
-	UpdatedAt   int64   `json:"updated_at"`
+	CacheKey     string  `json:"cache_key"`
+	ReleaseDate  *string `json:"release_date"`
+	ImageType    string  `json:"image_type"`
+	CreatedAt    int64   `json:"created_at"`
+	UpdatedAt    int64   `json:"updated_at"`
+	LastAccessed int64   `json:"last_accessed"`
 }
 
-func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
+// allowlisted columns and directions for ListImageMetaByKindCtx sorting — the
+// ORDER BY is built from these maps only, never from caller input. The
+// ORDER BY appends `cache_key <dir>` as a deterministic tiebreaker that
+// follows the sort direction: with tied primary values (e.g. rows created
+// in the same second, or last_accessed = 0), ASC and DESC still produce
+// visibly reversed orders, so direction flips always reorder the list.
+var listImageMetaSortColumns = map[string]bool{
+	"release_date":  true,
+	"created_at":    true,
+	"updated_at":    true,
+	"last_accessed": true,
+}
+
+var listImageMetaSortDirs = map[string]bool{
+	"ASC":  true,
+	"DESC": true,
+}
+
+func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType, sortBy, sortDir string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
+	if !listImageMetaSortColumns[sortBy] {
+		sortBy = "created_at"
+	}
+	// Callers send the direction in either case (the web UI sends lowercase
+	// "asc"/"desc") — normalize before the allowlist check, otherwise every
+	// lowercase value silently fell back to DESC and direction flips were
+	// no-ops at the SQL level.
+	sortDir = strings.ToUpper(sortDir)
+	if !listImageMetaSortDirs[sortDir] {
+		sortDir = "DESC"
+	}
+
 	var total int64
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM image_meta WHERE image_type = ?", imageType).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	offset := (page - 1) * pageSize
-	rows, err := db.QueryContext(ctx,
-		"SELECT cache_key, release_date, image_type, created_at, updated_at FROM image_meta WHERE image_type = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-		imageType, pageSize, offset,
-	)
+	query := "SELECT cache_key, release_date, image_type, created_at, updated_at, last_accessed FROM image_meta WHERE image_type = ? ORDER BY " + sortBy + " " + sortDir + ", cache_key " + sortDir + " LIMIT ? OFFSET ?"
+	rows, err := db.QueryContext(ctx, query, imageType, pageSize, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -44,7 +73,7 @@ func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType string, p
 	var items []ImageMetaItem
 	for rows.Next() {
 		var item ImageMetaItem
-		if err := rows.Scan(&item.CacheKey, &item.ReleaseDate, &item.ImageType, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.CacheKey, &item.ReleaseDate, &item.ImageType, &item.CreatedAt, &item.UpdatedAt, &item.LastAccessed); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, item)
@@ -52,8 +81,8 @@ func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType string, p
 	return items, total, nil
 }
 
-func ListImageMetaByKind(db *sql.DB, imageType string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
-	return ListImageMetaByKindCtx(context.Background(), db, imageType, page, pageSize)
+func ListImageMetaByKind(db *sql.DB, imageType, sortBy, sortDir string, page, pageSize int64) ([]ImageMetaItem, int64, error) {
+	return ListImageMetaByKindCtx(context.Background(), db, imageType, sortBy, sortDir, page, pageSize)
 }
 
 // --- Global settings ---
@@ -149,6 +178,36 @@ func UpsertImageMetaCtx(ctx context.Context, db *sql.DB, cacheKey string, releas
 
 func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType string) error {
 	return UpsertImageMetaCtx(context.Background(), db, cacheKey, releaseDate, imageType)
+}
+
+// TouchImageAccess bumps image_meta.last_accessed for the given cache_key,
+// throttled to once per 60 seconds per key. A non-existent cache_key is a no-op
+// (the row is only created by UpsertImageMeta on the cache-miss/regen path;
+// this helper exists to record the serve event without forcing a write).
+func TouchImageAccessCtx(ctx context.Context, db *sql.DB, cacheKey string) error {
+	var lastAccessed int64
+	err := db.QueryRowContext(ctx, "SELECT last_accessed FROM image_meta WHERE cache_key = ?", cacheKey).Scan(&lastAccessed)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("touch image access: select: %w", err)
+	}
+
+	now := nowUnix()
+	if now-lastAccessed < 60 {
+		return nil
+	}
+
+	_, err = db.ExecContext(ctx, "UPDATE image_meta SET last_accessed = ? WHERE cache_key = ?", now, cacheKey)
+	if err != nil {
+		return fmt.Errorf("touch image access: update: %w", err)
+	}
+	return nil
+}
+
+func TouchImageAccess(db *sql.DB, cacheKey string) error {
+	return TouchImageAccessCtx(context.Background(), db, cacheKey)
 }
 
 func ReadImageMetaCtx(ctx context.Context, db *sql.DB, cacheKey string) (*string, error) {

@@ -410,6 +410,9 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 				p.Caches.ImageMem.Touch(cacheKey)
 			}
 			slog.Debug("image mem cache hit", "kind", p.Kind, "cache_key", cacheKey)
+			if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+				slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+			}
 			return v.([]byte), contentType, nil
 		}
 	}
@@ -426,6 +429,9 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 				if p.Caches.ImageMem != nil {
 					p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
 				}
+				if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+					slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+				}
 				return entry.Bytes, contentType, nil
 			}
 			slog.Debug("image cache stale, serving + background refresh", "kind", p.Kind, "cache_key", cacheKey)
@@ -433,6 +439,9 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 				p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
 			}
 			go p.refreshStale(resolved, imageSize)
+			if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+				slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+			}
 			return entry.Bytes, contentType, nil
 		}
 	}
@@ -567,6 +576,9 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 	}
 	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar); err != nil {
 		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
+	}
+	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
 	}
 
 	// Cross-ID cache writes (fire-and-forget, logged on failure).
