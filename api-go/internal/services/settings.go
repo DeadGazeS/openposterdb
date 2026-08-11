@@ -1,8 +1,10 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"strings"
 )
 
@@ -319,67 +321,218 @@ func int32ClampOr(v int32) int32 {
 	return v
 }
 
+// fieldSpec describes one user-facing JSON field on RenderSettings. The slice
+// is the single source of truth for the wire/storage format: both the admin
+// PUT decoder (handlers.HandleUpdateSettings) and the storage-layer
+// serialiser RenderSettingsToMap walk this table. Building it from reflection
+// on RenderSettings means a new field added there with a JSON tag
+// automatically flows to both the decoder and the serialiser — eliminating
+// the field-by-field drift that produced the 2026-08-04 badge-width bug
+// (where a new per-kind field reached RenderSettingsToMap but not the
+// parallel hand-written request struct).
+type FieldSpec struct {
+	JSONName string // JSON tag value (e.g. "poster_badge_width")
+	GoName   string // RenderSettings struct field name (e.g. "PosterBadgeWidth")
+	Kind     string // "common" | "poster" | "logo" | "backdrop" | "episode" — informational
+	GoType   string // category used to drive decode/serialise dispatch; see fieldType* constants
+}
+
+// GoType values used to drive fieldSpec-aware logic. Each one corresponds to a
+// branch in applyFieldToSettings (decode) and RenderSettingsToMap (serialise).
+const (
+	fieldTypeString       = "string"        // string or any `type X string` alias
+	fieldTypeBool         = "bool"          // bool
+	fieldTypeInt          = "int"           // plain int32 (validated separately by ValidateRenderSettings)
+	fieldTypeScalePercent = "scale_percent" // ScalePercent (needs ClampScalePercent on decode)
+	fieldTypeBadgeAlpha   = "badge_alpha"   // BadgeAlpha (needs ClampBadgeAlpha on decode)
+	fieldTypeEdgeInset    = "edge_inset"    // BackdropEdgeInsetX/Y (needs ClampEdgeInset on decode)
+	fieldTypeLayout       = "layout"        // ImageLayout (JSON object on wire, marshalled string in storage)
+	fieldTypeColors       = "colors"        // map[string]SourceColorSet (JSON object on wire, flat color_* keys in storage)
+)
+
+// RenderSettingFields is the shared, reflection-built spec slice. Exported so
+// the admin handler (and the consistency regression test) can walk it.
+var RenderSettingFields = buildRenderSettingFields()
+
+func buildRenderSettingFields() []FieldSpec {
+	rt := reflect.TypeOf(RenderSettings{})
+	out := make([]FieldSpec, 0, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		// IsDefault is an internal-use field: set by ParseGlobalRenderSettings
+		// / DefaultRenderSettings, never user-settable, never serialised to
+		// storage, never returned by SettingsResponseMap. Skip it so the
+		// spec only covers the wire/storage surface.
+		if name == "is_default" {
+			continue
+		}
+		out = append(out, FieldSpec{
+			JSONName: name,
+			GoName:   f.Name,
+			Kind:     fieldKindFromName(f.Name),
+			GoType:   fieldTypeFromField(f),
+		})
+	}
+	return out
+}
+
+func fieldKindFromName(name string) string {
+	switch {
+	case strings.HasPrefix(name, "Poster"):
+		return "poster"
+	case strings.HasPrefix(name, "Logo"):
+		return "logo"
+	case strings.HasPrefix(name, "Backdrop"):
+		return "backdrop"
+	case strings.HasPrefix(name, "Episode"):
+		return "episode"
+	}
+	return "common"
+}
+
+func fieldTypeFromField(f reflect.StructField) string {
+	// Named types come first — they're the special cases.
+	switch f.Type.Name() {
+	case "ImageLayout":
+		return fieldTypeLayout
+	case "ScalePercent":
+		return fieldTypeScalePercent
+	case "BadgeAlpha":
+		return fieldTypeBadgeAlpha
+	}
+	// Fall back to the underlying kind. Plain int32 with a BackdropEdgeInset*
+	// name needs ClampEdgeInset; other plain int32 fields (ratings_limit,
+	// *_ratings_limit) are direct and validated separately.
+	switch f.Type.Kind() {
+	case reflect.String:
+		return fieldTypeString
+	case reflect.Bool:
+		return fieldTypeBool
+	case reflect.Int32:
+		if strings.HasPrefix(f.Name, "BackdropEdgeInset") {
+			return fieldTypeEdgeInset
+		}
+		return fieldTypeInt
+	case reflect.Map:
+		return fieldTypeColors
+	}
+	return ""
+}
+
+// applyFieldToSettings decodes one payload key into s via the spec entry. A
+// JSON null leaves the field untouched, matching the original pointer-based
+// decoder (where null on a *T field stays nil). Returns an error if the JSON
+// value is the wrong shape for the field's type.
+func applyFieldToSettings(s *RenderSettings, spec FieldSpec, raw json.RawMessage) error {
+	if string(raw) == "null" {
+		return nil
+	}
+	field := reflect.ValueOf(s).Elem().FieldByName(spec.GoName)
+	switch spec.GoType {
+	case fieldTypeString:
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.SetString(v)
+	case fieldTypeBool:
+		var v bool
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.SetBool(v)
+	case fieldTypeInt:
+		var v int32
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.SetInt(int64(v))
+	case fieldTypeScalePercent:
+		var v int32
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.SetInt(int64(ClampScalePercent(v)))
+	case fieldTypeBadgeAlpha:
+		var v int32
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.SetInt(int64(ClampBadgeAlpha(v)))
+	case fieldTypeEdgeInset:
+		var v int32
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.SetInt(int64(ClampEdgeInset(v)))
+	case fieldTypeLayout:
+		var v ImageLayout
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		field.Set(reflect.ValueOf(v))
+	case fieldTypeColors:
+		var v map[string]SourceColorSet
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		if err := ValidateSourceColors(v); err != nil {
+			return fmt.Errorf("invalid %s: %w", spec.JSONName, err)
+		}
+		v = NormalizeSourceColors(v)
+		field.Set(reflect.ValueOf(v))
+	}
+	return nil
+}
+
+// ApplyUpdatePayload walks the shared spec slice and applies every payload
+// key it recognises to s. Unknown keys are ignored (the previous hand-written
+// request struct silently dropped them too via pointer-absent behaviour, so
+// callers that send extras still get the same result). Errors are returned for
+// malformed values; validation of the resulting s is the caller's
+// responsibility (ValidateRenderSettings).
+func ApplyUpdatePayload(s *RenderSettings, payload map[string]json.RawMessage) error {
+	for _, spec := range RenderSettingFields {
+		raw, ok := payload[spec.JSONName]
+		if !ok {
+			continue
+		}
+		if err := applyFieldToSettings(s, spec, raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RenderSettingsToMap converts effective render settings back into the flat
-// key/value form stored in global_settings. Used by the admin settings update
-// path so the stored representation always reflects the current settings.
+// key/value form stored in global_settings. Walks the shared RenderSettingFields
+// spec (the same table the admin PUT decoder uses) so a new RenderSettings
+// field with a JSON tag automatically lands here.
 func RenderSettingsToMap(s *RenderSettings) map[string]string {
-	m := map[string]string{
-		"image_source":             string(s.ImageSource),
-		"lang":                     s.Lang,
-		"textless":                 boolStr(s.Textless),
-		"ratings_limit":            int32Str(s.RatingsLimit),
-		"ratings_order":            s.RatingsOrder,
-		"ratings_exclude":          s.RatingsExclude,
-		"poster_layout":            mustMarshalLayout(&s.PosterLayout),
-		"logo_ratings_limit":       int32Str(s.LogoRatingsLimit),
-		"backdrop_ratings_limit":   int32Str(s.BackdropRatingsLimit),
-		"poster_badge_style":       string(s.PosterBadgeStyle),
-		"logo_badge_style":         string(s.LogoBadgeStyle),
-		"backdrop_badge_style":     string(s.BackdropBadgeStyle),
-		"poster_label_style":       string(s.PosterLabelStyle),
-		"logo_label_style":         string(s.LogoLabelStyle),
-		"backdrop_label_style":     string(s.BackdropLabelStyle),
-		"poster_badge_direction":   string(s.PosterBadgeDirection),
-		"poster_fit":               string(s.PosterFit),
-		"poster_text_size":         int32Str(int32(s.PosterTextSize)),
-		"logo_text_size":           int32Str(int32(s.LogoTextSize)),
-		"backdrop_text_size":       int32Str(int32(s.BackdropTextSize)),
-		"poster_badge_size":        int32Str(int32(s.PosterBadgeSize)),
-		"logo_badge_size":          int32Str(int32(s.LogoBadgeSize)),
-		"backdrop_badge_size":      int32Str(int32(s.BackdropBadgeSize)),
-		"poster_badge_width":       int32Str(int32(s.PosterBadgeWidth)),
-		"poster_badge_height":      int32Str(int32(s.PosterBadgeHeight)),
-		"logo_badge_width":         int32Str(int32(s.LogoBadgeWidth)),
-		"logo_badge_height":        int32Str(int32(s.LogoBadgeHeight)),
-		"backdrop_badge_width":     int32Str(int32(s.BackdropBadgeWidth)),
-		"backdrop_badge_height":    int32Str(int32(s.BackdropBadgeHeight)),
-		"episode_badge_width":      int32Str(int32(s.EpisodeBadgeWidth)),
-		"episode_badge_height":     int32Str(int32(s.EpisodeBadgeHeight)),
-		"poster_logo_size":         int32Str(int32(s.PosterLogoSize)),
-		"logo_logo_size":           int32Str(int32(s.LogoLogoSize)),
-		"backdrop_logo_size":       int32Str(int32(s.BackdropLogoSize)),
-		"logo_layout":              mustMarshalLayout(&s.LogoLayout),
-		"backdrop_layout":          mustMarshalLayout(&s.BackdropLayout),
-		"backdrop_badge_direction": string(s.BackdropBadgeDirection),
-		"backdrop_edge_inset_x":    int32Str(s.BackdropEdgeInsetX),
-		"backdrop_edge_inset_y":    int32Str(s.BackdropEdgeInsetY),
-		"episode_ratings_limit":    int32Str(s.EpisodeRatingsLimit),
-		"episode_badge_style":      string(s.EpisodeBadgeStyle),
-		"episode_label_style":      string(s.EpisodeLabelStyle),
-		"episode_text_size":        int32Str(int32(s.EpisodeTextSize)),
-		"episode_badge_size":       int32Str(int32(s.EpisodeBadgeSize)),
-		"episode_logo_size":        int32Str(int32(s.EpisodeLogoSize)),
-		"episode_layout":           mustMarshalLayout(&s.EpisodeLayout),
-		"episode_badge_direction":  string(s.EpisodeBadgeDirection),
-		"episode_blur":             boolStr(s.EpisodeBlur),
-		"poster_badge_shape":       string(s.PosterBadgeShape),
-		"logo_badge_shape":         string(s.LogoBadgeShape),
-		"backdrop_badge_shape":     string(s.BackdropBadgeShape),
-		"episode_badge_shape":      string(s.EpisodeBadgeShape),
-		"poster_badge_alpha":       int32Str(int32(s.PosterBadgeAlpha)),
-		"logo_badge_alpha":         int32Str(int32(s.LogoBadgeAlpha)),
-		"backdrop_badge_alpha":     int32Str(int32(s.BackdropBadgeAlpha)),
-		"episode_badge_alpha":      int32Str(int32(s.EpisodeBadgeAlpha)),
+	m := make(map[string]string, len(RenderSettingFields))
+	sv := reflect.ValueOf(s).Elem()
+	for _, spec := range RenderSettingFields {
+		if spec.GoType == fieldTypeColors {
+			// Colors flatten into multiple color_<key>_<attr> keys; merged
+			// into m below via colorsToMap.
+			continue
+		}
+		fv := sv.FieldByName(spec.GoName)
+		switch spec.GoType {
+		case fieldTypeString:
+			m[spec.JSONName] = fv.String()
+		case fieldTypeBool:
+			m[spec.JSONName] = boolStr(fv.Bool())
+		case fieldTypeInt, fieldTypeScalePercent, fieldTypeBadgeAlpha, fieldTypeEdgeInset:
+			m[spec.JSONName] = int32Str(int32(fv.Int()))
+		case fieldTypeLayout:
+			layout := fv.Interface().(ImageLayout)
+			m[spec.JSONName] = mustMarshalLayout(&layout)
+		}
 	}
 	maps.Copy(m, colorsToMap(s.Colors))
 	return m

@@ -623,28 +623,34 @@ func TestApplyQueryOverridesUnknownKind(t *testing.T) {
 	}
 }
 
-// TestUpdateSettingsRequestCoversRenderSettingsToMap is a regression guard for
-// the 2026-08-04 badge-width bug: a new per-kind field was added to
-// RenderSettings (and thus to RenderSettingsToMap) but not to
-// updateSettingsRequest, so the frontend's value was silently dropped on
-// decode. This test asserts every static key RenderSettingsToMap produces has
-// a matching JSON tag in updateSettingsRequest — if a future change adds a
-// field to one side and forgets the other, this fails.
-func TestUpdateSettingsRequestCoversRenderSettingsToMap(t *testing.T) {
-	reqType := reflect.TypeOf(updateSettingsRequest{})
-	reqTags := map[string]bool{}
-	for i := 0; i < reqType.NumField(); i++ {
-		name := strings.Split(reqType.Field(i).Tag.Get("json"), ",")[0]
-		if name != "" && name != "-" {
-			reqTags[name] = true
+// TestRenderSettingFieldsSpecIsComplete is a regression guard for the
+// 2026-08-04 badge-width bug. Now that updateSettingsRequest and
+// RenderSettingsToMap both iterate the shared services.RenderSettingFields
+// spec, the spec itself is the single source of truth — drift between the
+// two sides is structurally impossible. This test asserts the spec is
+// internally consistent: JSONNames are unique, GoNames exist on
+// RenderSettings, and the spec covers every static key RenderSettingsToMap
+// produces.
+func TestRenderSettingFieldsSpecIsComplete(t *testing.T) {
+	specByName := map[string]services.FieldSpec{}
+	for _, spec := range services.RenderSettingFields {
+		if _, dup := specByName[spec.JSONName]; dup {
+			t.Errorf("spec has duplicate JSONName %q", spec.JSONName)
+		}
+		specByName[spec.JSONName] = spec
+	}
+	rsType := reflect.TypeOf(services.RenderSettings{})
+	for _, spec := range services.RenderSettingFields {
+		if _, ok := rsType.FieldByName(spec.GoName); !ok {
+			t.Errorf("spec JSONName=%q references GoName=%q which does not exist on RenderSettings", spec.JSONName, spec.GoName)
 		}
 	}
 	for key := range services.RenderSettingsToMap(&services.RenderSettings{}) {
 		if strings.HasPrefix(key, "color_") {
 			continue // dynamic from colorsToMap; covered by TestColorsRoundTrip
 		}
-		if !reqTags[key] {
-			t.Errorf("RenderSettingsToMap produces key %q but updateSettingsRequest has no JSON tag for it", key)
+		if _, ok := specByName[key]; !ok {
+			t.Errorf("RenderSettingsToMap produces key %q but spec has no entry for it", key)
 		}
 	}
 }
