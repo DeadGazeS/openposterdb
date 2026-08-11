@@ -34,6 +34,6 @@ watch(() => props.fetching, (now, was) => {
         <RefreshCw v-else class="absolute inset-0 size-4" :class="{ 'animate-spin': fetching }" />
       </Transition>
     </span>
-    Refresh
+    Refresh Content
   </Button>
 </template>

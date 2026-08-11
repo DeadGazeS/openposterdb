@@ -50,13 +50,13 @@ function openDialog() {
 <template>
   <Button variant="outline" :size="size" class="text-destructive hover:text-destructive" @click="openDialog">
     <Trash2 class="size-4 mr-1" />
-    Clear cache and images
+    Clear Cache and Images
   </Button>
 
   <Dialog :open="open" @update:open="(v: boolean) => { if (!v) open = false }">
     <DialogContent class="max-w-sm">
       <DialogHeader>
-        <DialogTitle>Clear cache and images</DialogTitle>
+        <DialogTitle>Clear Cache and Images</DialogTitle>
       </DialogHeader>
       <div class="space-y-4">
         <p class="text-sm text-muted-foreground">
@@ -69,7 +69,7 @@ function openDialog() {
           <Button variant="outline" :disabled="loading" @click="open = false">Cancel</Button>
           <Button variant="destructive" :disabled="loading" @click="confirmClear">
             <Loader2 v-if="loading" class="size-4 animate-spin mr-1" />
-            Clear cache and images
+            Clear Cache and Images
           </Button>
         </div>
       </div>

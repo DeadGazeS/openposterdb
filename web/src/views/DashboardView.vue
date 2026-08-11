@@ -60,22 +60,29 @@ function onCleared(message: string) {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-end gap-2">
-      <ClearCacheButton @cleared="onCleared" />
-      <RefreshButton :fetching="userRefreshing" @refresh="handleRefresh" />
+    <div class="space-y-4">
+      <div class="rounded-lg border p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="w-fit border border-t-0 border-l-0 rounded-tl-md rounded-br-md bg-muted px-4 py-2 text-sm font-bold uppercase tracking-widest">
+            Dashboard
+          </h3>
+          <div class="flex items-center gap-2">
+            <ClearCacheButton @cleared="onCleared" />
+            <RefreshButton :fetching="userRefreshing" @refresh="handleRefresh" />
+          </div>
+        </div>
+        <p v-if="clearMessage" class="text-sm text-muted-foreground text-right">{{ clearMessage }}</p>
+        <div class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          <Card v-for="card in cards" :key="card.key">
+            <CardHeader class="pb-2">
+              <CardTitle class="text-sm font-medium text-muted-foreground">{{ card.label }}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Skeleton v-if="isPending" class="h-8 w-20" />
+              <p v-else class="text-2xl font-bold">{{ formatStatValue(card.key, stats?.[card.key]) }}</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
-    <p v-if="clearMessage" class="text-sm text-muted-foreground text-right">{{ clearMessage }}</p>
-    <div class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-    <Card v-for="card in cards" :key="card.key">
-      <CardHeader class="pb-2">
-        <CardTitle class="text-sm font-medium text-muted-foreground">{{ card.label }}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Skeleton v-if="isPending" class="h-8 w-20" />
-        <p v-else class="text-2xl font-bold">{{ formatStatValue(card.key, stats?.[card.key]) }}</p>
-      </CardContent>
-    </Card>
-    </div>
-  </div>
-</template>
+  </template>

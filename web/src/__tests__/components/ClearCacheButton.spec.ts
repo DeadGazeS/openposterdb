@@ -29,7 +29,7 @@ async function openAndConfirm(wrapper: ReturnType<typeof mountButton>) {
   // Only the trigger is shown until clicked (dialog is closed).
   await wrapper.find('button').trigger('click')
   await flushPromises()
-  const clearButtons = wrapper.findAll('button').filter((b) => b.text().trim() === 'Clear cache and images')
+  const clearButtons = wrapper.findAll('button').filter((b) => b.text().trim() === 'Clear Cache and Images')
   await clearButtons[clearButtons.length - 1]!.trigger('click') // the dialog confirm
   await flushPromises()
 }

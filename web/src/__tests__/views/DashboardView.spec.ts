@@ -40,7 +40,7 @@ function mountView() {
         Skeleton: { template: '<div data-testid="skeleton" />' },
         RefreshCw: { template: '<span />' },
         ClearCacheButton: {
-          template: '<button @click="$emit(\'cleared\', \'Cache and images cleared — removed 42 cached images.\')">Clear cache and images</button>',
+          template: '<button @click="$emit(\'cleared\', \'Cache and images cleared — removed 42 cached images.\')">Clear Cache and Images</button>',
           emits: ['cleared'],
         },
       },
@@ -125,12 +125,28 @@ describe('DashboardView', () => {
     mockAdminApi.getStats.mockClear()
 
     // ClearCacheButton owns the confirm flow; here it emits `cleared` on click.
-    const clearButton = wrapper.findAll('button').find((b) => b.text().includes('Clear cache'))
+    const clearButton = wrapper.findAll('button').find((b) => b.text().includes('Clear Cache'))
     expect(clearButton).toBeDefined()
     await clearButton!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Cache and images cleared')
     expect(mockAdminApi.getStats).toHaveBeenCalled() // refetched after clear
+  })
+
+  it('rounds image_mem_cache_mb via formatStatValue (two decimals)', async () => {
+    mockAdminApi.getStats.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ...sampleStats, image_mem_cache_mb: 123.4567890123 }),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    // Two-decimal rounding of image_mem_cache_mb; everything else stays as-is.
+    expect(wrapper.text()).toContain('123.46')
+    // The raw 12-digit float must not leak through (would not be substring of
+    // the rounded display).
+    expect(wrapper.text()).not.toContain('123.4567890123')
   })
 })
