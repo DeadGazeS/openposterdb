@@ -19,16 +19,16 @@ type RatingSource struct {
 }
 
 var (
-	SourceMal        = &RatingSource{Key: "mal", Label: "MAL", CacheChar: 'm', ColorR: 34, ColorG: 60, ColorB: 120}
+SourceMal        = &RatingSource{Key: "mal", Label: "MyAnimeList", CacheChar: 'e', ColorR: 34, ColorG: 60, ColorB: 120}
 	SourceImdb       = &RatingSource{Key: "imdb", Label: "IMDb", CacheChar: 'i', ColorR: 180, ColorG: 145, ColorB: 15}
-	SourceLetterboxd = &RatingSource{Key: "lb", Label: "LB", CacheChar: 'l', ColorR: 0, ColorG: 155, ColorB: 88}
-	SourceRt         = &RatingSource{Key: "rt", Label: "RTC", CacheChar: 'r', ColorR: 185, ColorG: 35, ColorB: 8}
-	SourceRtAudience = &RatingSource{Key: "rta", Label: "RTA", CacheChar: 'a', ColorR: 185, ColorG: 35, ColorB: 8}
-	SourceMetacritic = &RatingSource{Key: "mc", Label: "MC", CacheChar: 'c', ColorR: 75, ColorG: 150, ColorB: 38}
+	SourceLetterboxd = &RatingSource{Key: "lb", Label: "Letterboxd", CacheChar: 'l', ColorR: 0, ColorG: 155, ColorB: 88}
+	SourceRt         = &RatingSource{Key: "rt", Label: "Rotten Tomatoes Critics", CacheChar: 'c', ColorR: 185, ColorG: 35, ColorB: 8}
+	SourceRtAudience = &RatingSource{Key: "rta", Label: "Rotten Tomatoes Audience", CacheChar: 'a', ColorR: 185, ColorG: 35, ColorB: 8}
+	SourceMetacritic = &RatingSource{Key: "mc", Label: "Metacritic", CacheChar: 'm', ColorR: 75, ColorG: 150, ColorB: 38}
 	SourceTmdb       = &RatingSource{Key: "tmdb", Label: "TMDB", CacheChar: 't', ColorR: 1, ColorG: 155, ColorB: 88}
 	SourceTrakt      = &RatingSource{Key: "trakt", Label: "Trakt", CacheChar: 'k', ColorR: 175, ColorG: 15, ColorB: 45}
-	SourceMdblist    = &RatingSource{Key: "mdblist", Label: "MDB", CacheChar: 'd', ColorR: 66, ColorG: 132, ColorB: 202}
-	SourceEbert      = &RatingSource{Key: "ebert", Label: "Ebert", CacheChar: 'e', ColorR: 232, ColorG: 89, ColorB: 12}
+	SourceMdblist    = &RatingSource{Key: "mdblist", Label: "MDBList", CacheChar: 'd', ColorR: 66, ColorG: 132, ColorB: 202}
+	SourceEbert      = &RatingSource{Key: "ebert", Label: "Roger Ebert", CacheChar: 'r', ColorR: 232, ColorG: 89, ColorB: 12}
 )
 
 var allSources = []*RatingSource{

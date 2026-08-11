@@ -43,8 +43,8 @@ func TestBadgesCacheSuffix(t *testing.T) {
 		{Source: SourceLetterboxd, Value: "4.2"},
 		{Source: SourceRt, Value: "95%"},
 	}
-	if s := BadgesCacheSuffix(badges); s != "@ilr" {
-		t.Errorf("expected @ilr, got %s", s)
+	if s := BadgesCacheSuffix(badges); s != "@ilc" {
+		t.Errorf("expected @ilc, got %s", s)
 	}
 }
 
@@ -56,15 +56,15 @@ func TestBadgesCacheSuffixEmpty(t *testing.T) {
 
 func TestRatingsCacheSuffixDefault(t *testing.T) {
 	suffix := RatingsCacheSuffix("mal,imdb,lb,rt,rta,mc,tmdb,trakt", "", 3)
-	if suffix != "@mil" {
-		t.Errorf("expected @mil, got %s", suffix)
+	if suffix != "@eil" {
+		t.Errorf("expected @eil, got %s", suffix)
 	}
 }
 
 func TestRatingsCacheSuffixCustomOrder(t *testing.T) {
 	suffix := RatingsCacheSuffix("trakt,imdb,rt", "", 3)
-	if suffix != "@kir" {
-		t.Errorf("expected @kir, got %s", suffix)
+	if suffix != "@kic" {
+		t.Errorf("expected @kic, got %s", suffix)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestAvailableSourcesString(t *testing.T) {
 		{Source: SourceRt, Value: "95%"},
 	}
 	// Canonical order: mal, imdb, lb, rt, rta, mc, tmdb, trakt
-	if s := AvailableSourcesString(badges); s != "irt" {
-		t.Errorf("expected irt, got %s", s)
+	if s := AvailableSourcesString(badges); s != "ict" {
+		t.Errorf("expected ict, got %s", s)
 	}
 }
 
