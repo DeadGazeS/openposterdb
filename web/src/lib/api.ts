@@ -168,7 +168,7 @@ const ADMIN_IMAGE_ENDPOINTS: Record<ImageListKind, AdminImageEndpoints> = {
 
 interface AdminImageApi {
   clear: () => Promise<Response>
-  list: (page: number, pageSize: number) => Promise<Response>
+  list: (page: number, pageSize: number, sortBy?: string, sortDir?: string) => Promise<Response>
   image: (key: string) => Promise<Response>
   fetch: (idType: string, idValue: string) => Promise<Response>
   purge: (idType: string, idValue: string, scope?: PurgeScope) => Promise<Response>
@@ -180,7 +180,8 @@ interface AdminImageApi {
 function makeAdminImageApi(cfg: AdminImageEndpoints): AdminImageApi {
   return {
     clear: () => del(`/api/admin/${cfg.plural}`),
-    list: (page, pageSize) => get(`/api/admin/${cfg.plural}?page=${page}&page_size=${pageSize}`),
+    list: (page, pageSize, sortBy, sortDir) =>
+      get(buildUrl(`/api/admin/${cfg.plural}`, { page, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir })),
     image: (key) => get(`/api/admin/${cfg.plural}/${key}${cfg.imageSuffix}`),
     fetch: (idType, idValue) => post(`/api/admin/${cfg.plural}/${idType}/${idValue}/fetch`),
     purge: (idType, idValue, scope = 'title') => del(purgeUrl(cfg.plural, idType, idValue, scope)),
