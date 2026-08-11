@@ -1,10 +1,9 @@
 package image
 
 import (
-	"crypto/sha256"
+	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -79,18 +78,6 @@ func newFace(size float64) font.Face {
 func GetFontFacesAt(textSizePct float64) (font.Face, font.Face) {
 	return newFace(labelFontFaceSize * textSizePct / 100.0),
 		newFace(valueFontFaceSize * textSizePct / 100.0)
-}
-
-func loadFontFromData(data []byte) (font.Face, error) {
-	f, err := sfnt.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return opentype.NewFace(f, &opentype.FaceOptions{
-		Size:    26,
-		DPI:     72,
-		Hinting: font.HintingNone,
-	})
 }
 
 func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize) ([]byte, error) {
@@ -173,56 +160,52 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 		layout = settings.EpisodeLayout
 	}
 
-	valueFace, labelFace := GetFontFacesAt(textSizePct)
+	// GetFontFacesAt returns (label, value) — assign in that order.
+	labelFace, valueFace := GetFontFacesAt(textSizePct)
 	if valueFace == nil || labelFace == nil {
 		return nil, fmt.Errorf("font not loaded")
 	}
 	textScale := float32(textSizePct) / 100.0
 
+	params := RenderParams{
+		Badges:          badges,
+		ValueFontFace:   valueFace,
+		LabelFontFace:   labelFace,
+		Quality:         quality,
+		Layout:          layout,
+		BadgeStyle:      badgeStyle,
+		LabelStyle:      labelStyle,
+		Appearance:      appearance,
+		TargetWidth:     targetW,
+		BadgeScale:      badgeScale,
+		BadgeMultiplier: badgeMultiplier,
+		TextScale:       textScale,
+		LogoScale:       logoScale,
+		Colors:          settings.Colors,
+	}
+
 	switch kind {
 	case "poster":
-		return RenderPosterSync(imageBytes, badges, valueFace, labelFace, quality,
-			layout, badgeStyle, labelStyle, appearance,
-			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
-			settings.PosterFit, settings.Colors)
+		params.PosterFit = settings.PosterFit
+		return RenderPosterSync(imageBytes, params)
 
 	case "logo":
-		return RenderLogoSync(imageBytes, badges, valueFace, labelFace,
-			badgeStyle, labelStyle, appearance, targetW, badgeScale, badgeMultiplier, textScale, logoScale,
-			layout, settings.Colors)
+		return RenderLogoSync(imageBytes, params)
 
 	case "backdrop":
-		return RenderBackdropSync(imageBytes, badges, valueFace, labelFace, quality,
-			layout, badgeStyle, labelStyle, appearance,
-			targetW, badgeScale, badgeMultiplier, textScale, logoScale,
-			settings.BackdropEdgeInsetX, settings.BackdropEdgeInsetY, settings.Colors)
+		params.EdgeInsetX = settings.BackdropEdgeInsetX
+		params.EdgeInsetY = settings.BackdropEdgeInsetY
+		return RenderBackdropSync(imageBytes, params)
 
 	case "episode":
-		return RenderEpisodeSync(imageBytes, badges, valueFace, labelFace, quality,
-			layout, badgeStyle, labelStyle, appearance,
-			targetW, badgeScale, badgeMultiplier, textScale, logoScale, settings.EpisodeBlur, settings.Colors)
+		params.Blur = settings.EpisodeBlur
+		return RenderEpisodeSync(imageBytes, params)
 	}
 
 	return nil, fmt.Errorf("unknown image kind: %s", kind)
 }
 
 // --- CDN helpers ---
-
-func SettingsHash(settings *services.RenderSettings, kind string, imageSizeStr *string) string {
-	h := sha256.New()
-	io.WriteString(h, kind+"\x00")
-	suffix := services.SettingsCacheSuffix(settings, kind, imageSizeStr)
-	io.WriteString(h, suffix+"\x00")
-	io.WriteString(h, services.ExcludeCacheToken(settings.RatingsExclude)+"\x00")
-	io.WriteString(h, string(settings.ImageSource)+"\x00")
-	io.WriteString(h, settings.Lang+"\x00")
-	if settings.Textless {
-		io.WriteString(h, "1")
-	} else {
-		io.WriteString(h, "0")
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))[:32]
-}
 
 func ImageResponse(data []byte, contentType string) (int, map[string]string, []byte) {
 	return 200, map[string]string{
@@ -244,15 +227,6 @@ func TmdbPosterVariant(lang string, textless bool) string {
 	return "_t_" + lang
 }
 
-func ImageExt(kind string) string {
-	switch kind {
-	case "logo":
-		return "png"
-	default:
-		return "jpg"
-	}
-}
-
 func ImageContentType(kind string) string {
 	switch kind {
 	case "logo":
@@ -262,54 +236,8 @@ func ImageContentType(kind string) string {
 	}
 }
 
-func ImageSubdir(kind string) string {
-	switch kind {
-	case "logo":
-		return "logos"
-	case "backdrop":
-		return "backdrops"
-	case "episode":
-		return "episodes"
-	default:
-		return "posters"
-	}
-}
-
-func KindPrefix(kind string) string {
-	switch kind {
-	case "logo":
-		return "_l"
-	case "backdrop":
-		return "_b"
-	case "episode":
-		return "_e"
-	default:
-		return ""
-	}
-}
-
 func EnsureCacheDir(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0755)
-}
-
-func ReadFileCache(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-func WriteFileCache(path string, data []byte) error {
-	if err := EnsureCacheDir(path); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func StripImageExt(idValue, kind string) string {
-	switch kind {
-	case "logo":
-		return strings.TrimSuffix(idValue, ".png")
-	default:
-		return strings.TrimSuffix(idValue, ".jpg")
-	}
 }
 
 func ImageDbValue(kind string) string {
@@ -323,22 +251,6 @@ func ImageDbValue(kind string) string {
 	default:
 		return "p"
 	}
-}
-
-func computeCDNMaxAge(releaseDate *string, minStale, maxAge uint64) uint64 {
-	return services.ComputeCDNMaxAge(releaseDate, minStale, maxAge)
-}
-
-func newFontFace(data []byte) font.Face {
-	f, err := sfnt.Parse(data)
-	if err != nil {
-		return nil
-	}
-	face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: 26, DPI: 72, Hinting: font.HintingNone})
-	if err != nil {
-		return nil
-	}
-	return face
 }
 
 // ratingsLimitForKind returns the number of ratings to fetch for a kind: the
@@ -375,90 +287,181 @@ func ratingsLimitForKind(kind string, settings *services.RenderSettings, overrid
 // images, ID resolutions, fetched ratings); nil fields disable that layer.
 //
 // Returns (image bytes, content type, error).
-func ServeImage(
-	db *sql.DB,
-	tmdb *services.TmdbClient,
-	omdb *services.OmdbClient,
-	mdblist *services.MdblistClient,
-	trakt *services.TraktClient,
-	fanart *services.FanartClient,
-	idTypeStr, idValue string,
-	kind string,
-	settings *services.RenderSettings,
-	ratingsLimit *int32,
-	cacheDir string,
-	externalCacheOnly bool,
-	ratingsMinStaleSecs uint64,
-	ratingsMaxAgeSecs uint64,
-	imageStaleSecs uint64,
-	quality uint8,
-	imageSizeStr *string,
-	caches *services.MemCacheSet,
-) ([]byte, string, error) {
-	idType, err := services.ParseIDType(idTypeStr)
+
+// ServeParams carries everything ServeImage needs to resolve and render one
+// image request.
+type ServeParams struct {
+	Context             context.Context
+	DB                  *sql.DB
+	TMDB                *services.TmdbClient
+	OMDB                *services.OmdbClient
+	MDBList             *services.MdblistClient
+	Trakt               *services.TraktClient
+	Fanart              *services.FanartClient
+	IDType              string
+	IDValue             string
+	Kind                string
+	Settings            *services.RenderSettings
+	RatingsLimit        *int32
+	CacheDir            string
+	ExternalCacheOnly   bool
+	RatingsMinStaleSecs uint64
+	RatingsMaxAgeSecs   uint64
+	ImageStaleSecs      uint64
+	Quality             uint8
+	ImageSizeStr        *string
+	Caches              *services.MemCacheSet
+	Inflight            *InflightSet
+}
+
+func ServeImage(p ServeParams) ([]byte, string, error) {
+	if p.Context == nil {
+		p.Context = context.Background()
+	}
+	idType, err := services.ParseIDType(p.IDType)
 	if err != nil {
 		return nil, "", err
 	}
 
-	if err := services.ValidateIDValue(idValue); err != nil {
+	if err := services.ValidateIDValue(p.IDValue); err != nil {
 		return nil, "", err
 	}
 
-	if tmdb == nil {
+	if p.TMDB == nil {
 		return nil, "", apperr.NewOther("TMDB API key not configured — image generation unavailable")
 	}
-	if caches == nil {
-		caches = &services.MemCacheSet{}
+	if p.Caches == nil {
+		p.Caches = &services.MemCacheSet{}
 	}
 
-	contentType := ImageContentType(kind)
-	imageTypeChar := ImageDbValue(kind)
+	contentType := ImageContentType(p.Kind)
 	imageSize := services.ImageSizeMedium
-	if imageSizeStr != nil {
-		imageSize = services.ParseImageSize(*imageSizeStr)
+	if p.ImageSizeStr != nil {
+		imageSize = services.ParseImageSize(*p.ImageSizeStr)
 	}
 
-	slog.Debug("image request", "kind", kind, "id", idTypeStr+"/"+idValue)
+	slog.Debug("image request", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
+
+	// Clone the caller's settings so the badge-direction/style default
+	// resolution below (and any future in-place mutation) cannot mutate the
+	// caller's struct. RenderSettings mutated fields here are all value types
+	// (BadgeDirection / BadgeStyle / etc. are string aliases) so a shallow
+	// copy is sufficient; the Colors map is read-only in this function and is
+	// shared intentionally. Production handlers always pass a fresh struct per
+	// request, but integration tests reuse a struct across calls (would shift
+	// the cache key on each invocation), so this guards both.
+	settingsCopy := *p.Settings
+	p.Settings = &settingsCopy
 
 	// Resolve badge direction/style defaults before cache key construction.
-	switch kind {
+	switch p.Kind {
 	case "poster":
-		settings.PosterBadgeDirection = settings.PosterBadgeDirection.ResolveDefault()
-		settings.PosterBadgeStyle = settings.PosterBadgeStyle.Resolve(settings.PosterBadgeDirection)
+		p.Settings.PosterBadgeDirection = p.Settings.PosterBadgeDirection.ResolveDefault()
+		p.Settings.PosterBadgeStyle = p.Settings.PosterBadgeStyle.Resolve(p.Settings.PosterBadgeDirection)
 	case "backdrop":
-		settings.BackdropBadgeDirection = settings.BackdropBadgeDirection.ResolveDefault()
-		settings.BackdropBadgeStyle = settings.BackdropBadgeStyle.Resolve(settings.BackdropBadgeDirection)
+		p.Settings.BackdropBadgeDirection = p.Settings.BackdropBadgeDirection.ResolveDefault()
+		p.Settings.BackdropBadgeStyle = p.Settings.BackdropBadgeStyle.Resolve(p.Settings.BackdropBadgeDirection)
 	case "episode":
-		settings.EpisodeBadgeDirection = settings.EpisodeBadgeDirection.ResolveDefault()
-		settings.EpisodeBadgeStyle = settings.EpisodeBadgeStyle.Resolve(settings.EpisodeBadgeDirection)
+		p.Settings.EpisodeBadgeDirection = p.Settings.EpisodeBadgeDirection.ResolveDefault()
+		p.Settings.EpisodeBadgeStyle = p.Settings.EpisodeBadgeStyle.Resolve(p.Settings.EpisodeBadgeDirection)
 	}
 
 	// Resolve the ID, uplifting episodes to their parent series for poster,
 	// logo, and backdrop endpoints.
-	resolved, err := services.ResolveIDCached(caches.IDs, idType, idValue, tmdb)
+	resolved, err := services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, idType, p.IDValue, p.TMDB)
 	if err != nil {
 		return nil, "", err
 	}
 
-	if kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
+	if p.Kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
 		if resolved.Episode != nil {
 			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-			resolved, err = services.ResolveIDCached(caches.IDs, services.IDTypeTMDB, seriesID, tmdb)
+			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, p.TMDB)
 			if err != nil {
 				return nil, "", err
 			}
 		}
 	}
 
-	if kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
+	if p.Kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
 		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
 	}
 
-	// Fetch ratings. The number of ratings shown is the explicit ?ratings_limit
-	// override when provided (and valid), otherwise the layout's total badge
-	// capacity. The stored ratings_limit settings fields are legacy and are
-	// never read here.
-	limit := ratingsLimitForKind(kind, settings, ratingsLimit)
+	// Fetch ratings, apply preferences, and build the cache key.
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Serve from the in-memory cache first (fast path; works even with
+	// external_cache_only, mirroring the Rust image_mem_cache). When the entry
+	// is due for re-validation (60s window) and the release-date staleness says
+	// the cached render is out of date, serve the bytes anyway and refresh in
+	// the background — mirroring the Rust check_caches behavior so ratings
+	// changes propagate through a hot in-memory entry within ~a minute.
+	if p.Caches.ImageMem != nil {
+		if v, ok, due := p.Caches.ImageMem.GetDue(cacheKey); ok {
+			if due && !p.ExternalCacheOnly {
+				revalStaleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
+				if entry, err := services.ReadCache(cachePath, revalStaleSecs); err == nil && entry.IsStale {
+					slog.Debug("image mem cache entry stale, background refresh", "kind", p.Kind, "cache_key", cacheKey)
+					go p.refreshStale(resolved, imageSize)
+				}
+				p.Caches.ImageMem.Touch(cacheKey)
+			}
+			slog.Debug("image mem cache hit", "kind", p.Kind, "cache_key", cacheKey)
+			return v.([]byte), contentType, nil
+		}
+	}
+
+	// Serve from filesystem cache if present and fresh. A stale entry is
+	// served immediately and regenerated in the background so the request is
+	// not blocked (mirrors the Rust background refresh; the inflight set
+	// guarantees at most one regeneration per cache key).
+	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
+	if !p.ExternalCacheOnly {
+		if entry, err := services.ReadCache(cachePath, staleSecs); err == nil {
+			if !entry.IsStale {
+				slog.Debug("image cache hit", "kind", p.Kind, "cache_key", cacheKey)
+				if p.Caches.ImageMem != nil {
+					p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
+				}
+				return entry.Bytes, contentType, nil
+			}
+			slog.Debug("image cache stale, serving + background refresh", "kind", p.Kind, "cache_key", cacheKey)
+			if p.Caches.ImageMem != nil {
+				p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
+			}
+			go p.refreshStale(resolved, imageSize)
+			return entry.Bytes, contentType, nil
+		}
+	}
+
+	// Render (fetch artwork + generate + persist), coalesced so concurrent
+	// requests for the same cache key share a single render.
+	render := func() ([]byte, error) {
+		return p.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+	}
+	var rendered []byte
+	if p.Inflight != nil {
+		rendered, err = p.Inflight.RunCoalesced(cacheKey, render)
+	} else {
+		rendered, err = render()
+	}
+	if err != nil {
+		return nil, "", err
+	}
+
+	slog.Debug("image generated", "kind", p.Kind, "cache_key", cacheKey, "badges", len(badges))
+	return rendered, contentType, nil
+}
+
+// prepareRender fetches ratings (when the kind's limit allows), applies
+// preferences, and computes the cache key/path for the request's ID form.
+// It is the first half of the render pipeline, shared by ServeImage and the
+// background-refresh path.
+func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, err error) {
+	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 
 	var rawBadges []services.RatingBadge
 	if limit > 0 {
@@ -483,102 +486,124 @@ func ServeImage(
 			epEpisode = resolved.Episode.EpisodeNumber
 		}
 
-		rawBadges = services.FetchRatingsCached(
-			caches.Ratings,
-			resolved.TMDbID, mediaType, imdbID,
-			epShowID, epSeason, epEpisode,
-			tmdb, omdb, mdblist, trakt,
+		rawBadges = services.FetchRatingsCachedCtx(p.Context, p.Caches.Ratings,
+			services.RatingsClients{TMDB: p.TMDB, OMDB: p.OMDB, MDBList: p.MDBList, Trakt: p.Trakt},
+			services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
+				EpisodeShowTMDbID: epShowID, EpisodeSeason: epSeason, EpisodeEpisode: epEpisode},
 		)
 		slog.Debug("ratings fetched",
-			"kind", kind,
-			"id", idTypeStr+"/"+idValue,
+			"kind", p.Kind,
+			"id", p.IDType+"/"+p.IDValue,
 			"badges", len(rawBadges),
 			"sources", badgeSourceString(rawBadges),
 		)
 	} else {
-		slog.Debug("ratings skipped", "kind", kind, "id", idTypeStr+"/"+idValue, "reason", "ratings_limit=0")
+		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "ratings_limit=0")
 	}
 
-	badges := services.ApplyRatingPreferences(rawBadges, settings.RatingsOrder, settings.RatingsExclude, limit)
+	badges = services.ApplyRatingPreferences(rawBadges, p.Settings.RatingsOrder, p.Settings.RatingsExclude, limit)
 
-	// Build the cache value (id value + variant + settings/ratings suffix).
+	suffix := p.renderSuffix(badges)
+	cacheKey, cachePath, err = p.cacheKeyFor(p.IDType, p.IDValue, suffix)
+	releaseDate = resolved.ReleaseDate
+	imageTypeChar = ImageDbValue(p.Kind)
+	return badges, cacheKey, cachePath, releaseDate, imageTypeChar, err
+}
+
+// renderSuffix builds the settings+ratings cache suffix for the given badges.
+// It is ID-independent, so it can be reused for alternate-ID cache keys.
+func (p ServeParams) renderSuffix(badges []services.RatingBadge) string {
 	ratingsSuffix := services.BadgesCacheSuffix(badges)
-	suffix := services.SettingsCacheSuffixWithRatings(settings, kind, imageSizeStr, ratingsSuffix)
+	return services.SettingsCacheSuffixWithRatings(p.Settings, p.Kind, p.ImageSizeStr, ratingsSuffix)
+}
 
-	fanartPrimary := settings.ImageSource.IsFanart() && fanart != nil
-	variant := cacheVariant(kind, settings, fanartPrimary)
-
+// cacheKeyFor computes the cache key and path for a specific ID form using
+// the request's variant and suffix (both ID-independent).
+func (p ServeParams) cacheKeyFor(idType, idValue, suffix string) (cacheKey, cachePath string, err error) {
+	fanartPrimary := p.Settings.ImageSource.IsFanart() && p.Fanart != nil
+	variant := cacheVariant(p.Kind, p.Settings, fanartPrimary)
 	cacheValue := idValue + variant + suffix
-	cacheKey := idTypeStr + "/" + cacheValue
-	cachePath, err := services.TypedCachePath(cacheDir, ImageSubdir(kind), idTypeStr, cacheValue, ImageExt(kind))
-	if err != nil {
-		return nil, "", err
-	}
+	cacheKey = idType + "/" + cacheValue
+	cachePath, err = services.TypedCachePath(p.CacheDir, services.ImageSubdir(p.Kind), idType, cacheValue, services.ImageExt(p.Kind))
+	return cacheKey, cachePath, err
+}
 
-	// Serve from the in-memory cache first (fast path; works even with
-	// external_cache_only, mirroring the Rust image_mem_cache).
-	if caches.ImageMem != nil {
-		if v, ok := caches.ImageMem.Get(cacheKey); ok {
-			slog.Debug("image mem cache hit", "kind", kind, "cache_key", cacheKey)
-			return v.([]byte), contentType, nil
-		}
-	}
-
-	// Serve from filesystem cache if present and fresh.
-	releaseDate := resolved.ReleaseDate
-	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), ratingsMinStaleSecs, ratingsMaxAgeSecs)
-	if !externalCacheOnly {
-		if entry, err := services.ReadCache(cachePath, staleSecs); err == nil && !entry.IsStale {
-			slog.Debug("image cache hit", "kind", kind, "cache_key", cacheKey)
-			if caches.ImageMem != nil {
-				caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
-			}
-			return entry.Bytes, contentType, nil
-		}
-	}
-
+// renderArtwork fetches the base artwork, renders badges onto it, and persists
+// the result (in-memory + filesystem + metadata, plus cross-ID copies). It is
+// the coalescable unit: concurrent requests for the same cache key share one
+// run via the inflight set.
+func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, imageSize services.ImageSize) ([]byte, error) {
 	// Fetch the base artwork (TMDB primary, fanart optional).
 	var imageBytes []byte
-	if fanartPrimary {
-		imageBytes = fetchFanartArtwork(fanart, tmdb, resolved, kind, settings, cacheDir, externalCacheOnly)
+	if p.Settings.ImageSource.IsFanart() && p.Fanart != nil {
+		imageBytes = fetchFanartArtworkCtx(p.Context, p.Fanart, p.TMDB, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
 	}
 	if imageBytes == nil {
-		imageBytes, err = fetchTmdbArtwork(tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
+		var err error
+		imageBytes, err = fetchTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, p.Settings, imageSize)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 	}
 	if imageBytes == nil {
-		slog.Warn("no artwork available", "kind", kind, "id", idTypeStr+"/"+idValue)
-		return nil, "", apperr.NewIDNotFound("no " + kind + " artwork available for this title")
+		slog.Warn("no artwork available", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
+		return nil, apperr.NewIDNotFound("no " + p.Kind + " artwork available for this title")
 	}
 
 	// Render badges onto the artwork.
-	rendered, err := GenerateImage(imageBytes, badges, settings, kind, quality, &imageSize)
+	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
 	if err != nil {
-		return nil, "", apperr.NewImageError(err)
+		return nil, apperr.NewImageError(err)
 	}
 
 	// Persist: in-memory + filesystem + metadata DB.
-	if caches.ImageMem != nil {
-		caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
+	if p.Caches.ImageMem != nil {
+		p.Caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
 	}
-	if !externalCacheOnly {
+	if !p.ExternalCacheOnly {
 		if err := services.WriteCache(cachePath, rendered); err != nil {
 			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)
 		}
 	}
-	if err := services.UpsertImageMeta(db, cacheKey, releaseDate, imageTypeChar); err != nil {
+	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar); err != nil {
 		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
 	}
 
-	slog.Debug("image generated", "kind", kind, "cache_key", cacheKey, "badges", len(badges))
-	return rendered, contentType, nil
+	// Cross-ID cache writes (fire-and-forget, logged on failure).
+	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
+
+	return rendered, nil
 }
 
-// cacheVariant builds the language/source variant token that distinguishes the
-// artwork source (and language) within a cache key. Empty for the poster
-// default case so existing default cache keys stay stable.
+// refreshStale regenerates a stale cache entry in the background with fresh
+// ratings. Guarded by the inflight set so concurrent stale requests for the
+// same key trigger only one regeneration. Best-effort: failures are logged.
+//
+// Runs with an independent background context so the work outlives the client
+// request that triggered it (this is server-side cache maintenance, not part
+// of the user's response).
+func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize) {
+	bgParams := p
+	bgParams.Context = context.Background()
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := bgParams.prepareRender(resolved)
+	if err != nil {
+		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
+		return
+	}
+	render := func() ([]byte, error) {
+		return bgParams.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+	}
+	var renderErr error
+	if p.Inflight != nil {
+		_, renderErr = p.Inflight.RunCoalesced(cacheKey, render)
+	} else {
+		_, renderErr = render()
+	}
+	if renderErr != nil {
+		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", renderErr)
+	}
+}
+
 func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary bool) string {
 	switch kind {
 	case "poster":
@@ -605,9 +630,9 @@ func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary 
 	return ""
 }
 
-// fetchTmdbArtwork downloads the base artwork for the given kind from TMDB,
+// fetchTmdbArtworkCtx downloads the base artwork for the given kind from TMDB,
 // preferring the on-disk base cache. Returns nil bytes when no artwork exists.
-func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
+func fetchTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
 	tmdbSize := imageSize.TmdbSize()
 
 	var filePath string
@@ -631,7 +656,7 @@ func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheO
 			lang = ""
 		}
 		textless := settings.Textless && kind == "poster"
-		images, err := tmdb.GetImages(mediaType, resolved.TMDbID, lang)
+		images, err := tmdb.GetImagesCtx(ctx, mediaType, resolved.TMDbID, lang)
 		if err != nil {
 			return nil, err
 		}
@@ -660,7 +685,7 @@ func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheO
 	}
 
 	if externalCacheOnly {
-		return tmdb.FetchPosterBytes(filePath, tmdbSize)
+		return tmdb.FetchPosterBytesCtx(ctx, filePath, tmdbSize)
 	}
 
 	basePath, err := services.BasePosterPath(cacheDir, filePath, tmdbSize)
@@ -670,7 +695,7 @@ func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheO
 	if entry, err := services.ReadCache(basePath, imageStaleSecs); err == nil {
 		return entry.Bytes, nil
 	}
-	bytes, err := tmdb.FetchPosterBytes(filePath, tmdbSize)
+	bytes, err := tmdb.FetchPosterBytesCtx(ctx, filePath, tmdbSize)
 	if err != nil {
 		return nil, err
 	}
@@ -680,10 +705,16 @@ func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheO
 	return bytes, nil
 }
 
-// fetchFanartArtwork downloads the base artwork from fanart.tv when the
+// fetchTmdbArtwork downloads the base artwork for the given kind from TMDB,
+// preferring the on-disk base cache. Returns nil bytes when no artwork exists.
+func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
+	return fetchTmdbArtworkCtx(context.Background(), tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
+}
+
+// fetchFanartArtworkCtx downloads the base artwork from fanart.tv when the
 // user's image source is fanart. Returns nil bytes when unavailable so the
 // caller falls through to TMDB.
-func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
+func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
 	if kind == "episode" {
 		return nil
 	}
@@ -692,13 +723,13 @@ func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient
 	var err error
 	switch resolved.MediaType {
 	case services.MediaTypeMovie:
-		images, err = fanart.GetMovieImages(resolved.TMDbID)
+		images, err = fanart.GetMovieImagesCtx(ctx, resolved.TMDbID)
 	default:
 		tvID := resolved.TMDbID
 		if resolved.TVDBID != nil && *resolved.TVDBID != 0 {
 			tvID = *resolved.TVDBID
 		}
-		images, err = fanart.GetTVImages(tvID)
+		images, err = fanart.GetTVImagesCtx(ctx, tvID)
 	}
 	if err != nil || images == nil {
 		return nil
@@ -723,22 +754,33 @@ func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient
 	}
 
 	if !externalCacheOnly {
-		if basePath, err := services.BaseFanartPath(cacheDir, selected.ID, ImageExt(kind)); err == nil {
+		if basePath, err := services.BaseFanartPath(cacheDir, selected.ID, services.ImageExt(kind)); err == nil {
 			if entry, err := services.ReadCache(basePath, 0); err == nil {
 				return entry.Bytes
 			}
-			if bytes, err := fanart.FetchPosterBytes(selected.URL); err == nil {
-				_ = services.WriteCache(basePath, bytes)
+			if bytes, err := fanart.FetchPosterBytesCtx(ctx, selected.URL); err == nil {
+				// Fire-and-forget cache write — log on failure but don't block the
+				// refresh; the bytes are already returned to the caller.
+				if err := services.WriteCache(basePath, bytes); err != nil {
+					slog.Warn("fanart cache write failed", "base_path", basePath, "error", err)
+				}
 				return bytes
 			}
 			return nil
 		}
 	}
-	bytes, err := fanart.FetchPosterBytes(selected.URL)
+	bytes, err := fanart.FetchPosterBytesCtx(ctx, selected.URL)
 	if err != nil {
 		return nil
 	}
 	return bytes
+}
+
+// fetchFanartArtwork downloads the base artwork from fanart.tv when the
+// user's image source is fanart. Returns nil bytes when unavailable so the
+// caller falls through to TMDB.
+func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
+	return fetchFanartArtworkCtx(context.Background(), fanart, tmdb, resolved, kind, settings, cacheDir, externalCacheOnly)
 }
 
 func derefStr(s *string) string {
@@ -758,16 +800,21 @@ const DemoEpisodeID = "episode-tt12637874-S1E1"
 // base cache and returns an error when TMDB is unavailable or no artwork
 // exists for the kind.
 func DemoArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, kind string, imageSize services.ImageSize) ([]byte, error) {
+	return DemoArtworkCtx(context.Background(), tmdb, cacheDir, externalCacheOnly, imageStaleSecs, kind, imageSize)
+}
+
+// DemoArtworkCtx is the context-aware form of DemoArtwork.
+func DemoArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, kind string, imageSize services.ImageSize) ([]byte, error) {
 	idValue := DemoIMDBID
 	if kind == "episode" {
 		idValue = DemoEpisodeID
 	}
-	resolved, err := services.ResolveID(services.IDTypeIMDB, idValue, tmdb)
+	resolved, err := services.ResolveIDCtx(ctx, services.IDTypeIMDB, idValue, tmdb)
 	if err != nil {
 		return nil, err
 	}
 	settings := &services.RenderSettings{Lang: "en", Textless: false}
-	bytes, err := fetchTmdbArtwork(tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
+	bytes, err := fetchTmdbArtworkCtx(ctx, tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -783,8 +830,4 @@ func badgeSourceString(badges []services.RatingBadge) string {
 		keys[i] = b.Source.Key
 	}
 	return strings.Join(keys, ",")
-}
-
-func RenderImageWithFont(imageBytes []byte, badges []services.RatingBadge, settings *services.RenderSettings, kind string, quality uint8, imageSize *services.ImageSize, fontData []byte) ([]byte, error) {
-	return GenerateImage(imageBytes, badges, settings, kind, quality, imageSize)
 }

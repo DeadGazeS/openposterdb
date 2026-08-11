@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { adminApi } from '@/lib/api'
+import { okOrThrow } from '@/lib/api-error'
 import RefreshButton from '@/components/RefreshButton.vue'
 import ClearCacheButton from '@/components/ClearCacheButton.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,11 +19,7 @@ interface Stats {
 
 const { data: stats, isPending, refetch } = useQuery<Stats>({
   queryKey: ['admin', 'stats'],
-  queryFn: async () => {
-    const res = await adminApi.getStats()
-    if (!res.ok) throw new Error('Failed to fetch stats')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<Stats>(await adminApi.getStats(), 'Failed to fetch stats'),
 })
 
 // True only while a user-initiated Refresh click is in flight — the query's
@@ -47,6 +44,14 @@ const cards = [
   { key: 'image_mem_cache_mb', label: 'Image Cache (MB)' },
 ] as const
 
+type CardKey = (typeof cards)[number]['key']
+
+function formatStatValue(key: CardKey, value: number | undefined): string {
+  if (value == null) return '—'
+  if (key === 'image_mem_cache_mb') return value.toFixed(2)
+  return String(value)
+}
+
 const clearMessage = ref('')
 function onCleared(message: string) {
   clearMessage.value = message
@@ -68,7 +73,7 @@ function onCleared(message: string) {
       </CardHeader>
       <CardContent>
         <Skeleton v-if="isPending" class="h-8 w-20" />
-        <p v-else class="text-2xl font-bold">{{ stats?.[card.key] ?? '—' }}</p>
+        <p v-else class="text-2xl font-bold">{{ formatStatValue(card.key, stats?.[card.key]) }}</p>
       </CardContent>
     </Card>
     </div>

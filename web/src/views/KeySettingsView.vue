@@ -2,11 +2,13 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { selfApi, type SaveSettingsPayload } from '@/lib/api'
+import { selfApi } from '@/lib/api'
+import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
-import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
+import type { RenderSettings } from '@/lib/settings'
 import { Button } from '@/components/ui/button'
 import { BookOpen } from 'lucide-vue-next'
+import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -16,6 +18,18 @@ const keyPrefix = ref('')
 const settings = ref<RenderSettings | null>(null)
 const settingsLoading = ref(true)
 const initError = ref('')
+
+// Shared load/save/reset pattern — mirrors SettingsView's wire-up via the
+// same composable. The onLoad hook keeps the local `settings` ref in sync
+// so RenderSettingsForm reflects the freshly-fetched data immediately.
+const { loadSettings, saveSettings, resetSettings } = useRenderSettingsForm<SaveSettingsPayload>({
+  api: {
+    load: () => selfApi.getSettings(),
+    save: (p) => selfApi.updateSettings(p),
+    reset: () => selfApi.resetSettings(),
+  },
+  onLoad: (data) => { settings.value = data },
+})
 
 onMounted(async () => {
   try {
@@ -42,32 +56,6 @@ onMounted(async () => {
     settingsLoading.value = false
   }
 })
-
-async function loadSettings(): Promise<RenderSettings | null> {
-  try {
-    const res = await selfApi.getSettings()
-    if (res.ok) {
-      const data: RenderSettings = await res.json()
-      settings.value = data
-      return data
-    }
-  } catch {
-    // handled by form
-  }
-  return null
-}
-
-async function saveSettings(s: SaveSettingsPayload): Promise<string | null> {
-  const res = await selfApi.updateSettings(s)
-  if (res.ok) return null
-  const data = await res.json().catch(() => null)
-  return data?.error || 'Failed to save'
-}
-
-async function resetSettings(): Promise<boolean> {
-  const res = await selfApi.resetSettings()
-  return res.ok
-}
 
 function handleLogout() {
   auth.logoutApiKey()
@@ -105,11 +93,8 @@ function handleLogout() {
           :load-settings="loadSettings"
           :save-settings="saveSettings"
           :reset-settings="resetSettings"
-          :fetch-preview="selfApi.previewPoster"
-          :fetch-logo-preview="selfApi.previewLogo"
-          :fetch-backdrop-preview="selfApi.previewBackdrop"
-          :fetch-episode-preview="selfApi.previewEpisode"
-        />
+          :fetch-preview="selfApi.preview"
+                                      />
       </div>
     </div>
   </main>

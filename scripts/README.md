@@ -1,40 +1,12 @@
 # Scripts
 
-Utility scripts for developing, testing, releasing, and seeding OpenPosterDB.
-
-## dev-worktree.sh
-
-Prepares a freshly created git worktree for local development and runs it. A new
-worktree is missing all the gitignored bits the app needs (`api/.env`, `api/db`,
-`api/cache`, `web/node_modules`); this gets one runnable in a single command.
-
-```bash
-./scripts/dev-worktree.sh              # set up (if needed) then run API + web
-./scripts/dev-worktree.sh --fresh      # also wipe api/db + api/cache first
-./scripts/dev-worktree.sh --release    # build/run the API in release mode
-./scripts/dev-worktree.sh --setup-only # copy env + install deps, don't run
-```
-
-Run it from inside the worktree you want to set up (any subdirectory is fine).
-
-### What it does
-
-1. Copies `api/.env` from the **main** worktree if the current worktree lacks one (never overwrites an existing one).
-2. With `--fresh`, deletes the current worktree's `api/db` and `api/cache` for a clean slate before running. In the **main** worktree this would wipe your primary data, so it asks for confirmation first (or pass `--yes`); in a linked worktree it wipes without asking.
-3. Installs web dependencies (`npm ci`, falling back to `npm install`) if `web/node_modules` is missing.
-4. Runs the Rust API (`cargo run` in `api/`, on `http://localhost:3000`) and the Vite dev server (`npm run dev` in `web/`, usually `http://localhost:5173`) together. Press Ctrl+C — or let either process exit — to stop both.
-
-> The dev UI is served by Vite over plain HTTP at `http://localhost:5173`. If login
-> appears broken, add `COOKIE_SECURE=false` to `api/.env` (see the main README) —
-> otherwise the browser drops the auth cookie.
-
----
+Utility scripts for testing, seeding, and regenerating example images for OpenPosterDB.
 
 ## seed.sh
 
 Warms the OpenPosterDB cache by requesting posters for titles from the IMDB dataset. Entries are processed newest-first, using `endYear` for series (if available) and `startYear` otherwise.
 
-Requires `title.basics.tsv` in the scripts directory. Download it from <https://datasets.imdbws.com/title.basics.tsv.gz> and extract.
+Requires `title.basics.tsv` in the scripts directory — download it from <https://datasets.imdbws.com/title.basics.tsv.gz> and extract it (it is not committed to git).
 
 ```bash
 ./scripts/seed.sh <BASE_URL> [OPTIONS]
@@ -71,22 +43,11 @@ Requires `title.basics.tsv` in the scripts directory. Download it from <https://
 
 # Seed 100k movies + 100k series in one run
 ./scripts/seed.sh http://localhost:3000 -N 100000
-
-
 ```
-
-### Data files
-
-| File | Description |
-|------|-------------|
-| `title.basics.tsv` | Extracted IMDB dataset used by the seed script. Not committed to git. |
-| `imdb_ids.txt` | Plain list of all IMDB IDs (one per line, sorted). |
-
----
 
 ## test.sh
 
-Runs the full test suite: backend (Rust), frontend unit tests (Vitest), and end-to-end tests (Playwright).
+Runs the full test suite: backend (Go), frontend unit tests (Vitest), Playwright E2E tests, and generates a visual HTML report of all image permutations.
 
 ```bash
 ./scripts/test.sh
@@ -94,49 +55,16 @@ Runs the full test suite: backend (Rust), frontend unit tests (Vitest), and end-
 
 ### What it does
 
-1. Runs `cargo test` in `api/`
+1. Runs `go test ./...` in `api-go/`
 2. Runs `npx vitest run` in `web/`
-3. Builds a container image with the `test-support` feature flag
-4. Starts the container on port `3333`, loading API keys from `api/.env`
+3. Builds the container image (Dockerfile)
+4. Starts the container on port `3333`, loading API keys from `.env`
 5. Waits for the backend to become healthy (up to 60s)
-6. Runs Playwright E2E tests (`setup`, `settings`, `chromium`, `live` projects)
-7. Tears down the container on exit
+6. Runs `scripts/visual-report.sh` against the running container
+7. Runs Playwright E2E tests (`setup`, `settings`, `chromium`, `live` projects)
+8. Tears down the container on exit
 
 Requires either `podman` or `docker`.
-
----
-
-## release.sh
-
-Creates a new tagged release and pushes it to GitHub.
-
-```bash
-./scripts/release.sh <VERSION>
-./scripts/release.sh repair
-```
-
-### Create a release
-
-```bash
-./scripts/release.sh 1.0.0
-```
-
-1. Checks that the working tree is clean
-2. Updates the version in `api/Cargo.toml` and `web/package.json`
-3. Updates `Cargo.lock` and `package-lock.json`
-4. Commits, pushes to `main`, and creates a GitHub release with auto-generated notes
-
-The `v` prefix is added automatically — pass `1.0.0`, not `v1.0.0`.
-
-### Repair a release
-
-```bash
-./scripts/release.sh repair
-```
-
-Re-triggers the release workflow for the most recent tag by deleting and recreating the GitHub release. Useful when CI failed on the initial release.
-
----
 
 ## regenerate-examples.sh
 
@@ -157,3 +85,11 @@ Defaults to `http://localhost:3000`. Uses the free API key. Fetches assets for:
 - The General (`tt0017925`)
 
 Logos and backdrops that aren't available are silently skipped.
+
+## visual-report.sh
+
+Generates an HTML visual report of all image permutations (image sizes, badge styles, shapes, label styles, text/badge/logo sizes) into `test-report/`. Expects a running instance on port 3333 (e.g. the container started by `test.sh`) and uses the free API key.
+
+```bash
+./scripts/visual-report.sh
+```

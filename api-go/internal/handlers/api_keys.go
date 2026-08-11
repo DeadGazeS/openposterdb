@@ -1,25 +1,27 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 
+	"openposterdb/internal/httpx"
 	"openposterdb/internal/services"
 )
 
 func HandleListKeys(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
-		keys, err := services.ListAPIKeys(db)
+		keys, err := services.ListAPIKeysCtx(r.Context(), db)
 		if err != nil {
-			writeError(w, 500, "Failed to list keys")
+			httpx.WriteError(w, 500, "Failed to list keys")
 			return
 		}
 
@@ -42,35 +44,39 @@ func HandleListKeys(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, 200, result)
+		httpx.WriteJSON(w, 200, result)
 	}
 }
 
 func HandleCreateKey(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		var body struct {
 			Name string `json:"name"`
 		}
-		if err := decodeJSONBody(r, &body); err != nil || body.Name == "" {
-			writeError(w, 400, "name is required")
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.WriteError(w, 400, "invalid request body")
+			return
+		}
+		if err := services.ValidateAPIKeyName(body.Name); err != nil {
+			httpx.WriteError(w, 400, err.Error())
 			return
 		}
 
-		raw, hash, prefix := GenerateAPIKey()
+		raw, hash, prefix := services.GenerateAPIKey()
 
 		var createdBy int64 = 1
-		id, err := services.CreateAPIKey(db, body.Name, hash, prefix, createdBy)
+		id, err := services.CreateAPIKeyCtx(r.Context(), db, body.Name, hash, prefix, createdBy)
 		if err != nil {
-			writeError(w, 500, "Failed to create key")
+			httpx.WriteError(w, 500, "Failed to create key")
 			return
 		}
 
-		writeJSON(w, 201, map[string]interface{}{
+		httpx.WriteJSON(w, 201, map[string]any{
 			"id":         id,
 			"name":       body.Name,
 			"key":        raw,
@@ -82,23 +88,23 @@ func HandleCreateKey(db *sql.DB) http.HandlerFunc {
 func HandleDeleteKey(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		idStr := r.PathValue("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			writeError(w, 400, "invalid id")
+			httpx.WriteError(w, 400, "invalid id")
 			return
 		}
 
-		if err := services.DeleteAPIKey(db, id); err != nil {
-			writeError(w, 500, "Failed to delete key")
+		if err := services.DeleteAPIKeyCtx(r.Context(), db, id); err != nil {
+			httpx.WriteError(w, 500, "Failed to delete key")
 			return
 		}
 
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}
 }
 
@@ -113,18 +119,18 @@ type perKeySettingsResponse struct {
 func HandleGetKeySettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		idStr := r.PathValue("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			writeError(w, 400, "invalid id")
+			httpx.WriteError(w, 400, "invalid id")
 			return
 		}
 
-		settings := services.GetEffectiveRenderSettings(db, id, nil)
+		settings := services.GetEffectiveRenderSettingsCtx(r.Context(), db, id, nil)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
@@ -207,8 +213,8 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 // settings row. The JSON tags align between the two structs, and
 // APIKeySettings' UnmarshalJSON normalises the layout objects to their stored
 // JSON-string form.
-func apiKeySettingsFromEffective(db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
-	eff := services.GetEffectiveRenderSettings(db, apiKeyID, nil)
+func apiKeySettingsFromEffective(ctx context.Context, db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
+	eff := services.GetEffectiveRenderSettingsCtx(ctx, db, apiKeyID, nil)
 	data, err := json.Marshal(&eff)
 	if err != nil {
 		return nil, err
@@ -223,13 +229,13 @@ func apiKeySettingsFromEffective(db *sql.DB, apiKeyID int64) (*services.APIKeySe
 // loadKeySettingsBase returns the stored settings row for a key, or the
 // effective (globals-derived) defaults when no row exists yet, so omitted
 // optional fields on a first save get meaningful values instead of zeroes.
-func loadKeySettingsBase(db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
-	base, err := services.GetAPIKeySettings(db, apiKeyID)
+func loadKeySettingsBase(ctx context.Context, db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
+	base, err := services.GetAPIKeySettingsCtx(ctx, db, apiKeyID)
 	if err != nil {
 		return nil, err
 	}
 	if base == nil {
-		return apiKeySettingsFromEffective(db, apiKeyID)
+		return apiKeySettingsFromEffective(ctx, db, apiKeyID)
 	}
 	return base, nil
 }
@@ -383,85 +389,85 @@ func validateAndNormalizeKeySettings(s *services.APIKeySettings) error {
 func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		idStr := r.PathValue("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			writeError(w, 400, "invalid id")
+			httpx.WriteError(w, 400, "invalid id")
 			return
 		}
 
 		var body keySettingsUpdate
-		if err := decodeJSONBody(r, &body); err != nil {
-			writeError(w, 400, "invalid JSON")
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
-		base, err := loadKeySettingsBase(db, id)
+		base, err := loadKeySettingsBase(r.Context(), db, id)
 		if err != nil {
-			writeError(w, 500, "Failed to load settings")
+			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
 		merged := mergeKeySettingsUpdate(base, &body)
 		merged.APIKeyID = id
 		if err := validateAndNormalizeKeySettings(&merged); err != nil {
-			writeError(w, 400, err.Error())
+			httpx.WriteError(w, 400, err.Error())
 			return
 		}
-		if err := services.UpsertAPIKeySettings(db, &merged); err != nil {
-			writeError(w, 500, "Failed to update settings")
+		if err := services.UpsertAPIKeySettingsCtx(r.Context(), db, &merged); err != nil {
+			httpx.WriteError(w, 500, "Failed to update settings")
 			return
 		}
 
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}
 }
 
 func HandleResetKeySettings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		idStr := r.PathValue("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			writeError(w, 400, "invalid id")
+			httpx.WriteError(w, 400, "invalid id")
 			return
 		}
 
-		if err := services.DeleteAPIKeySettings(db, id); err != nil {
-			writeError(w, 500, "Failed to reset settings")
+		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, id); err != nil {
+			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
 
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}
 }
 
 func HandleSelfKeyInfo(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		apiUser := GetAPIKeyUser(r)
 		if apiUser == nil {
-			writeError(w, 401, "Unauthorized")
+			httpx.WriteError(w, 401, "Unauthorized")
 			return
 		}
 
-		k, err := services.FindAPIKeyByID(db, apiUser.KeyID)
+		k, err := services.FindAPIKeyByIDCtx(r.Context(), db, apiUser.KeyID)
 		if err != nil || k == nil {
-			writeError(w, 404, "Not found")
+			httpx.WriteError(w, 404, "Not found")
 			return
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"name":       k.Name,
 			"key_prefix": k.KeyPrefix,
 		})
@@ -471,17 +477,17 @@ func HandleSelfKeyInfo(db *sql.DB) http.HandlerFunc {
 func HandleSelfSettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		apiUser := GetAPIKeyUser(r)
 		if apiUser == nil {
-			writeError(w, 401, "Unauthorized")
+			httpx.WriteError(w, 401, "Unauthorized")
 			return
 		}
 
-		settings := services.GetEffectiveRenderSettings(db, apiUser.KeyID, nil)
+		settings := services.GetEffectiveRenderSettingsCtx(r.Context(), db, apiUser.KeyID, nil)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
@@ -490,59 +496,59 @@ func HandleSelfSettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		apiUser := GetAPIKeyUser(r)
 		if apiUser == nil {
-			writeError(w, 401, "Unauthorized")
+			httpx.WriteError(w, 401, "Unauthorized")
 			return
 		}
 
 		var body keySettingsUpdate
-		if err := decodeJSONBody(r, &body); err != nil {
-			writeError(w, 400, "invalid JSON")
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
-		base, err := loadKeySettingsBase(db, apiUser.KeyID)
+		base, err := loadKeySettingsBase(r.Context(), db, apiUser.KeyID)
 		if err != nil {
-			writeError(w, 500, "Failed to load settings")
+			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
 		merged := mergeKeySettingsUpdate(base, &body)
 		merged.APIKeyID = apiUser.KeyID
 		if err := validateAndNormalizeKeySettings(&merged); err != nil {
-			writeError(w, 400, err.Error())
+			httpx.WriteError(w, 400, err.Error())
 			return
 		}
-		if err := services.UpsertAPIKeySettings(db, &merged); err != nil {
-			writeError(w, 500, "Failed to update settings")
+		if err := services.UpsertAPIKeySettingsCtx(r.Context(), db, &merged); err != nil {
+			httpx.WriteError(w, 500, "Failed to update settings")
 			return
 		}
 
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}
 }
 
 func HandleResetSelfSettings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		apiUser := GetAPIKeyUser(r)
 		if apiUser == nil {
-			writeError(w, 401, "Unauthorized")
+			httpx.WriteError(w, 401, "Unauthorized")
 			return
 		}
 
-		if err := services.DeleteAPIKeySettings(db, apiUser.KeyID); err != nil {
-			writeError(w, 500, "Failed to reset settings")
+		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, apiUser.KeyID); err != nil {
+			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
 
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}
 }

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -15,6 +16,8 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/hkdf"
+
+	apperr "openposterdb/internal/errors"
 )
 
 func deriveCipherKey(jwtSecret []byte) []byte {
@@ -53,10 +56,7 @@ func decrypt(encrypted string, gcm cipher.AEAD) (string, error) {
 }
 
 func MaskKey(key string) string {
-	n := len(key) / 4
-	if n > 4 {
-		n = 4
-	}
+	n := min(len(key)/4, 4)
 	if n == 0 {
 		return "****"
 	}
@@ -70,6 +70,10 @@ func MaskKey(key string) string {
 	for i, j := 0, len(revSuf)-1; i < j; i, j = i+1, j-1 {
 		revSuf[i], revSuf[j] = revSuf[j], revSuf[i]
 	}
+
+
+
+
 	return fmt.Sprintf("%s...%s", prefix, string(revSuf))
 }
 
@@ -202,7 +206,7 @@ func (m *ServiceKeyManager) loadFromDB(service string) *[]string {
 		return nil
 	}
 	var keys []string
-	for _, k := range strings.Split(plain, ",") {
+	for k := range strings.SplitSeq(plain, ",") {
 		k = strings.TrimSpace(k)
 		if k != "" {
 			keys = append(keys, k)
@@ -363,7 +367,7 @@ func (m *ServiceKeyManager) storeKey(service, value string) error {
 
 func parseKeys(keys string) []string {
 	var result []string
-	for _, k := range strings.Split(keys, ",") {
+	for k := range strings.SplitSeq(keys, ",") {
 		k = strings.TrimSpace(k)
 		if k != "" {
 			result = append(result, k)
@@ -377,12 +381,12 @@ func ParseServiceKeys(keys string) []string {
 	return parseKeys(keys)
 }
 
-// ValidateServiceKeyString validates a comma-separated service key value before
+// ValidateServiceKeyStringCtx validates a comma-separated service key value before
 // saving it. It rejects clearly-malformed input (empty entries when a value was
 // provided, duplicates, whitespace garbage) and performs a live check against
 // the provider for a definitive answer. Network/provider errors and rate limits
 // are tolerated (the key is accepted) — only a clear 401/403 rejects the key.
-func ValidateServiceKeyString(service, value string, httpClient *http.Client) error {
+func ValidateServiceKeyStringCtx(ctx context.Context, service, value string, httpClient *http.Client) error {
 	rawKeys := parseKeys(value)
 	if len(rawKeys) == 0 {
 		if strings.TrimSpace(value) == "" {
@@ -400,17 +404,26 @@ func ValidateServiceKeyString(service, value string, httpClient *http.Client) er
 			return fmt.Errorf("duplicate key: %s", MaskKey(k))
 		}
 		seen[k] = true
-		if err := ValidateServiceKey(service, k, httpClient); err != nil {
+		if err := ValidateServiceKeyCtx(ctx, service, k, httpClient); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ValidateServiceKey performs a live check against the provider for a single key.
+// ValidateServiceKeyString validates a comma-separated service key value before
+// saving it. It rejects clearly-malformed input (empty entries when a value was
+// provided, duplicates, whitespace garbage) and performs a live check against
+// the provider for a definitive answer. Network/provider errors and rate limits
+// are tolerated (the key is accepted) — only a clear 401/403 rejects the key.
+func ValidateServiceKeyString(service, value string, httpClient *http.Client) error {
+	return ValidateServiceKeyStringCtx(context.Background(), service, value, httpClient)
+}
+
+// ValidateServiceKeyCtx performs a live check against the provider for a single key.
 // Only a definitive 401/403 is treated as invalid; network errors, 5xx, and rate
 // limits are tolerated so flaky providers don't block saving a good key.
-func ValidateServiceKey(service, key string, httpClient *http.Client) error {
+func ValidateServiceKeyCtx(ctx context.Context, service, key string, httpClient *http.Client) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
@@ -421,28 +434,35 @@ func ValidateServiceKey(service, key string, httpClient *http.Client) error {
 
 	switch service {
 	case "tmdb":
-		return checkProviderURL(httpClient, "https://api.themoviedb.org/3/configuration?api_key="+key, "TMDB")
+		return checkProviderURLCtx(ctx, httpClient, "https://api.themoviedb.org/3/configuration?api_key="+key, "TMDB")
 	case "omdb":
-		return checkProviderURL(httpClient, "https://www.omdbapi.com/?apikey="+key+"&i=tt3896198", "OMDb")
+		return checkProviderURLCtx(ctx, httpClient, "https://www.omdbapi.com/?apikey="+key+"&i=tt3896198", "OMDb")
 	case "mdblist":
-		return checkProviderURL(httpClient, "https://api.mdblist.com/tmdb/movie/1?apikey="+key, "MDBList")
+		return checkProviderURLCtx(ctx, httpClient, "https://api.mdblist.com/tmdb/movie/1?apikey="+key, "MDBList")
 	case "fanart":
-		return checkProviderURL(httpClient, "https://webservice.fanart.tv/v3/movies/550?api_key="+key, "Fanart.tv")
+		return checkProviderURLCtx(ctx, httpClient, "https://webservice.fanart.tv/v3/movies/550?api_key="+key, "Fanart.tv")
 	case "trakt":
-		return checkTraktClientID(httpClient, key)
+		return checkTraktClientIDCtx(ctx, httpClient, key)
 	}
 	return nil
 }
 
-func checkProviderURL(httpClient *http.Client, url, service string) error {
-	req, err := http.NewRequest("GET", url, nil)
+// ValidateServiceKey performs a live check against the provider for a single key.
+// Only a definitive 401/403 is treated as invalid; network errors, 5xx, and rate
+// limits are tolerated so flaky providers don't block saving a good key.
+func ValidateServiceKey(service, key string, httpClient *http.Client) error {
+	return ValidateServiceKeyCtx(context.Background(), service, key, httpClient)
+}
+
+func checkProviderURLCtx(ctx context.Context, httpClient *http.Client, url, service string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil
 	}
 	req.Header.Set("User-Agent", "openposterdb/1.2.1")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		slog.Warn("service key validation request failed", "service", service, "error", err)
+		slog.Warn("service key validation request failed", "service", service, "error", apperr.RedactURLSecrets(err))
 		return nil
 	}
 	defer resp.Body.Close()
@@ -454,8 +474,12 @@ func checkProviderURL(httpClient *http.Client, url, service string) error {
 	return nil
 }
 
-func checkTraktClientID(httpClient *http.Client, clientID string) error {
-	req, err := http.NewRequest("GET", "https://api.trakt.tv/movies/tt3896198", nil)
+func checkProviderURL(httpClient *http.Client, url, service string) error {
+	return checkProviderURLCtx(context.Background(), httpClient, url, service)
+}
+
+func checkTraktClientIDCtx(ctx context.Context, httpClient *http.Client, clientID string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.trakt.tv/movies/tt3896198", nil)
 	if err != nil {
 		return nil
 	}
@@ -474,4 +498,8 @@ func checkTraktClientID(httpClient *http.Client, clientID string) error {
 		return fmt.Errorf("invalid Client ID (HTTP %d)", resp.StatusCode)
 	}
 	return nil
+}
+
+func checkTraktClientID(httpClient *http.Client, clientID string) error {
+	return checkTraktClientIDCtx(context.Background(), httpClient, clientID)
 }

@@ -2,7 +2,7 @@ name: Build Docker Image
 
 on:
   push:
-    branches: [main, testing, rewrite]
+    branches: [main, testing, rewrite, refactor]
   workflow_dispatch:
 
 env:
@@ -51,7 +51,7 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          file: Containerfile
+          file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

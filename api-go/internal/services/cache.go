@@ -52,8 +52,8 @@ func PreviewPath(cacheDir, imageType, suffix, ext string) (string, error) {
 }
 
 type CacheEntry struct {
-	Bytes    []byte
-	IsStale  bool
+	Bytes   []byte
+	IsStale bool
 }
 
 func ReadCache(path string, staleSecs uint64) (*CacheEntry, error) {
@@ -224,61 +224,23 @@ func ComputeStaleSecs(releaseDateStr string, minStale, maxAge uint64) uint64 {
 	return minStale + filmAge*(maxAge-minStale)/maxAge
 }
 
+// dateStrToEpoch parses a "YYYY-MM-DD" release date and returns the Unix
+// timestamp (seconds since 1970-01-01 UTC), or 0 if the string is missing,
+// malformed, or before 1970. Replaces an earlier hand-rolled leap-year /
+// days-since-epoch implementation — time.Parse handles all the edge cases.
 func dateStrToEpoch(s string) uint64 {
-	if len(s) != 10 {
+	if s == "" {
 		return 0
 	}
-	var year, month, day uint64
-	if n, _ := fmt.Sscanf(s, "%d-%d-%d", &year, &month, &day); n != 3 {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
 		return 0
 	}
-	if month < 1 || month > 12 || year < 1970 {
+	u := t.Unix()
+	if u < 0 {
 		return 0
 	}
-	maxDay := maxDaysInMonth(year, month)
-	if day < 1 || day > maxDay {
-		return 0
-	}
-
-	return daysFromEpoch(year, month, day) * 86400
-}
-
-func maxDaysInMonth(year, month uint64) uint64 {
-	switch month {
-	case 1, 3, 5, 7, 8, 10, 12:
-		return 31
-	case 4, 6, 9, 11:
-		return 30
-	case 2:
-		if isLeap(year) {
-			return 29
-		}
-		return 28
-	}
-	return 0
-}
-
-func daysFromEpoch(year, month, day uint64) uint64 {
-	leapsBefore := func(y uint64) uint64 {
-		return y/4 - y/100 + y/400
-	}
-	prev := year - 1
-	daysToYear := 365*(year-1970) + leapsBefore(prev) - leapsBefore(1969)
-
-	daysInMonth := []uint64{0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
-	var monthDays uint64
-	for m := uint64(1); m < month; m++ {
-		monthDays += daysInMonth[m]
-	}
-	if month > 2 && isLeap(year) {
-		monthDays++
-	}
-
-	return daysToYear + monthDays + day - 1
-}
-
-func isLeap(y uint64) bool {
-	return (y%4 == 0 && y%100 != 0) || y%400 == 0
+	return uint64(u)
 }
 
 func ComputeCDNMaxAge(releaseDate *string, minStale, maxAge uint64) uint64 {

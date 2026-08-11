@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -114,16 +115,39 @@ type findResult struct {
 	TVEpisodeResults []episodeFindEntry `json:"tv_episode_results"`
 }
 
-func ResolveID(idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+func ResolveIDCtx(ctx context.Context, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
 	switch idType {
 	case IDTypeIMDB:
-		return resolveIMDB(idValue, tmdb)
+		return resolveIMDBCtx(ctx, idValue, tmdb)
 	case IDTypeTMDB:
-		return resolveTMDB(idValue, tmdb)
+		return resolveTMDBCtx(ctx, idValue, tmdb)
 	case IDTypeTVDB:
-		return resolveTVDB(idValue, tmdb)
+		return resolveTVDBCtx(ctx, idValue, tmdb)
 	}
 	return nil, apperr.NewInvalidIDType(idType.String())
+}
+
+func ResolveID(idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+	return ResolveIDCtx(context.Background(), idType, idValue, tmdb)
+}
+
+// ResolveIDCached resolves an ID, caching successful results in the given
+// in-memory cache (key "idtype/idvalue", matching the Rust id_cache). A nil
+// cache bypasses caching. Errors are never cached, so a transient TMDB failure
+// doesn't poison the cache.
+func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+	if cache != nil {
+		key := idType.String() + "/" + idValue
+		if v, ok := cache.Get(key); ok {
+			return v.(*ResolvedID), nil
+		}
+		resolved, err := ResolveIDCtx(ctx, idType, idValue, tmdb)
+		if err == nil {
+			cache.Set(key, resolved, 1)
+		}
+		return resolved, err
+	}
+	return ResolveIDCtx(ctx, idType, idValue, tmdb)
 }
 
 // ResolveIDCached resolves an ID, caching successful results in the given
@@ -131,33 +155,22 @@ func ResolveID(idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, er
 // cache bypasses caching. Errors are never cached, so a transient TMDB failure
 // doesn't poison the cache.
 func ResolveIDCached(cache *MemCache, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
-	if cache != nil {
-		key := idType.String() + "/" + idValue
-		if v, ok := cache.Get(key); ok {
-			return v.(*ResolvedID), nil
-		}
-		resolved, err := ResolveID(idType, idValue, tmdb)
-		if err == nil {
-			cache.Set(key, resolved, 1)
-		}
-		return resolved, err
-	}
-	return ResolveID(idType, idValue, tmdb)
+	return ResolveIDCachedCtx(context.Background(), cache, idType, idValue, tmdb)
 }
 
-func resolveIMDB(imdbID string, tmdb *TmdbClient) (*ResolvedID, error) {
+func resolveIMDBCtx(ctx context.Context, imdbID string, tmdb *TmdbClient) (*ResolvedID, error) {
 	if rest, ok := strings.CutPrefix(imdbID, "episode-"); ok {
-		return resolveIMDBEpisode(rest, imdbID, tmdb)
+		return resolveIMDBEpisodeCtx(ctx, rest, imdbID, tmdb)
 	}
 
 	var result findResult
-	if err := tmdb.Get(fmt.Sprintf("/find/%s", imdbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", imdbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
 	if len(result.TVEpisodeResults) > 0 {
 		ep := result.TVEpisodeResults[0]
-		return resolveEpisodeDetails(tmdb, ep.ShowID, ep.SeasonNumber, ep.EpisodeNumber, ep.StillPath, &imdbID)
+		return resolveEpisodeDetailsCtx(ctx, tmdb, ep.ShowID, ep.SeasonNumber, ep.EpisodeNumber, ep.StillPath, &imdbID)
 	}
 
 	bestMovie := findBestEntry(result.MovieResults)
@@ -186,9 +199,9 @@ func resolveIMDB(imdbID string, tmdb *TmdbClient) (*ResolvedID, error) {
 	return nil, apperr.NewIDNotFound(fmt.Sprintf("%s (not found on TMDB)", imdbID))
 }
 
-func resolveTMDB(idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+func resolveTMDBCtx(ctx context.Context, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
 	if rest, ok := strings.CutPrefix(idValue, "episode-"); ok {
-		return resolveTMDBEpisode(rest, idValue, tmdb)
+		return resolveTMDBEpisodeCtx(ctx, rest, idValue, tmdb)
 	}
 
 	var mediaType MediaType
@@ -234,7 +247,7 @@ func resolveTMDB(idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
 	}
 
 	var details tmdbDetails
-	if err := tmdb.Get(path, params, &details); err != nil {
+	if err := tmdb.GetCtx(ctx, path, params, &details); err != nil {
 		return nil, err
 	}
 
@@ -270,19 +283,19 @@ func resolveTMDB(idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
 	}, nil
 }
 
-func resolveTVDB(tvdbIDVal string, tmdb *TmdbClient) (*ResolvedID, error) {
+func resolveTVDBCtx(ctx context.Context, tvdbIDVal string, tmdb *TmdbClient) (*ResolvedID, error) {
 	if rest, ok := strings.CutPrefix(tvdbIDVal, "episode-"); ok {
-		return resolveTVDBEpisode(rest, tvdbIDVal, tmdb)
+		return resolveTVDBEpisodeCtx(ctx, rest, tvdbIDVal, tmdb)
 	}
 
 	var result findResult
-	if err := tmdb.Get(fmt.Sprintf("/find/%s", tvdbIDVal), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", tvdbIDVal), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
 	if len(result.TVEpisodeResults) > 0 {
 		ep := result.TVEpisodeResults[0]
-		return resolveEpisodeDetails(tmdb, ep.ShowID, ep.SeasonNumber, ep.EpisodeNumber, ep.StillPath, nil)
+		return resolveEpisodeDetailsCtx(ctx, tmdb, ep.ShowID, ep.SeasonNumber, ep.EpisodeNumber, ep.StillPath, nil)
 	}
 
 	tvdbNum, _ := strconv.ParseUint(tvdbIDVal, 10, 64)
@@ -296,7 +309,7 @@ func resolveTVDB(tvdbIDVal string, tmdb *TmdbClient) (*ResolvedID, error) {
 			PosterPath *string `json:"poster_path"`
 			FirstAir   *string `json:"first_air_date"`
 		}
-		tmdb.Get(fmt.Sprintf("/tv/%d", tv.ID), map[string]string{"append_to_response": "external_ids"}, &details)
+		tmdb.GetCtx(ctx, fmt.Sprintf("/tv/%d", tv.ID), map[string]string{"append_to_response": "external_ids"}, &details)
 
 		var imdb *string
 		if details.ExternalIDs != nil && details.ExternalIDs.IMDbID != nil {
@@ -320,7 +333,7 @@ func resolveTVDB(tvdbIDVal string, tmdb *TmdbClient) (*ResolvedID, error) {
 			PosterPath  *string `json:"poster_path"`
 			ReleaseDate *string `json:"release_date"`
 		}
-		tmdb.Get(fmt.Sprintf("/movie/%d", movie.ID), nil, &details)
+		tmdb.GetCtx(ctx, fmt.Sprintf("/movie/%d", movie.ID), nil, &details)
 
 		return &ResolvedID{
 			IMDbID:      details.IMDbID,
@@ -335,7 +348,7 @@ func resolveTVDB(tvdbIDVal string, tmdb *TmdbClient) (*ResolvedID, error) {
 	return nil, apperr.NewIDNotFound(fmt.Sprintf("%s (not found on TMDB via TVDB lookup)", tvdbIDVal))
 }
 
-func resolveEpisodeDetails(tmdb *TmdbClient, showID uint64, season, episode uint32, hintStillPath, hintIMDbID *string) (*ResolvedID, error) {
+func resolveEpisodeDetailsCtx(ctx context.Context, tmdb *TmdbClient, showID uint64, season, episode uint32, hintStillPath, hintIMDbID *string) (*ResolvedID, error) {
 	type epDetails struct {
 		StillPath   *string `json:"still_path"`
 		AirDate     *string `json:"air_date"`
@@ -347,7 +360,7 @@ func resolveEpisodeDetails(tmdb *TmdbClient, showID uint64, season, episode uint
 
 	var details epDetails
 	path := fmt.Sprintf("/tv/%d/season/%d/episode/%d", showID, season, episode)
-	if err := tmdb.Get(path, map[string]string{"append_to_response": "external_ids"}, &details); err != nil {
+	if err := tmdb.GetCtx(ctx, path, map[string]string{"append_to_response": "external_ids"}, &details); err != nil {
 		return nil, err
 	}
 
@@ -373,7 +386,7 @@ func resolveEpisodeDetails(tmdb *TmdbClient, showID uint64, season, episode uint
 		var show struct {
 			PosterPath *string `json:"poster_path"`
 		}
-		if err := tmdb.Get(fmt.Sprintf("/tv/%d", showID), nil, &show); err == nil {
+		if err := tmdb.GetCtx(ctx, fmt.Sprintf("/tv/%d", showID), nil, &show); err == nil {
 			posterPath = show.PosterPath
 		}
 	}
@@ -394,14 +407,14 @@ func resolveEpisodeDetails(tmdb *TmdbClient, showID uint64, season, episode uint
 	}, nil
 }
 
-func resolveIMDBEpisode(rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
+func resolveIMDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
 	seriesIMDbID, season, episode := parseEpisodeExternal(rest, fullID)
 	if seriesIMDbID == "" {
 		return nil, apperr.NewInvalidIDType(fullID)
 	}
 
 	var result findResult
-	if err := tmdb.Get(fmt.Sprintf("/find/%s", seriesIMDbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", seriesIMDbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
@@ -409,10 +422,10 @@ func resolveIMDBEpisode(rest, fullID string, tmdb *TmdbClient) (*ResolvedID, err
 		return nil, apperr.NewIDNotFound(fmt.Sprintf("%s (not found as a TV series on TMDB)", seriesIMDbID))
 	}
 
-	return resolveEpisodeDetails(tmdb, result.TVResults[0].ID, season, episode, nil, nil)
+	return resolveEpisodeDetailsCtx(ctx, tmdb, result.TVResults[0].ID, season, episode, nil, nil)
 }
 
-func resolveTMDBEpisode(rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
+func resolveTMDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
 	upper := strings.ToUpper(rest)
 	idx := strings.Index(upper, "-S")
 	if idx < 0 {
@@ -435,17 +448,17 @@ func resolveTMDBEpisode(rest, fullID string, tmdb *TmdbClient) (*ResolvedID, err
 	season, _ := strconv.ParseUint(seParts[0], 10, 32)
 	episode, _ := strconv.ParseUint(seParts[1], 10, 32)
 
-	return resolveEpisodeDetails(tmdb, showID, uint32(season), uint32(episode), nil, nil)
+	return resolveEpisodeDetailsCtx(ctx, tmdb, showID, uint32(season), uint32(episode), nil, nil)
 }
 
-func resolveTVDBEpisode(rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
+func resolveTVDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
 	seriesTVDBID, season, episode := parseEpisodeExternal(rest, fullID)
 	if seriesTVDBID == "" {
 		return nil, apperr.NewInvalidIDType(fullID)
 	}
 
 	var result findResult
-	if err := tmdb.Get(fmt.Sprintf("/find/%s", seriesTVDBID), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", seriesTVDBID), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
@@ -453,7 +466,7 @@ func resolveTVDBEpisode(rest, fullID string, tmdb *TmdbClient) (*ResolvedID, err
 		return nil, apperr.NewIDNotFound(fmt.Sprintf("%s (not found as a TV series on TMDB via TVDB lookup)", seriesTVDBID))
 	}
 
-	return resolveEpisodeDetails(tmdb, result.TVResults[0].ID, season, episode, nil, nil)
+	return resolveEpisodeDetailsCtx(ctx, tmdb, result.TVResults[0].ID, season, episode, nil, nil)
 }
 
 func parseEpisodeExternal(rest, idValue string) (string, uint32, uint32) {

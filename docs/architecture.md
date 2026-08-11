@@ -13,7 +13,7 @@ Internal reference for how OpenPosterDB caches and renders images. You don't nee
 
 ## Cache architecture
 
-Images are cached in three layers: in-memory (moka), filesystem, and SQLite metadata. Cache keys encode all the settings that affect the rendered output so that different configurations produce separate cached files.
+Images are cached in three layers: in-memory (MemCache), filesystem, and SQLite metadata. Cache keys encode all the settings that affect the rendered output so that different configurations produce separate cached files.
 
 ### Filesystem layout
 
@@ -33,56 +33,55 @@ Images are cached in three layers: in-memory (moka), filesystem, and SQLite meta
 
 Cache keys uniquely identify a rendered image. They are used as keys in the in-memory cache and stored in the `image_meta` SQLite table.
 
+All kinds share one shape — `{id_type}/{id_value}{variant}{suffixes}` — the suffixes are appended in a fixed per-kind order:
+
 **Poster:**
 ```
-{id_type}/{id_value}{ratings_suffix}{layout_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{fit_suffix}{size_suffix}
-```
-
-**Fanart poster:**
-```
-{id_type}/{id_value}{variant}{ratings_suffix}{layout_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{fit_suffix}{size_suffix}
+{id_type}/{id_value}{variant}{ratings}{badge_style}{label_style}{badge_direction}{layout}{text_size}{badge_size}{badge_width}{badge_height}{logo_size}{badge_shape}{badge_alpha}{fit}{image_size}{colors}
 ```
 
 **Logo:**
 ```
-{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{style_suffix}{label_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{size_suffix}
+{id_type}/{id_value}{variant}{ratings}{badge_style}{label_style}{layout}{text_size}{badge_size}{badge_width}{badge_height}{logo_size}{badge_shape}{badge_alpha}{image_size}{colors}
 ```
 
 **Backdrop:**
 ```
-{id_type}/{id_value}{kind_prefix}{variant}{ratings_suffix}{layout_suffix}{style_suffix}{label_suffix}{direction_suffix}{text_size_suffix}{shape_suffix}{background_suffix}{edge_inset_suffix}{size_suffix}
+{id_type}/{id_value}{variant}{ratings}{badge_style}{label_style}{badge_direction}{layout}{text_size}{badge_size}{badge_width}{badge_height}{logo_size}{badge_shape}{badge_alpha}{edge_inset}{image_size}{colors}
 ```
+
+**Episode:**
+```
+{id_type}/{id_value}{variant}{ratings}{badge_style}{label_style}{badge_direction}{layout}{text_size}{badge_size}{badge_width}{badge_height}{logo_size}{badge_shape}{badge_alpha}{blur}{image_size}{colors}
+```
+
+Suffix order comes from `SettingsCacheSuffixWithRatings` (`internal/services/cachesuffix.go`); every suffix is emitted unconditionally except the ones marked "only when…" in the table below (defaults produce no token so existing keys stay stable).
 
 ### Suffix reference
 
 | Suffix | Format | Example | Description |
 |---|---|---|---|
 | Ratings | `@{chars}` | `@mil` | Single-char per source, no commas (`m`=MAL, `i`=IMDb, `l`=Letterboxd, `r`=RT, `a`=RT Audience, `c`=Metacritic, `t`=TMDB, `k`=Trakt, `d`=MDBList score, `e`=Roger Ebert) |
-| Layout | `.ly{token}` | `.lya1b2c3` | 8-char hash of the per-side badge layout (per-row × rows × start per side + fill order); only present when non-default |
-| Badge style | `.s{style}` | `.sh`, `.sv` | `h` = horizontal, `v` = vertical |
+| Badge style | `.s{style}` | `.slr`, `.stb` | `lr` = logo left, `rl` = value left, `tb` = logo top, `bt` = value top (legacy aliases `h`/`v` accepted); resolved via `ForShape` |
 | Label style | `.l{style}` | `.lt`, `.li`, `.lo`, `.lh` | `t` = text labels, `i` = icon labels, `o` = official provider logos, `h` = high-resolution provider logos (rasterized from `highRes` SVGs) |
-| Badge direction | `.d{dir}` | `.dh`, `.dv` | `h` = horizontal, `v` = vertical (resolved from `d` = default) |
-| Badge size | `.b{size}` | `.bm`, `.bxl` | `xs` = extra-small, `s` = small, `m` = medium (default), `l` = large, `xl` = extra-large |
+| Badge direction | `.d{dir}` | `.dh`, `.dv` | `h` = horizontal, `v` = vertical, `d` = default (layout positions are set via the per-kind layout grid; the UI no longer exposes direction) |
+| Layout | `.ly{token}` | `.lya1b2c3` | 8-char hash of the per-side badge layout (per-row × rows × start per side + fill order); only present when non-default |
+| Text size | `.ts{n}` | `.ts145` | Rating text size as a percentage of the default (only when ≠ 100) |
+| Badge size | `.bz{n}` | `.bz120` | Overall badge size as a percentage of the default (only when ≠ 100) |
+| Badge width | `.bw{n}` | `.bw150` | Badge width scale as a percentage of the default (only when ≠ 100) |
+| Badge height | `.bh{n}` | `.bh75` | Badge height scale as a percentage of the default (only when ≠ 100) |
+| Logo size | `.ls{n}` | `.ls110` | Rating source logo size as a percentage of the default (only when ≠ 100) |
 | Badge shape | `.sh{shape}` | `.shr`, `.shp` | `r` = rounded (default), `p` = pill (the `sh` prefix distinguishes it from the `.s{style}` token above) |
-| Badge background | `.bg{bg}` | `.bgd`, `.bgn` | `d` = default, `k` = dark, `t` = transparent, `n` = none |
+| Badge alpha | `.ba{n}` | `.ba80` | Badge background opacity (0–100); the badge background is black at this alpha |
 | Poster fit | `.f{fit}` | `.fc`, `.fp`, `.fb` | `c` = cover, `p` = pad, `b` = blur — `native` (default) emits no token |
 | Edge inset (backdrop) | `.eh{n}` / `.ev{n}` | `.eh8`, `.ev3` | Backdrop ratings inset from the edge by `n`% — `eh` horizontal, `ev` vertical; only when non-zero |
+| Blur (episode) | `.blur` | `.blur` | Episode spoiler blur; only when enabled |
 | Image size | `.z{size}` | `.zm`, `.zl` | `s` = small, `m` = medium (default), `l` = large, `vl` = very-large |
-
-### Image kind prefixes
-
-Logos, backdrops, and episodes include a kind prefix in their cache keys to distinguish them from posters:
-
-| Kind | Prefix |
-|---|---|
-| Poster | *(none)* |
-| Logo | `_l` |
-| Backdrop | `_b` |
-| Episode | `_e` |
+| Colors | `.col{token}` | `.colab12cd34` | 8-char hash of the per-source color overrides; only when any override is set |
 
 ### Source variant markers
 
-Logos and backdrops include a source marker (`_t` for TMDB, `_f` for Fanart.tv) to distinguish images from different sources. Posters use a separate variant scheme — the default case (English, non-textless) has no marker for backward compatibility:
+The variant marker encodes the source and the language, and carries the kind letter for logo/backdrop keys (`cacheVariant` in `internal/image/serve.go`). Posters use a separate scheme — the default case (English, non-textless) has no marker for backward compatibility:
 
 | Image type | Variant | Marker | Description |
 |---|---|---|---|
@@ -91,10 +90,11 @@ Logos and backdrops include a source marker (`_t` for TMDB, `_f` for Fanart.tv) 
 | Poster | TMDB textless | `_t_tl` | Textless TMDB poster |
 | Poster | Fanart textless | `_f_tl` | Fanart image with no text overlay |
 | Poster | Fanart language | `_f_{lang}` | Fanart image matching language (e.g. `_f_en`) |
-| Logo/Backdrop | TMDB | `_t` or `_t_{lang}` | Image sourced from TMDB |
-| Logo/Backdrop | Fanart | `_f` or `_f_{lang}` | Image sourced from Fanart.tv |
-| *(negative)* | Textless miss | `_f_tl_neg` | No textless fanart image available |
-| *(negative)* | Language miss | `_f_{lang}_neg` | No fanart image for this language |
+| Logo | TMDB | `_l_t_{lang}` | Logo sourced from TMDB (e.g. `_l_t_en`) |
+| Logo | Fanart | `_l_f_{lang}` | Logo sourced from Fanart.tv |
+| Backdrop | TMDB | `_b_t` | Backdrop sourced from TMDB |
+| Backdrop | Fanart | `_b_f` | Backdrop sourced from Fanart.tv |
+| Episode | *(none)* | — | Episodes have no variant marker |
 
 ### Database values
 
@@ -114,94 +114,67 @@ Settings are stored as short single-character or two-character codes:
 | Setting | Values | Meaning |
 |---|---|---|
 | `image_source` | `t`, `f` | TMDB, Fanart.tv |
-| `badge_style` | `h`, `v` | Horizontal, Vertical |
+| `badge_style` | `d`, `lr`, `rl`, `tb`, `bt` | Default (logo left), logo left, value left, logo top, value top |
 | `label_style` | `t`, `i`, `o`, `h` | Text, Icon, Official, High Res |
-| `badge_direction` | `d`, `h`, `v` | Default (horizontal rows), Horizontal, Vertical |
+| `badge_direction` | `d`, `h`, `v` | Default, Horizontal, Vertical (legacy; the UI no longer exposes it) |
 | `layout` | JSON | Per-side badge layout (per kind: `poster_layout`, `logo_layout`, `backdrop_layout`, `episode_layout`). Each of the four sides holds `per_row` (badges per row), `rows` (row count), and `start` (anchor — `l`/`c`/`r` for top/bottom, `t`/`c`/`b` for left/right), plus an `order` array of side names (fill order). Badges are laid out in horizontal rows on every side. The total number of ratings shown is the sum of the four side capacities (`per_row × rows`). Defaults preserve old behaviour: poster bottom 3×1 centre, logo bottom 5×1 centre, backdrop top 5×1 right, episode right 1×1 top |
 | `text_size` | `50`–`400` | Rating text font size as a percentage of the default (100 = default) |
 | `badge_size` | `50`–`400` | Overall badge size as a percentage of the default (100 = default) |
+| `badge_width` / `badge_height` | `50`–`400` | Badge frame scale on a single axis as a percentage of the default |
 | `logo_size` | `50`–`400` | Rating source logo size as a percentage of the default (100 = default) |
 | `badge_shape` | `r`, `p` | Rounded (default), Pill |
-| `badge_background` | `d`, `k`, `t`, `n` | Default (coloured label + dark value), Dark, Transparent, None |
-| `layout` | JSON | Per-side badge layout (see `layout` row above) |
+| `badge_alpha` | `0`–`100` | Badge background opacity (default 80); the badge background is black at this alpha |
 
 ### Example cache keys
 
 ```
-# TMDB poster, 3 ratings (MAL, IMDb, Letterboxd), bottom-center, horizontal badges, official labels, horizontal direction, default text size, medium image
-imdb/tt0111161@mil.pbc.sh.lo.dh.zm
+# TMDB poster, 3 ratings (MAL, IMDb, Letterboxd), default everything, medium image
+imdb/tt0111161@mil.lr.lo.h.shr.ba80.zm
 
 # Same poster at large image size with larger text (145%)
-imdb/tt0111161@mil.pbc.sh.lo.dh.ts145.zl
+imdb/tt0111161@mil.lr.lo.h.ts145.zl
 
 # Fanart textless poster
-imdb/tt0111161_f_tl@mil.pbc.sh.lo.dh.zm
+imdb/tt0111161_f_tl@mil.lr.lo.h.shr.ba80.zm
 
-# Logo from TMDB with English language, 3 ratings, horizontal badges, text labels
-imdb/tt0111161_l_t_en@mil.sh.lt.zm
+# Logo from TMDB with English language, 3 ratings, icon labels
+imdb/tt0111161_l_t_en@mil.lr.lo.li.shr.ba80.zm
 
 # Logo from Fanart.tv with English language
-imdb/tt0111161_l_f_en@mil.sh.lt.zm
+imdb/tt0111161_l_f_en@mil.lr.lo.shr.ba80.zm
 
-# Backdrop from TMDB with default layout, vertical badges, official labels, 150% text size, large image
-imdb/tt0111161_b_t@mil.ptr.sv.lo.dv.ts150.zl
+# Backdrop from TMDB, text labels, 150% text size, edge insets, large image
+imdb/tt0111161_b_t@mil.lr.lo.h.ts150.eh8.ev3.shr.ba80.zl
 
-# Episode with 1 rating (right-side layout), vertical badges, official labels, default text size, blur enabled
-imdb/tt0959621_e@i.ptr.sv.lo.dv.blur.zm
+# Episode with 1 rating, blur enabled, default text size, medium image
+imdb/tt0959621@i.lr.lo.h.shr.ba80.blur.zm
 ```
 
 ### Cross-ID cache
 
-When a poster is generated via one ID type (e.g. IMDB), the rendered image is also written to the filesystem cache under all resolved alternate IDs (TMDB, TVDB). This avoids redundant image generation when the same content is requested via different ID types.
-
-- Alternate IDs are determined from the moka-cached `ResolvedId` (no extra API calls)
-- Writes are best-effort and parallelized — errors are logged but not propagated
-- Only the filesystem cache and DB metadata are populated; the in-memory cache is not — alternate keys get promoted to memory on their first actual request
-- Applies to all image types: posters, logos, and backdrops
+After a successful render, the Go implementation copies the rendered bytes to the filesystem cache under every resolved alternate ID form (IMDB, TMDB, TVDB) via a fire-and-forget goroutine (`internal/image/crossid.go`, `writeCrossIDCache`). The episode-uplift case is included: a poster rendered via a series-level request also writes the episode-level key when applicable. Skipped when `EXTERNAL_CACHE_ONLY=true` and for episodes (which always uplift). Subsequent requests via any of those IDs hit the same cache entry and skip regeneration.
 
 ### Staleness and background refresh
 
-Cache entries are checked for staleness based on the film's release date:
+Rendered-image cache entries are checked for staleness based on the film's release date (`ComputeStaleSecs` in `internal/services/cache.go`):
 - **Unreleased / unknown**: uses `RATINGS_STALE_SECS` (default 24h)
 - **Recent films**: linearly increasing stale time from `RATINGS_STALE_SECS` to `RATINGS_MAX_AGE_SECS`
 - **Old films** (age > `RATINGS_MAX_AGE_SECS`): never stale (ratings are stable)
 
-When a stale entry is served, a background refresh is spawned to regenerate it without blocking the response. Request coalescing ensures concurrent requests for the same image share a single generation task.
+When a cached entry is stale, the Go implementation serves the stale bytes immediately and spawns a **background refresh** (`internal/image/serve.go:refreshStale`) that re-fetches ratings + re-renders through the `InflightSet` so concurrent identical requests coalesce to a single regeneration (mirrors the Rust `image_inflight` + `check_caches` behavior). Rating changes therefore propagate through a hot in-memory entry within about a minute (the mem-cache `revalidateAfter` window, default 60s).
 
 ### CDN caching
 
-When `ENABLE_CDN_REDIRECTS=true`, authenticated poster requests (`/{api_key}/...`) return a **302 redirect** to a content-addressed URL (`/c/{settings_hash}/...`) instead of serving the image directly. This is designed for deployments behind Cloudflare or another CDN:
-
-1. The app computes a 32-character hex hash from the user's effective settings (ratings order, badge style, layout, etc.)
-2. The original endpoint validates the API key, then redirects to `/c/{hash}/{id_type}/poster-default/{id_value}.jpg`
-3. The `/c/` endpoint serves the image with a dynamic `Cache-Control` TTL based on the film's age (see below)
-4. The CDN caches by the `/c/` URL — all users with identical settings share one cache entry
-
-**Why this helps:** Without redirects, the CDN caches by the full URL including the API key, so two users requesting the same poster with the same settings produce two separate cache entries. With redirects, they share one.
-
-**When to enable:** Only when a CDN sits in front of the origin. Without a CDN, the redirect is an extra round-trip to the same server for no benefit.
-
-The redirect response uses `Cache-Control: public, max-age=300, stale-while-revalidate=3600` so the CDN caches the redirect at the edge. The cache is keyed by the full URL (which includes the API key), so one user's cached redirect is never served to another. The `stale-while-revalidate` directive allows the edge to keep serving the cached redirect for up to an hour while the origin is unreachable. The `/c/` image response uses a dynamic `Cache-Control` TTL that scales with the film's age — the same staleness logic used for internal cache revalidation:
-
-| Film age | `max-age` | Why |
-|---|---|---|
-| Unreleased / unknown | `RATINGS_STALE_SECS` (default 1 day) | Ratings are volatile, may change daily |
-| Recently released | Scales linearly from 1 day to 1 year | Ratings stabilize over time |
-| Older than `RATINGS_MAX_AGE_SECS` (default 1 year) | 1 year | Ratings are settled |
-
-The `stale-while-revalidate` directive is set to 7x the `max-age`, so CDN edge nodes can serve slightly stale content while revalidating in the background. The `/c/` routes are rate-limited by IP.
-
-**Important:** The origin keeps the settings hash → settings mapping in memory with a 5-minute TTL. The CDN must cache the image on the first request to the `/c/` URL; if it doesn't, subsequent requests after the TTL expires will 404 at origin until the next authenticated request re-populates the mapping. Cloudflare and most production CDNs cache on first hit, so this is not an issue in practice.
+When `ENABLE_CDN_REDIRECTS=true`, the public image endpoint registers the effective render settings under a stable content hash via the in-memory `HashRegistry` and issues a 302 to `/c/{hash}/...` (`internal/handlers/image.go`, `internal/handlers/cdn.go`). The CDN-cached endpoint serves the rendered bytes from the filesystem cache, so a CDN can deduplicate cache entries across all users with identical settings (only the settings hash matters for the cache key, not the API key or path). Image responses carry `Cache-Control: public, max-age=3600, stale-while-revalidate=86400`; preview responses use `public, max-age=60`. The redirect is skipped for the free key (settings are public and would leak) and when CDN redirects are disabled.
 
 ### External cache only
 
 When `EXTERNAL_CACHE_ONLY=true`, the server skips image file writes to disk (rendered posters and base source images from TMDB/Fanart.tv). This is useful when deployed behind a CDN like Cloudflare that caches responses at the edge.
 
-- The in-memory (moka) cache still handles short-term request deduplication
-- Request coalescing still prevents duplicate generation for concurrent requests
+- The in-memory (MemCache) image cache still handles short-term request deduplication
 - The cache directory is not created on startup
 - Filesystem reads naturally return misses (no files on disk), so every request either hits the in-memory cache or regenerates the image
-- Best used together with `ENABLE_CDN_REDIRECTS=true` so the CDN absorbs the vast majority of traffic
+- Best used behind a CDN (e.g. Cloudflare) so the edge absorbs the vast majority of traffic
 - SQLite metadata is **always** written, even with this flag — `image_meta` stores release dates (for CDN TTL computation) and `available_ratings` records which rating sources have data for each movie (so cache keys can be reconstructed without external API calls on cache hits)
 - The Docker volume is still required for the SQLite database (`DB_DIR`), even when image caching is fully external
 

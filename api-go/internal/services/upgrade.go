@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"os"
@@ -8,25 +9,25 @@ import (
 	"strings"
 )
 
-func RunUpgrades(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS upgrades (name TEXT PRIMARY KEY, completed_at INTEGER NOT NULL)"); err != nil {
+func RunUpgradesCtx(ctx context.Context, db *sql.DB, cacheDir string, externalCacheOnly bool) error {
+	if _, err := db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS upgrades (name TEXT PRIMARY KEY, completed_at INTEGER NOT NULL)"); err != nil {
 		return err
 	}
 
-	if err := runOnce(db, "v001_backdrop_cache_keys", func() error {
-		return upgradeV001(db, cacheDir, externalCacheOnly)
+	if err := runOnceCtx(ctx, db, "v001_backdrop_cache_keys", func() error {
+		return upgradeV001Ctx(ctx, db, cacheDir, externalCacheOnly)
 	}); err != nil {
 		return err
 	}
 
-	if err := runOnce(db, "v002_backdrop_position_direction_cache", func() error {
-		return upgradeV002(db, cacheDir, externalCacheOnly)
+	if err := runOnceCtx(ctx, db, "v002_backdrop_position_direction_cache", func() error {
+		return upgradeV002Ctx(ctx, db, cacheDir, externalCacheOnly)
 	}); err != nil {
 		return err
 	}
 
-	if err := runOnce(db, "v003_badge_shape_background_cache", func() error {
-		return upgradeV003(db, cacheDir, externalCacheOnly)
+	if err := runOnceCtx(ctx, db, "v003_badge_shape_background_cache", func() error {
+		return upgradeV003Ctx(ctx, db, cacheDir, externalCacheOnly)
 	}); err != nil {
 		return err
 	}
@@ -34,11 +35,15 @@ func RunUpgrades(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 	return nil
 }
 
+func RunUpgrades(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
+	return RunUpgradesCtx(context.Background(), db, cacheDir, externalCacheOnly)
+}
+
 // v001: Migrate backdrop cache keys from `_b@` to `_b_f@`
-func upgradeV001(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
+func upgradeV001Ctx(ctx context.Context, db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 	// DB step
-	result, err := db.Exec(
-		"UPDATE image_meta SET cache_key = replace(cache_key, '_b@', '_b_f@') " +
+	result, err := db.ExecContext(ctx,
+		"UPDATE image_meta SET cache_key = replace(cache_key, '_b@', '_b_f@') "+
 			"WHERE image_type = 'b' AND instr(cache_key, '_b@') > 0",
 	)
 	if err != nil {
@@ -96,7 +101,7 @@ func renameFilesV001(dir string) (uint64, error) {
 }
 
 // v002: Insert `.ptr` (TopRight) and `.dv` (Vertical) into backdrop cache keys
-func upgradeV002(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
+func upgradeV002Ctx(ctx context.Context, db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 	// DB step
 	var total uint64
 
@@ -105,7 +110,7 @@ func upgradeV002(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 		old := style + "l" + "."
 		newVal := ".ptr." + style + "l" + "."
 		oldLen := len(old)
-		result, err := db.Exec(
+		result, err := db.ExecContext(ctx,
 			"UPDATE image_meta SET cache_key = "+
 				"substr(cache_key, 1, instr(cache_key, '"+old+"') - 1) || '"+newVal+"' || "+
 				"substr(cache_key, instr(cache_key, '"+old+"') + "+stringInt(oldLen)+") "+
@@ -123,7 +128,7 @@ func upgradeV002(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 		old := label + "b" + "."
 		newVal := label + "dv." + "b" + "."
 		oldLen := len(old)
-		result, err := db.Exec(
+		result, err := db.ExecContext(ctx,
 			"UPDATE image_meta SET cache_key = "+
 				"substr(cache_key, 1, instr(cache_key, '"+old+"') - 1) || '"+newVal+"' || "+
 				"substr(cache_key, instr(cache_key, '"+old+"') + "+stringInt(oldLen)+") "+
@@ -225,7 +230,7 @@ func migrateNameV002(name string) *string {
 }
 
 // v003: Insert `.shr.bgd` (default rounded shape + default background) after badge size token
-func upgradeV003(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
+func upgradeV003Ctx(ctx context.Context, db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 	// DB step
 	sizeTokens := []string{".bxs.", ".bs.", ".bm.", ".bl.", ".bxl."}
 	defaultSuffix := "shr.bgd."
@@ -234,7 +239,7 @@ func upgradeV003(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
 	for _, token := range sizeTokens {
 		newToken := token + defaultSuffix
 		oldLen := len(token)
-		result, err := db.Exec(
+		result, err := db.ExecContext(ctx,
 			"UPDATE image_meta SET cache_key = "+
 				"substr(cache_key, 1, instr(cache_key, '"+token+"') - 1) || '"+newToken+"' || "+
 				"substr(cache_key, instr(cache_key, '"+token+"') + "+stringInt(oldLen)+") "+
@@ -321,16 +326,16 @@ func stringInt(n int) string {
 	return string(rune('0' + n%10))
 }
 
-func runOnce(db *sql.DB, name string, f func() error) error {
+func runOnceCtx(ctx context.Context, db *sql.DB, name string, f func() error) error {
 	var exists int
-	if err := db.QueryRow("SELECT 1 FROM upgrades WHERE name = ?", name).Scan(&exists); err == nil {
+	if err := db.QueryRowContext(ctx, "SELECT 1 FROM upgrades WHERE name = ?", name).Scan(&exists); err == nil {
 		return nil
 	}
 	slog.Info("running data upgrade", "name", name)
 	if err := f(); err != nil {
 		return err
 	}
-	if _, err := db.Exec("INSERT INTO upgrades (name, completed_at) VALUES (?, unixepoch())", name); err != nil {
+	if _, err := db.ExecContext(ctx, "INSERT INTO upgrades (name, completed_at) VALUES (?, unixepoch())", name); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "unique") &&
 			!strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 			return err

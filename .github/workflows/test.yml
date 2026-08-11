@@ -32,7 +32,29 @@ jobs:
 
       - name: Run tests
         working-directory: api-go
-        run: go test ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Coverage summary
+        working-directory: api-go
+        if: ${{ !cancelled() }}
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: Coverage gate
+        working-directory: api-go
+        if: ${{ !cancelled() }}
+        run: |
+          coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          awk -v c="$coverage" 'BEGIN { exit (c < 35) ? 1 : 0 }' \
+            && echo "Coverage $coverage% >= 35%" \
+            || (echo "Coverage $coverage% < 35% (regression: tune COVERAGE_MIN in scripts/test.sh)" && exit 1)
+
+      - name: Upload coverage artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: api-go/coverage.out
+          retention-days: 7
 
   frontend-unit:
     name: Frontend unit tests
@@ -42,7 +64,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -67,7 +89,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -93,6 +115,8 @@ jobs:
           MDBLIST_API_KEY: ${{ secrets.MDBLIST_API_KEY || 'test' }}
           FANART_API_KEY: ${{ secrets.FANART_API_KEY || 'test' }}
           OMDB_API_KEY: ${{ secrets.OMDB_API_KEY || '' }}
+          # Mirrors scripts/test-constants.sh (GitHub Actions can't source
+          # external shell files — keep both in sync when changing).
           JWT_SECRET: abababababababababababababababababababababababababababababababab
           LISTEN_ADDR: 0.0.0.0:3333
           COOKIE_SECURE: "false"
@@ -114,7 +138,7 @@ jobs:
         working-directory: web
         env:
           CI: true
-        run: npx playwright test --project=setup --project=chromium --project=live
+        run: npx playwright test --project=setup --project=settings --project=chromium --project=live
 
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}

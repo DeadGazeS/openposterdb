@@ -15,6 +15,30 @@ API_KEY="t0-free-rpdb"
 ASSETS="poster"  # poster, logo, backdrop, all
 DRY_RUN=false
 
+# fetch_asset issues a HEAD-like curl to check how long an asset fetch takes
+# and whether the response is a real image (vs a Cloudflare error page). Returns
+# the time on stdout and a 0/1 exit status. Hoisted to top level so it's not
+# defined inside the main loop body.
+fetch_asset() {
+  local base_url="$1" api_key="$2" id="$3" asset_type="$4" ext="$5"
+  local url="${base_url}/${api_key}/imdb/${asset_type}-default/${id}.${ext}"
+  local output
+  output=$(curl -sL --max-time 60 -o /dev/null -w '%{http_code}\t%{time_total}\t%{content_type}' "$url" 2>/dev/null)
+  local http_code time_total content_type
+  http_code=$(echo "$output" | cut -f1)
+  time_total=$(echo "$output" | cut -f2)
+  content_type=$(echo "$output" | cut -f3)
+
+  # Must be 200 with an image content type — not a Cloudflare error page
+  if [[ "$http_code" == "200" ]] && [[ "$content_type" == image/* ]]; then
+    echo "$time_total"
+    return 0
+  else
+    echo "$time_total $http_code"
+    return 1
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") <BASE_URL> [OPTIONS]
@@ -128,7 +152,7 @@ fi
 
 # Join conditions with &&
 AWK_FILTER="NR > 1"
-for cond in "${AWK_CONDS[@]+"${AWK_CONDS[@]}"}"; do
+for cond in "${AWK_CONDS[@]}"; do
   AWK_FILTER="$AWK_FILTER && $cond"
 done
 
@@ -199,26 +223,6 @@ fi
 
 # ── seeding ──
 echo "── Seeding ──"
-
-fetch_asset() {
-  local base_url="$1" api_key="$2" id="$3" asset_type="$4" ext="$5"
-  local url="${base_url}/${api_key}/imdb/${asset_type}-default/${id}.${ext}"
-  local output
-  output=$(curl -sL --max-time 60 -o /dev/null -w '%{http_code}\t%{time_total}\t%{content_type}' "$url" 2>/dev/null)
-  local http_code time_total content_type
-  http_code=$(echo "$output" | cut -f1)
-  time_total=$(echo "$output" | cut -f2)
-  content_type=$(echo "$output" | cut -f3)
-
-  # Must be 200 with an image content type — not a Cloudflare error page
-  if [[ "$http_code" == "200" ]] && [[ "$content_type" == image/* ]]; then
-    echo "$time_total"
-    return 0
-  else
-    echo "$time_total $http_code"
-    return 1
-  fi
-}
 
 COUNT=0
 OK=0

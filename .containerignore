@@ -1,4 +1,15 @@
-api/
+.git
+.github
+.idea
+.opencode
+.cortexkit
+.env
+NOTES.md
+RULES.md
+api
+docs
+scripts
 web/node_modules
 web/dist
-.git
+web/coverage
+web/e2e

@@ -1,7 +1,6 @@
 package errors
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -31,14 +30,6 @@ func NewIDNotFound(msg string) *AppError {
 	return &AppError{Status: http.StatusNotFound, Message: msg}
 }
 
-func NewUnauthorized() *AppError {
-	return &AppError{Status: http.StatusUnauthorized, Message: "Unauthorized"}
-}
-
-func NewForbidden(msg string) *AppError {
-	return &AppError{Status: http.StatusForbidden, Message: msg}
-}
-
 func NewBadRequest(msg string) *AppError {
 	return &AppError{Status: http.StatusBadRequest, Message: msg}
 }
@@ -47,27 +38,23 @@ func NewAPIError(err error) *AppError {
 	return &AppError{Status: http.StatusInternalServerError, Message: "API error", Err: err}
 }
 
-func NewIOError(err error) *AppError {
-	return &AppError{Status: http.StatusInternalServerError, Message: "IO error", Err: err}
-}
-
 func NewImageError(err error) *AppError {
 	return &AppError{Status: http.StatusInternalServerError, Message: "image error", Err: err}
-}
-
-func NewDBError(msg string) *AppError {
-	return &AppError{Status: http.StatusInternalServerError, Message: "database error: " + msg}
 }
 
 func NewOther(msg string) *AppError {
 	return &AppError{Status: http.StatusInternalServerError, Message: msg}
 }
 
-func (e *AppError) JSON() []byte {
-	msg := e.Message
+// ClientMessage returns the error message safe for client exposure: 5xx
+// errors are sanitized to "Internal server error" so internal details (SQL
+// errors, provider errors, panic traces) don't leak to API callers. 4xx
+// errors pass through verbatim because the caller needs the message to fix
+// their request. Centralised here so httpx.WriteAppError produces identical
+// sanitisation.
+func (e *AppError) ClientMessage() string {
 	if e.Status >= 500 {
-		msg = "Internal server error"
+		return "Internal server error"
 	}
-	b, _ := json.Marshal(map[string]string{"error": msg})
-	return b
+	return e.Message
 }

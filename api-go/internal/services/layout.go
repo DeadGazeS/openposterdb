@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -90,7 +91,7 @@ func (l *ImageLayout) FillOrder() string {
 // SetFillOrder parses a comma-separated side order, keeping only valid sides.
 func (l *ImageLayout) SetFillOrder(order string) {
 	var out []string
-	for _, s := range strings.Split(order, ",") {
+	for s := range strings.SplitSeq(order, ",") {
 		s = strings.TrimSpace(s)
 		if s != "" && containsString(SideNames, s) && !containsString(out, s) {
 			out = append(out, s)
@@ -100,12 +101,7 @@ func (l *ImageLayout) SetFillOrder(order string) {
 }
 
 func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }
 
 // MarshalLayout serializes a layout to JSON.

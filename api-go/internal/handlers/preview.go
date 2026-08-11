@@ -1,15 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
 
-	apperr "openposterdb/internal/errors"
+	"golang.org/x/image/font"
+
+	"openposterdb/internal/httpx"
 	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
@@ -18,6 +19,27 @@ const (
 	previewPosterRatingsLimit       = 3
 	previewLogoBackdropRatingsLimit = 5
 )
+
+// loadPreviewFonts resolves the value + label font faces for a preview render
+// at the given text size. On missing font it writes a 500 response and returns
+// ok=false; callers should `return` on !ok.
+func loadPreviewFonts(w http.ResponseWriter, textSize services.ScalePercent) (labelFace, valueFace font.Face, ok bool) {
+	labelFace, valueFace = image.GetFontFacesAt(float64(textSize))
+	if valueFace == nil || labelFace == nil {
+		httpx.WriteJSON(w, 500, map[string]string{"error": "font not loaded"})
+		return nil, nil, false
+	}
+	return labelFace, valueFace, true
+}
+
+// writePreviewImage writes the preview response headers (Content-Type +
+// Cache-Control) and the rendered bytes. Content-type per kind:
+// image/jpeg for poster/backdrop/episode, image/png for logo.
+func writePreviewImage(w http.ResponseWriter, contentType string, rendered []byte) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write(rendered)
+}
 
 func sampleBadges() []services.RatingBadge {
 	return []services.RatingBadge{
@@ -32,71 +54,6 @@ func sampleBadges() []services.RatingBadge {
 		{Source: services.SourceMdblist, Value: "100"},
 		{Source: services.SourceEbert, Value: "4.0"},
 	}
-}
-
-func previewRenderSettings(
-	kind string,
-	badgeStyle services.BadgeStyle,
-	labelStyle services.LabelStyle,
-	textSize services.ScalePercent,
-	badgeSize services.ScalePercent,
-	logoSize services.ScalePercent,
-	layout services.ImageLayout,
-	badgeDirection services.BadgeDirection,
-	appearance services.BadgeAppearance,
-	ratingsLimit int32,
-	ratingsOrder string,
-	ratingsExclude string,
-) *services.RenderSettings {
-	s := services.DefaultRenderSettings()
-	s.RatingsOrder = ratingsOrder
-	s.RatingsExclude = ratingsExclude
-
-	switch kind {
-	case "poster":
-		s.RatingsLimit = ratingsLimit
-		s.PosterBadgeStyle = badgeStyle
-		s.PosterLabelStyle = labelStyle
-		s.PosterTextSize = textSize
-		s.PosterBadgeSize = badgeSize
-		s.PosterLogoSize = logoSize
-		s.PosterLayout = layout
-		s.PosterBadgeDirection = badgeDirection
-		s.PosterBadgeShape = appearance.Shape
-		s.PosterBadgeAlpha = appearance.Alpha
-	case "logo":
-		s.LogoRatingsLimit = ratingsLimit
-		s.LogoBadgeStyle = badgeStyle
-		s.LogoLabelStyle = labelStyle
-		s.LogoTextSize = textSize
-		s.LogoBadgeSize = badgeSize
-		s.LogoLogoSize = logoSize
-		s.LogoBadgeShape = appearance.Shape
-		s.LogoBadgeAlpha = appearance.Alpha
-	case "backdrop":
-		s.BackdropRatingsLimit = ratingsLimit
-		s.BackdropBadgeStyle = badgeStyle
-		s.BackdropLabelStyle = labelStyle
-		s.BackdropTextSize = textSize
-		s.BackdropBadgeSize = badgeSize
-		s.BackdropLogoSize = logoSize
-		s.BackdropLayout = layout
-		s.BackdropBadgeDirection = badgeDirection
-		s.BackdropBadgeShape = appearance.Shape
-		s.BackdropBadgeAlpha = appearance.Alpha
-	case "episode":
-		s.EpisodeRatingsLimit = ratingsLimit
-		s.EpisodeBadgeStyle = badgeStyle
-		s.EpisodeLabelStyle = labelStyle
-		s.EpisodeTextSize = textSize
-		s.EpisodeBadgeSize = badgeSize
-		s.EpisodeLogoSize = logoSize
-		s.EpisodeLayout = layout
-		s.EpisodeBadgeDirection = badgeDirection
-		s.EpisodeBadgeShape = appearance.Shape
-		s.EpisodeBadgeAlpha = appearance.Alpha
-	}
-	return &s
 }
 
 // previewLayout returns the layout from the query, falling back to the kind
@@ -149,6 +106,7 @@ func parsePreviewImageSize(raw *string, kind string) (*services.ImageSize, error
 }
 
 type PreviewHandler struct {
+	ctx context.Context
 	db  *sql.DB
 	cfg *PreviewConfig
 }
@@ -171,7 +129,7 @@ func (p *PreviewHandler) demoArtworkBytes(kind string) ([]byte, error) {
 	if p.cfg.TMDB == nil {
 		return sampleArtwork(kind), nil
 	}
-	bytes, err := image.DemoArtwork(p.cfg.TMDB, p.cfg.CacheDir, p.cfg.ExternalCacheOnly, 0, kind, services.ImageSizeMedium)
+	bytes, err := image.DemoArtworkCtx(p.ctx, p.cfg.TMDB, p.cfg.CacheDir, p.cfg.ExternalCacheOnly, 0, kind, services.ImageSizeMedium)
 	if err != nil || len(bytes) == 0 {
 		return sampleArtwork(kind), nil
 	}
@@ -202,7 +160,7 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 	idKey := "imdb/" + idValue
 
 	if p.cfg.TMDB != nil {
-		if sources, _, _, err := services.ReadAvailableRatings(p.db, idKey); err == nil {
+		if sources, _, _, err := services.ReadAvailableRatingsCtx(p.ctx, p.db, idKey); err == nil {
 			if badges := services.UnmarshalRatingBadges(sources); len(badges) > 0 {
 				return badges
 			}
@@ -210,7 +168,11 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 
 		if badges := p.fetchDemoRatings(idValue); len(badges) > 0 {
 			if encoded := services.MarshalRatingBadges(badges); encoded != "" {
-				_ = services.UpsertAvailableRatings(p.db, idKey, encoded, nil)
+				// Best-effort cache of preview-renderable ratings; the preview
+				// itself doesn't depend on this row.
+				if err := services.UpsertAvailableRatingsCtx(p.ctx, p.db, idKey, encoded, nil); err != nil {
+					slog.Warn("preview upsert available ratings failed", "id_key", idKey, "error", err)
+				}
 			}
 			return badges
 		}
@@ -220,7 +182,7 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 }
 
 func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge {
-	resolved, err := services.ResolveID(services.IDTypeIMDB, idValue, p.cfg.TMDB)
+	resolved, err := services.ResolveIDCtx(p.ctx, services.IDTypeIMDB, idValue, p.cfg.TMDB)
 	if err != nil {
 		return nil
 	}
@@ -242,24 +204,67 @@ func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge
 		season = resolved.Episode.SeasonNumber
 		episode = resolved.Episode.EpisodeNumber
 	}
-	_, _, _, _, badges := services.FetchRatings(
-		resolved.TMDbID, mediaType, imdbID, showID, season, episode,
-		p.cfg.TMDB, p.cfg.OMDB, p.cfg.MDBList, p.cfg.Trakt,
+	result := services.FetchRatingsCtx(
+		p.ctx,
+		services.RatingsClients{TMDB: p.cfg.TMDB, OMDB: p.cfg.OMDB, MDBList: p.cfg.MDBList, Trakt: p.cfg.Trakt},
+		services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
+			EpisodeShowTMDbID: showID, EpisodeSeason: season, EpisodeEpisode: episode},
 	)
-	return badges
+	return result.Badges
 }
 
-func NewPreviewHandler(db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
-	return &PreviewHandler{db: db, cfg: cfg}
+func NewPreviewHandler(ctx context.Context, db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
+	return &PreviewHandler{ctx: ctx, db: db, cfg: cfg}
 }
 
-func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
+// previewBuild is the shared prologue across HandlePoster/Logo/Backdrop/Episode.
+// It parses the query, resolves sizes/scales/ratings/badge settings/layout, and
+// loads fonts + colours + badges. On error it writes the 400/500 response and
+// returns ok=false; the caller should just `return`. The four kind handlers
+// add 1-2 kind-specific extras (posterFit, edgeInsets, blur) and then call
+// the kind-specific render function with build.RenderParams.
+type previewBuild struct {
+	// Query-derived values the handlers inspect after this returns.
+	query *ImageQuery
+
+	// Per-kind scale + size values.
+	textSize        services.ScalePercent
+	badgeSize       services.ScalePercent
+	logoSize        services.ScalePercent
+	targetWidth     uint32
+	badgeMultiplier float32
+	badgeScale      float32
+	logoScale       float32
+	textScale       float32
+
+	// Ratings: limit, order, exclude, layout, badge style/label/shape/alpha
+	// appearance — resolved once here and passed through RenderParams.
+	ratingsLimit   int32
+	ratingsOrder   string
+	ratingsExclude string
+	layout         services.ImageLayout
+	badgeStyle     services.BadgeStyle
+	labelStyle     services.LabelStyle
+	appearance     services.BadgeAppearance
+
+	// Font faces + colours + badges — passed to RenderParams.
+	labelFace font.Face
+	valueFace font.Face
+	colors    map[string]services.SourceColorSet
+	badges    []services.RatingBadge
+
+	// Quality from config (constant per request, but kept here so the kind
+	// handler doesn't reach back into p.cfg for it).
+	quality uint8
+}
+
+func (p *PreviewHandler) previewBuild(w http.ResponseWriter, r *http.Request, kind string) (*previewBuild, bool) {
 	query := parseImageQuery(r)
 
-	imageSize, err := parsePreviewImageSize(query.ImageSize, "poster")
+	imageSize, err := parsePreviewImageSize(query.ImageSize, kind)
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
-		return
+		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		return nil, false
 	}
 
 	resolvedSize := services.ImageSizeMedium
@@ -269,16 +274,33 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	textSize, badgeSize, logoSize := previewScales(query)
 
-	targetWidth := resolvedSize.PosterTargetWidth()
-	badgeMultiplier := previewBadgeMultiplier("poster", badgeSize)
-	badgeScale := resolvedSize.BadgeScale("poster") * badgeMultiplier
+	var targetWidth uint32
+	switch kind {
+	case "poster":
+		targetWidth = resolvedSize.PosterTargetWidth()
+	case "logo":
+		targetWidth = resolvedSize.LogoTargetWidth()
+	case "backdrop":
+		targetWidth = resolvedSize.BackdropTargetWidth()
+	case "episode":
+		targetWidth = resolvedSize.EpisodeTargetWidth()
+	}
+
+	badgeMultiplier := previewBadgeMultiplier(kind, badgeSize)
+	badgeScale := resolvedSize.BadgeScale(kind) * badgeMultiplier
 	logoScale := logoSize.Percent()
 	textScale := textSize.Percent()
 
-	ratingsLimit := int32(previewPosterRatingsLimit)
-	// An explicit ?ratings_limit beats the layout total only when valid; an
-	// absent or invalid override falls back to the layout total (matching the
-	// serve path's override ?? layout.Total() semantics).
+	// Per-kind default ratings limit: poster/episode use the smaller poster
+	// limit; logo/backdrop use the larger one. An explicit ?ratings_limit
+	// beats the layout total when valid; otherwise we fall back to the
+	// layout total below (matching the serve path's override ?? layout.Total()
+	// semantics).
+	defaultLimit := int32(previewLogoBackdropRatingsLimit)
+	if kind == "poster" || kind == "episode" {
+		defaultLimit = int32(previewPosterRatingsLimit)
+	}
+	ratingsLimit := defaultLimit
 	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
 	if overrideValid {
 		ratingsLimit = *query.RatingsLimit
@@ -295,12 +317,19 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		ratingsExclude = *query.RatingsExclude
 	}
 
-	layout := previewLayout(query, "poster")
+	layout := previewLayout(query, kind)
 	if !overrideValid {
 		ratingsLimit = layout.Total()
 	}
 
-	rawBadgeStyle := services.BadgeStyleDefault
+	// Per-kind default badge style: poster uses the project's default (the
+	// resolver picks the right shape-aware style); logo/backdrop/episode use
+	// the top-bottom style as their base.
+	defaultBadgeStyle := services.BadgeStyleLogoTB
+	if kind == "poster" {
+		defaultBadgeStyle = services.BadgeStyleDefault
+	}
+	rawBadgeStyle := defaultBadgeStyle
 	if query.BadgeStyle != nil {
 		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
 	}
@@ -310,14 +339,17 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		labelStyle = services.LabelStyle(*query.LabelStyle)
 	}
 
-	badgeDirection := services.BadgeDirectionDefault.ResolveDefault()
-	if query.BadgeDirection != nil {
-		badgeDirection = services.BadgeDirection(*query.BadgeDirection).ResolveDefault()
-	}
-
+	// badgeDirection matters for poster/backdrop/episode; the logo badge
+	// layout is direction-agnostic, so logo just resolves the raw style
+	// directly. Other kinds resolve the raw style against the query direction
+	// (or the default-resolved one).
 	badgeStyle := rawBadgeStyle.ResolveDefault()
-	if query.BadgeDirection != nil {
-		badgeStyle = rawBadgeStyle.Resolve(services.BadgeDirection(*query.BadgeDirection))
+	if kind != "logo" {
+		direction := services.BadgeDirectionDefault.ResolveDefault()
+		if query.BadgeDirection != nil {
+			direction = services.BadgeDirection(*query.BadgeDirection).ResolveDefault()
+		}
+		badgeStyle = rawBadgeStyle.Resolve(direction)
 	}
 
 	shape := services.BadgeShapeRounded
@@ -336,27 +368,55 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
 	}
 
-	posterFit := services.PosterFitNative
-	if query.Fit != nil {
-		posterFit = services.PosterFit(*query.Fit)
-	}
-
-	settings := previewRenderSettings("poster", badgeStyle, labelStyle, textSize, badgeSize, logoSize, layout, badgeDirection, appearance, ratingsLimit, ratingsOrder, ratingsExclude)
-	settings.PosterFit = posterFit
-
-	badges := p.demoBadges("poster")
+	badges := p.demoBadges(kind)
 	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
-		return
+
+	labelFace, valueFace, ok := loadPreviewFonts(w, textSize)
+	if !ok {
+		return nil, false
 	}
 
 	colors := parsePreviewColors(r)
 
+	return &previewBuild{
+		query:           query,
+		textSize:        textSize,
+		badgeSize:       badgeSize,
+		logoSize:        logoSize,
+		targetWidth:     targetWidth,
+		badgeMultiplier: badgeMultiplier,
+		badgeScale:      badgeScale,
+		logoScale:       logoScale,
+		textScale:       textScale,
+		ratingsLimit:    ratingsLimit,
+		ratingsOrder:    ratingsOrder,
+		ratingsExclude:  ratingsExclude,
+		layout:          layout,
+		badgeStyle:      badgeStyle,
+		labelStyle:      labelStyle,
+		appearance:      appearance,
+		labelFace:       labelFace,
+		valueFace:       valueFace,
+		colors:          colors,
+		badges:          badges,
+		quality:         p.cfg.ImageQuality,
+	}, true
+}
+
+func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
+	b, ok := p.previewBuild(w, r, "poster")
+	if !ok {
+		return
+	}
+
+	posterFit := services.PosterFitNative
+	if b.query.Fit != nil {
+		posterFit = services.PosterFit(*b.query.Fit)
+	}
+
 	posterBytes, err := p.demoArtworkBytes("poster")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
@@ -365,461 +425,123 @@ func (p *PreviewHandler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	// natural ratio; cover/pad/blur shape the 2:3 canvas). The web preview box
 	// is sized from the rendered image's natural dimensions, so the portrait
 	// box is stable for the 2:3 demo poster under every fit.
-	posterBytes, err = image.PosterPreviewArtwork(posterBytes, posterFit, targetWidth)
+	posterBytes, err = image.PosterPreviewArtwork(posterBytes, posterFit, b.targetWidth)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	rendered, err := image.RenderPosterSync(posterBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		layout, badgeStyle, labelStyle, appearance,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, posterFit, colors)
+	rendered, err := image.RenderPosterSync(posterBytes, image.RenderParams{
+		Badges: b.badges, ValueFontFace: b.valueFace, LabelFontFace: b.labelFace,
+		Quality: b.quality, Layout: b.layout, BadgeStyle: b.badgeStyle,
+		LabelStyle: b.labelStyle, Appearance: b.appearance, TargetWidth: b.targetWidth,
+		BadgeScale: b.badgeScale, BadgeMultiplier: b.badgeMultiplier, TextScale: b.textScale,
+		LogoScale: b.logoScale, PosterFit: posterFit, Colors: b.colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/jpeg", rendered)
 }
 
 func (p *PreviewHandler) HandleLogo(w http.ResponseWriter, r *http.Request) {
-	query := parseImageQuery(r)
-
-	imageSize, err := parsePreviewImageSize(query.ImageSize, "logo")
-	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+	b, ok := p.previewBuild(w, r, "logo")
+	if !ok {
 		return
 	}
-
-	resolvedSize := services.ImageSizeMedium
-	if imageSize != nil {
-		resolvedSize = *imageSize
-	}
-
-	textSize, badgeSize, logoSize := previewScales(query)
-
-	targetWidth := resolvedSize.LogoTargetWidth()
-	badgeMultiplier := previewBadgeMultiplier("logo", badgeSize)
-	badgeScale := resolvedSize.BadgeScale("logo") * badgeMultiplier
-	logoScale := logoSize.Percent()
-	textScale := textSize.Percent()
-
-	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
-	// An explicit ?ratings_limit beats the layout total only when valid; an
-	// absent or invalid override falls back to the layout total (matching the
-	// serve path's override ?? layout.Total() semantics).
-	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
-	if overrideValid {
-		ratingsLimit = *query.RatingsLimit
-	}
-
-	defaultOrder := services.DefaultRatingsOrder()
-	ratingsOrder := defaultOrder
-	if query.RatingsOrder != nil && *query.RatingsOrder != "" {
-		ratingsOrder = *query.RatingsOrder
-	}
-
-	ratingsExclude := ""
-	if query.RatingsExclude != nil {
-		ratingsExclude = *query.RatingsExclude
-	}
-
-	rawBadgeStyle := services.BadgeStyleLogoTB
-	if query.BadgeStyle != nil {
-		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
-	}
-
-	labelStyle := services.LabelStyleOfficial
-	if query.LabelStyle != nil {
-		labelStyle = services.LabelStyle(*query.LabelStyle)
-	}
-
-	badgeStyle := rawBadgeStyle.ResolveDefault()
-
-	shape := services.BadgeShapeRounded
-	if query.BadgeShape != nil {
-		shape = services.BadgeShape(*query.BadgeShape)
-	}
-	alpha := services.DefaultBadgeAlpha()
-	if query.BadgeAlpha != nil {
-		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
-	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
-	if query.BadgeWidth != nil {
-		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
-	}
-	if query.BadgeHeight != nil {
-		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
-	}
-
-	layout := previewLayout(query, "logo")
-	if !overrideValid {
-		ratingsLimit = layout.Total()
-	}
-
-	badges := p.demoBadges("logo")
-	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
-		return
-	}
-
-	colors := parsePreviewColors(r)
 
 	logoBytes, err := p.demoArtworkBytes("logo")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	rendered, err := image.RenderLogoSync(logoBytes, badges, valueFace, labelFace,
-		badgeStyle, labelStyle, appearance, targetWidth, badgeScale, badgeMultiplier, textScale, logoScale,
-		layout, colors)
+	rendered, err := image.RenderLogoSync(logoBytes, image.RenderParams{
+		Badges: b.badges, ValueFontFace: b.valueFace, LabelFontFace: b.labelFace,
+		Layout: b.layout, BadgeStyle: b.badgeStyle, LabelStyle: b.labelStyle,
+		Appearance: b.appearance, TargetWidth: b.targetWidth, BadgeScale: b.badgeScale,
+		BadgeMultiplier: b.badgeMultiplier, TextScale: b.textScale, LogoScale: b.logoScale,
+		Colors: b.colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/png", rendered)
 }
 
 func (p *PreviewHandler) HandleBackdrop(w http.ResponseWriter, r *http.Request) {
-	query := parseImageQuery(r)
-
-	imageSize, err := parsePreviewImageSize(query.ImageSize, "backdrop")
-	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+	b, ok := p.previewBuild(w, r, "backdrop")
+	if !ok {
 		return
-	}
-
-	resolvedSize := services.ImageSizeMedium
-	if imageSize != nil {
-		resolvedSize = *imageSize
-	}
-
-	textSize, badgeSize, logoSize := previewScales(query)
-
-	targetWidth := resolvedSize.BackdropTargetWidth()
-	badgeMultiplier := previewBadgeMultiplier("backdrop", badgeSize)
-	badgeScale := resolvedSize.BadgeScale("backdrop") * badgeMultiplier
-	logoScale := logoSize.Percent()
-	textScale := textSize.Percent()
-
-	ratingsLimit := int32(previewLogoBackdropRatingsLimit)
-	// An explicit ?ratings_limit beats the layout total only when valid; an
-	// absent or invalid override falls back to the layout total (matching the
-	// serve path's override ?? layout.Total() semantics).
-	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
-	if overrideValid {
-		ratingsLimit = *query.RatingsLimit
-	}
-
-	defaultOrder := services.DefaultRatingsOrder()
-	ratingsOrder := defaultOrder
-	if query.RatingsOrder != nil && *query.RatingsOrder != "" {
-		ratingsOrder = *query.RatingsOrder
-	}
-
-	ratingsExclude := ""
-	if query.RatingsExclude != nil {
-		ratingsExclude = *query.RatingsExclude
-	}
-
-	layout := previewLayout(query, "backdrop")
-	if !overrideValid {
-		ratingsLimit = layout.Total()
-	}
-
-	rawBadgeStyle := services.BadgeStyleLogoTB
-	if query.BadgeStyle != nil {
-		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
-	}
-
-	labelStyle := services.LabelStyleOfficial
-	if query.LabelStyle != nil {
-		labelStyle = services.LabelStyle(*query.LabelStyle)
-	}
-
-	badgeStyle := rawBadgeStyle.ResolveDefault()
-	if query.BadgeDirection != nil {
-		badgeStyle = rawBadgeStyle.Resolve(services.BadgeDirection(*query.BadgeDirection))
-	}
-
-	shape := services.BadgeShapeRounded
-	if query.BadgeShape != nil {
-		shape = services.BadgeShape(*query.BadgeShape)
-	}
-	alpha := services.DefaultBadgeAlpha()
-	if query.BadgeAlpha != nil {
-		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
-	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
-	if query.BadgeWidth != nil {
-		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
-	}
-	if query.BadgeHeight != nil {
-		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
 	}
 
 	edgeInsetX := int32(0)
-	if query.EdgeInsetX != nil {
-		edgeInsetX = *query.EdgeInsetX
+	if b.query.EdgeInsetX != nil {
+		edgeInsetX = *b.query.EdgeInsetX
 	}
 	edgeInsetY := int32(0)
-	if query.EdgeInsetY != nil {
-		edgeInsetY = *query.EdgeInsetY
+	if b.query.EdgeInsetY != nil {
+		edgeInsetY = *b.query.EdgeInsetY
 	}
-	badges := p.demoBadges("backdrop")
-	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
-		return
-	}
-
-	colors := parsePreviewColors(r)
 
 	backdropBytes, err := p.demoArtworkBytes("backdrop")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	rendered, err := image.RenderBackdropSync(backdropBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		layout, badgeStyle, labelStyle, appearance,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, edgeInsetX, edgeInsetY, colors)
+	rendered, err := image.RenderBackdropSync(backdropBytes, image.RenderParams{
+		Badges: b.badges, ValueFontFace: b.valueFace, LabelFontFace: b.labelFace,
+		Quality: b.quality, Layout: b.layout, BadgeStyle: b.badgeStyle,
+		LabelStyle: b.labelStyle, Appearance: b.appearance, TargetWidth: b.targetWidth,
+		BadgeScale: b.badgeScale, BadgeMultiplier: b.badgeMultiplier, TextScale: b.textScale,
+		LogoScale: b.logoScale, EdgeInsetX: edgeInsetX, EdgeInsetY: edgeInsetY, Colors: b.colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/jpeg", rendered)
 }
 
 func (p *PreviewHandler) HandleEpisode(w http.ResponseWriter, r *http.Request) {
-	query := parseImageQuery(r)
-
-	imageSize, err := parsePreviewImageSize(query.ImageSize, "episode")
-	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+	b, ok := p.previewBuild(w, r, "episode")
+	if !ok {
 		return
-	}
-
-	resolvedSize := services.ImageSizeMedium
-	if imageSize != nil {
-		resolvedSize = *imageSize
-	}
-
-	textSize, badgeSize, logoSize := previewScales(query)
-
-	targetWidth := resolvedSize.EpisodeTargetWidth()
-	badgeMultiplier := previewBadgeMultiplier("episode", badgeSize)
-	badgeScale := resolvedSize.BadgeScale("episode") * badgeMultiplier
-	logoScale := logoSize.Percent()
-	textScale := textSize.Percent()
-
-	ratingsLimit := int32(previewPosterRatingsLimit)
-	// An explicit ?ratings_limit beats the layout total only when valid; an
-	// absent or invalid override falls back to the layout total (matching the
-	// serve path's override ?? layout.Total() semantics).
-	overrideValid := query.RatingsLimit != nil && services.ValidateRatingsLimit(*query.RatingsLimit) == nil
-	if overrideValid {
-		ratingsLimit = *query.RatingsLimit
-	}
-
-	defaultOrder := services.DefaultRatingsOrder()
-	ratingsOrder := defaultOrder
-	if query.RatingsOrder != nil && *query.RatingsOrder != "" {
-		ratingsOrder = *query.RatingsOrder
-	}
-
-	ratingsExclude := ""
-	if query.RatingsExclude != nil {
-		ratingsExclude = *query.RatingsExclude
-	}
-
-	layout := previewLayout(query, "episode")
-	if !overrideValid {
-		ratingsLimit = layout.Total()
-	}
-
-	rawBadgeStyle := services.BadgeStyleLogoTB
-	if query.BadgeStyle != nil {
-		rawBadgeStyle = services.BadgeStyle(*query.BadgeStyle)
-	}
-
-	labelStyle := services.LabelStyleOfficial
-	if query.LabelStyle != nil {
-		labelStyle = services.LabelStyle(*query.LabelStyle)
-	}
-
-	badgeStyle := rawBadgeStyle.ResolveDefault()
-	if query.BadgeDirection != nil {
-		badgeStyle = rawBadgeStyle.Resolve(services.BadgeDirection(*query.BadgeDirection))
-	}
-
-	shape := services.BadgeShapeRounded
-	if query.BadgeShape != nil {
-		shape = services.BadgeShape(*query.BadgeShape)
-	}
-	alpha := services.DefaultBadgeAlpha()
-	if query.BadgeAlpha != nil {
-		alpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
-	}
-	appearance := services.BadgeAppearance{Shape: shape, Alpha: alpha, Style: badgeStyle, Width: services.DefaultScalePercent(), Height: services.DefaultScalePercent()}
-	if query.BadgeWidth != nil {
-		appearance.Width = services.ClampScalePercent(*query.BadgeWidth)
-	}
-	if query.BadgeHeight != nil {
-		appearance.Height = services.ClampScalePercent(*query.BadgeHeight)
 	}
 
 	blur := false
-	if query.Blur != nil {
-		blur = *query.Blur
+	if b.query.Blur != nil {
+		blur = *b.query.Blur
 	}
-	badges := p.demoBadges("episode")
-	badges = services.ApplyRatingPreferences(badges, ratingsOrder, ratingsExclude, ratingsLimit)
-	valueFace, labelFace := image.GetFontFacesAt(float64(textSize))
-	if valueFace == nil || labelFace == nil {
-		writeJSON(w, 500, map[string]string{"error": "font not loaded"})
-		return
-	}
-
-	colors := parsePreviewColors(r)
 
 	episodeBytes, err := p.demoArtworkBytes("episode")
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	rendered, err := image.RenderEpisodeSync(episodeBytes, badges, valueFace, labelFace, p.cfg.ImageQuality,
-		layout, badgeStyle, labelStyle, appearance,
-		targetWidth, badgeScale, badgeMultiplier, textScale, logoScale, blur, colors)
+	rendered, err := image.RenderEpisodeSync(episodeBytes, image.RenderParams{
+		Badges: b.badges, ValueFontFace: b.valueFace, LabelFontFace: b.labelFace,
+		Quality: b.quality, Layout: b.layout, BadgeStyle: b.badgeStyle,
+		LabelStyle: b.labelStyle, Appearance: b.appearance, TargetWidth: b.targetWidth,
+		BadgeScale: b.badgeScale, BadgeMultiplier: b.badgeMultiplier, TextScale: b.textScale,
+		LogoScale: b.logoScale, Blur: blur, Colors: b.colors,
+	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		httpx.WriteAppError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Write(rendered)
+	writePreviewImage(w, "image/jpeg", rendered)
 }
 
 // --- Admin image list/file serving ---
-
-func HandleImageFile(db *sql.DB, cacheDir string, imageType, idType, idValue string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
-			return
-		}
-
-		ext := "jpg"
-		contentType := "image/jpeg"
-		if imageType == "l" {
-			ext = "png"
-			contentType = "image/png"
-		}
-
-		subdir := services.ImageSubdirByType(imageType)
-		if subdir == "" {
-			writeError(w, 400, "invalid image type")
-			return
-		}
-
-		fileBase := strings.ReplaceAll(idValue, ":", "_")
-		path, err := services.TypedCachePath(cacheDir, subdir, idType, fileBase, ext)
-		if err != nil {
-			writeError(w, 400, "invalid path")
-			return
-		}
-
-		data, err := readFile(path)
-		if err != nil {
-			writeError(w, 404, "image not found")
-			return
-		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Write(data)
-	}
-}
-
-func HandleFetchImage(db *sql.DB, cfg *ImageServeConfig, tmdb *services.TmdbClient, omdb *services.OmdbClient, mdblist *services.MdblistClient, trakt *services.TraktClient, fanart *services.FanartClient, imageType, idType, idValue string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeError(w, 405, "Method not allowed")
-			return
-		}
-
-		if err := services.ValidateIDValue(idValue); err != nil {
-			writeError(w, 400, "invalid id value")
-			return
-		}
-
-		if tmdb == nil {
-			writeError(w, 503, "TMDB API key not configured — image generation unavailable")
-			return
-		}
-
-		kind, ok := kindFromType(imageType)
-		if !ok {
-			writeError(w, 400, "invalid image type")
-			return
-		}
-
-		slog.Debug("admin fetch requested", "kind", kind, "id", idType+"/"+idValue)
-
-		globals, _ := services.GetGlobalSettings(db)
-		settings := services.ParseGlobalRenderSettings(globals)
-
-		bytes, contentType, err := image.ServeImage(
-			db, tmdb, omdb, mdblist, trakt, fanart,
-			idType, idValue, kind, &settings, nil,
-			cfg.CacheDir, cfg.ExternalCacheOnly,
-			cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs, cfg.ImageStaleSecs,
-			cfg.ImageQuality, nil, cfg.Caches,
-		)
-		if err != nil {
-			if appErr, ok := err.(*apperr.AppError); ok {
-				writeError(w, appErr.Status, appErr.Message)
-			} else {
-				writeError(w, 500, err.Error())
-			}
-			return
-		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
-		w.Write(bytes)
-	}
-}
-
-func kindFromType(imageType string) (string, bool) {
-	switch imageType {
-	case "p":
-		return "poster", true
-	case "l":
-		return "logo", true
-	case "b":
-		return "backdrop", true
-	case "e":
-		return "episode", true
-	}
-	return "", false
-}
-
-// parsePreviewColors reads the `colors` query parameter (JSON object of
-// per-source color overrides) used for live previews of unsaved changes.
 func parsePreviewColors(r *http.Request) map[string]services.SourceColorSet {
 	raw := r.URL.Query().Get("colors")
 	if raw == "" {
@@ -838,20 +560,20 @@ func parsePreviewColors(r *http.Request) map[string]services.SourceColorSet {
 func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
 		dirCleared := false
 		if !externalCacheOnly {
-			subdir := services.ImageSubdirByType(imageType)
+			subdir := services.ImageSubdir(imageType)
 			if subdir != "" {
 				_, err := services.StageDirForClear(cacheDir, subdir)
 				dirCleared = err == nil
 			}
 		}
 
-		metaDeleted, _ := services.DeleteImageMetaByKind(db, imageType)
+		metaDeleted, _ := services.DeleteImageMetaByKindCtx(r.Context(), db, imageType)
 
 		// The kind isn't recoverable from the mem cache keys cheaply, so a
 		// per-kind purge drops the whole image mem cache (rare admin action).
@@ -859,7 +581,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			caches.ImageMem.Clear()
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"ok":                  true,
 			"external_cache_only": externalCacheOnly,
 			"dir_cleared":         dirCleared,
@@ -871,7 +593,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 
@@ -879,7 +601,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 
 		var filesDeleted int64 = 0
 		if !externalCacheOnly {
-			subdir := services.ImageSubdirByType(imageType)
+			subdir := services.ImageSubdir(imageType)
 			if subdir != "" {
 				if scope == "variant" {
 					ext := "jpg"
@@ -895,14 +617,14 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 
 		var metaDeleted int64 = 0
 		if scope == "variant" {
-			metaDeleted, _ = services.DeleteImageMetaExact(db, imageType, idType+"/"+idValue)
+			metaDeleted, _ = services.DeleteImageMetaExactCtx(r.Context(), db, imageType, idType+"/"+idValue)
 		} else {
-			metaDeleted, _ = services.DeleteImageMetaForTitle(db, imageType, idType, idValue)
+			metaDeleted, _ = services.DeleteImageMetaForTitleCtx(r.Context(), db, imageType, idType, idValue)
 		}
 
 		idKey := idType + "/" + idValue
 		if scope != "variant" {
-			services.DeleteAvailableRatings(db, idKey)
+			services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
 		}
 
 		// Invalidate the matching in-memory entries so the purge is visible
@@ -916,53 +638,11 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			}
 		}
 
-		writeJSON(w, 200, map[string]interface{}{
+		httpx.WriteJSON(w, 200, map[string]any{
 			"ok":                  true,
 			"external_cache_only": externalCacheOnly,
 			"files_deleted":       filesDeleted,
 			"meta_deleted":        metaDeleted,
 		})
 	}
-}
-
-func HandleServiceKeys(db *sql.DB, serviceKeys *services.ServiceKeyManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, 200, serviceKeys.GetStatus())
-		case http.MethodPut:
-			var update services.ServiceKeysUpdate
-			if err := decodeJSONBody(r, &update); err != nil {
-				writeError(w, 400, "invalid JSON")
-				return
-			}
-			if err := serviceKeys.UpdateKeys(&update); err != nil {
-				writeError(w, 500, "failed to update keys")
-				return
-			}
-			writeJSON(w, 200, serviceKeys.GetStatus())
-		default:
-			writeError(w, 405, "Method not allowed")
-		}
-	}
-}
-
-func readFile(path string) ([]byte, error) {
-	entry, err := services.ReadCache(path, 0)
-	if err != nil {
-		return nil, err
-	}
-	return entry.Bytes, nil
-}
-
-func parseInt64Param(r *http.Request, name string, def int64) int64 {
-	v := r.URL.Query().Get(name)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 1 {
-		return def
-	}
-	return n
 }

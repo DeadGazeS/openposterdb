@@ -34,10 +34,14 @@ const mockKeysApi = vi.hoisted(() => ({
   deleteSettings: vi.fn(),
 }))
 
-vi.mock('@/lib/api', () => ({
-  adminApi: mockAdminApi,
-  keysApi: mockKeysApi,
-}))
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
+  return {
+    ...actual,
+    adminApi: mockAdminApi,
+    keysApi: mockKeysApi,
+  }
+})
 
 const defaultSettings = {
   image_source: 't',
@@ -119,7 +123,7 @@ describe('SettingsView', () => {
     expect(wrapper.find('[data-testid="save-settings-button"]').exists()).toBe(true)
   })
 
-  it('renders the Global Image box on the image route', async () => {
+  it('renders the Global Image Settings box on the image route', async () => {
     mockRoute.name = 'settings-image'
     mockRoute.path = '/admin/settings/image'
 

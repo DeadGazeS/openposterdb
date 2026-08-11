@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Generate a visual HTML report of all image permutations.
-# Expects the test container to already be running on port 3333.
+# Expects the test container to already be running (see test.sh).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/test-constants.sh"
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:3333}"
-API_KEY="${API_KEY:-t0-free-rpdb}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:${TEST_PORT}}"
+API_KEY="${API_KEY:-${TEST_FREE_API_KEY}}"
 REPORT_DIR="test-report"
 IMG_DIR="$REPORT_DIR/images"
 
@@ -28,7 +29,8 @@ fetch_image() {
     local ext="$4"
     # Sanitise label for filename
     local filename
-    filename="$(echo "$label" | tr ' /=' '_' | tr -cd 'a-zA-Z0-9_-').${ext}"
+    filename="${label//[\/= ]/_}"
+    filename="${filename//[^a-zA-Z0-9_-]/}.${ext}"
     local id_type="${5:-imdb}"
     local id_value="${6:-$IMDB_ID}"
     local url="${BASE_URL}/${API_KEY}/${id_type}/${endpoint}/${id_value}.${ext}"
@@ -69,348 +71,112 @@ add_image() {
     fi
 }
 
+echo "Fetching permutations..."
+
+# --- Helpers ---
+# Each helper takes the common parameters and emits one section. The kind +
+# endpoint + ext + (optional) extra query string + (optional) id_value are
+# passed explicitly so the per-kind difference (e.g. episodes need
+# ratings_order=imdb,tmdb to render badges; episode ids differ from poster
+# ids) stays declarative at the call site.
+
+# render_default: emits the single-image "Default" section.
+render_default() {
+    local kind="$1" ext="$2" endpoint="$3"
+    local id_value="${4:-$IMDB_ID}" extra="${5:-}"
+    add_section "$kind - Default"
+    local path=$(fetch_image "${kind,,}_default" "$endpoint" "$extra" "$ext" "imdb" "$id_value")
+    add_image "default" "$path"
+    end_section
+}
+
+# render_perm: emits one parameter's permutations as a section (one image per value).
+render_perm() {
+    local kind="$1" param="$2" values="$3" ext="$4" endpoint="$5"
+    local id_value="${6:-$IMDB_ID}" extra="${7:-}"
+    add_section "$kind - $param"
+    for val in $values; do
+        local q="${param}=${val}"
+        [ -n "$extra" ] && q="${q}&${extra}"
+        local path=$(fetch_image "${param}=${val}" "$endpoint" "$q" "$ext" "imdb" "$id_value")
+        add_image "${param}=${val}" "$path"
+    done
+    end_section
+}
+
+# render_combined: emits a param1 × param2 Cartesian-product section.
+render_combined() {
+    local kind="$1" p1="$2" v1="$3" p2="$4" v2="$5" ext="$6" endpoint="$7"
+    local id_value="${8:-$IMDB_ID}" extra="${9:-}"
+    add_section "$kind - ${p1} × ${p2}"
+    for a in $v1; do
+        for b in $v2; do
+            local q="${p1}=${a}&${p2}=${b}"
+            [ -n "$extra" ] && q="${q}&${extra}"
+            local path=$(fetch_image "${p1}_${a}_${p2}_${b}" "$endpoint" "$q" "$ext" "imdb" "$id_value")
+            add_image "${p1}=${a} ${p2}=${b}" "$path"
+        done
+    done
+    end_section
+}
+
+# Episodes need ratings_order=imdb,tmdb so the badges are visible (the
+# default order includes one source that resolves to the same rating and
+# doesn't render a second badge).
+EP_EXTRA="ratings_order=imdb,tmdb"
+
 echo "Fetching poster permutations..."
-
-# --- Posters ---
-
-add_section "Poster - Default"
-path=$(fetch_image "default" "poster-default" "" "jpg")
-add_image "default" "$path"
-end_section
-
-add_section "Poster - badge_style"
-for val in h v d; do
-    path=$(fetch_image "badge_style=$val" "poster-default" "badge_style=$val" "jpg")
-    add_image "badge_style=$val" "$path"
-done
-end_section
-
-add_section "Poster - label_style"
-for val in t i o; do
-    path=$(fetch_image "label_style=$val" "poster-default" "label_style=$val" "jpg")
-    add_image "label_style=$val" "$path"
-done
-end_section
-
-add_section "Poster - text_size"
-for val in 50 75 100 150 200; do
-    path=$(fetch_image "text_size=$val" "poster-default" "text_size=$val" "jpg")
-    add_image "text_size=$val" "$path"
-done
-end_section
-
-add_section "Poster - badge_direction"
-for val in h v d; do
-    path=$(fetch_image "badge_direction=$val" "poster-default" "badge_direction=$val" "jpg")
-    add_image "badge_direction=$val" "$path"
-done
-end_section
-
-add_section "Poster - position"
-for val in bc tc l r tl tr bl br; do
-    path=$(fetch_image "position=$val" "poster-default" "position=$val" "jpg")
-    add_image "position=$val" "$path"
-done
-end_section
-
-add_section "Poster - textless"
-for val in true false; do
-    path=$(fetch_image "textless=$val" "poster-default" "textless=$val" "jpg")
-    add_image "textless=$val" "$path"
-done
-end_section
-
-add_section "Poster - image_source"
-for val in t f; do
-    path=$(fetch_image "image_source=$val" "poster-default" "image_source=$val" "jpg")
-    add_image "image_source=$val" "$path"
-done
-end_section
-
-add_section "Poster - ratings_limit"
-for val in 0 1 3 5 8; do
-    path=$(fetch_image "ratings_limit=$val" "poster-default" "ratings_limit=$val" "jpg")
-    add_image "ratings_limit=$val" "$path"
-done
-end_section
-
-add_section "Poster - imageSize"
-for val in medium large; do
-    path=$(fetch_image "imageSize=$val" "poster-default" "imageSize=$val" "jpg")
-    add_image "imageSize=$val" "$path"
-done
-end_section
-
-# Combined poster permutations: position × badge_direction
-add_section "Poster - position × badge_direction"
-for pos in bc tc l r tl tr bl br; do
-    for dir in h v; do
-        path=$(fetch_image "pos=${pos}_dir=${dir}" "poster-default" "position=${pos}&badge_direction=${dir}" "jpg")
-        add_image "position=$pos badge_direction=$dir" "$path"
-    done
-done
-end_section
-
-# Combined poster permutations: badge_style × label_style
-add_section "Poster - badge_style × label_style"
-for bs in h v; do
-    for ls in t i o; do
-        path=$(fetch_image "bs=${bs}_ls=${ls}" "poster-default" "badge_style=${bs}&label_style=${ls}" "jpg")
-        add_image "badge_style=$bs label_style=$ls" "$path"
-    done
-done
-end_section
-
-# Combined: position × text_size
-add_section "Poster - position × text_size"
-for pos in bc tc l r; do
-    for sz in 50 75 100 150 200; do
-        path=$(fetch_image "pos=${pos}_sz=${sz}" "poster-default" "position=${pos}&text_size=${sz}" "jpg")
-        add_image "position=$pos text_size=$sz" "$path"
-    done
-done
-end_section
+render_default "Poster" "jpg" "poster-default"
+render_perm "Poster" "badge_style" "h v d" "jpg" "poster-default"
+render_perm "Poster" "label_style" "t i o" "jpg" "poster-default"
+render_perm "Poster" "text_size" "50 75 100 150 200" "jpg" "poster-default"
+render_perm "Poster" "badge_direction" "h v d" "jpg" "poster-default"
+render_perm "Poster" "position" "bc tc l r tl tr bl br" "jpg" "poster-default"
+render_perm "Poster" "textless" "true false" "jpg" "poster-default"
+render_perm "Poster" "image_source" "t f" "jpg" "poster-default"
+render_perm "Poster" "ratings_limit" "0 1 3 5 8" "jpg" "poster-default"
+render_perm "Poster" "imageSize" "medium large" "jpg" "poster-default"
+render_combined "Poster" "position" "bc tc l r tl tr bl br" "badge_direction" "h v" "jpg" "poster-default"
+render_combined "Poster" "badge_style" "h v" "label_style" "t i o" "jpg" "poster-default"
+render_combined "Poster" "position" "bc tc l r" "text_size" "50 75 100 150 200" "jpg" "poster-default"
 
 echo "Fetching logo permutations..."
-
-# --- Logos ---
-
-add_section "Logo - Default"
-path=$(fetch_image "logo_default" "logo-default" "" "png")
-add_image "default" "$path"
-end_section
-
-add_section "Logo - badge_style"
-for val in h v d; do
-    path=$(fetch_image "logo_badge_style=$val" "logo-default" "badge_style=$val" "png")
-    add_image "badge_style=$val" "$path"
-done
-end_section
-
-add_section "Logo - label_style"
-for val in t i o; do
-    path=$(fetch_image "logo_label_style=$val" "logo-default" "label_style=$val" "png")
-    add_image "label_style=$val" "$path"
-done
-end_section
-
-add_section "Logo - text_size"
-for val in 50 75 100 150 200; do
-    path=$(fetch_image "logo_text_size=$val" "logo-default" "text_size=$val" "png")
-    add_image "text_size=$val" "$path"
-done
-end_section
-
-add_section "Logo - image_source"
-for val in t f; do
-    path=$(fetch_image "logo_image_source=$val" "logo-default" "image_source=$val" "png")
-    add_image "image_source=$val" "$path"
-done
-end_section
-
-add_section "Logo - ratings_limit"
-for val in 0 1 3 5 8; do
-    path=$(fetch_image "logo_ratings_limit=$val" "logo-default" "ratings_limit=$val" "png")
-    add_image "ratings_limit=$val" "$path"
-done
-end_section
-
-add_section "Logo - imageSize"
-for val in medium large; do
-    path=$(fetch_image "logo_imageSize=$val" "logo-default" "imageSize=$val" "png")
-    add_image "imageSize=$val" "$path"
-done
-end_section
-
-# Combined logo: badge_style × label_style
-add_section "Logo - badge_style × label_style"
-for bs in h v; do
-    for ls in t i o; do
-        path=$(fetch_image "logo_bs=${bs}_ls=${ls}" "logo-default" "badge_style=${bs}&label_style=${ls}" "png")
-        add_image "badge_style=$bs label_style=$ls" "$path"
-    done
-done
-end_section
+render_default "Logo" "png" "logo-default"
+render_perm "Logo" "badge_style" "h v d" "png" "logo-default"
+render_perm "Logo" "label_style" "t i o" "png" "logo-default"
+render_perm "Logo" "text_size" "50 75 100 150 200" "png" "logo-default"
+render_perm "Logo" "image_source" "t f" "png" "logo-default"
+render_perm "Logo" "ratings_limit" "0 1 3 5 8" "png" "logo-default"
+render_perm "Logo" "imageSize" "medium large" "png" "logo-default"
+render_combined "Logo" "badge_style" "h v" "label_style" "t i o" "png" "logo-default"
 
 echo "Fetching backdrop permutations..."
-
-# --- Backdrops ---
-
-add_section "Backdrop - Default"
-path=$(fetch_image "backdrop_default" "backdrop-default" "" "jpg")
-add_image "default" "$path"
-end_section
-
-add_section "Backdrop - badge_style"
-for val in h v d; do
-    path=$(fetch_image "backdrop_badge_style=$val" "backdrop-default" "badge_style=$val" "jpg")
-    add_image "badge_style=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - label_style"
-for val in t i o; do
-    path=$(fetch_image "backdrop_label_style=$val" "backdrop-default" "label_style=$val" "jpg")
-    add_image "label_style=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - text_size"
-for val in 50 75 100 150 200; do
-    path=$(fetch_image "backdrop_text_size=$val" "backdrop-default" "text_size=$val" "jpg")
-    add_image "text_size=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - badge_direction"
-for val in h v d; do
-    path=$(fetch_image "backdrop_badge_direction=$val" "backdrop-default" "badge_direction=$val" "jpg")
-    add_image "badge_direction=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - position"
-for val in bc tc l r tl tr bl br; do
-    path=$(fetch_image "backdrop_position=$val" "backdrop-default" "position=$val" "jpg")
-    add_image "position=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - image_source"
-for val in t f; do
-    path=$(fetch_image "backdrop_image_source=$val" "backdrop-default" "image_source=$val" "jpg")
-    add_image "image_source=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - ratings_limit"
-for val in 0 1 3 5 8; do
-    path=$(fetch_image "backdrop_ratings_limit=$val" "backdrop-default" "ratings_limit=$val" "jpg")
-    add_image "ratings_limit=$val" "$path"
-done
-end_section
-
-add_section "Backdrop - imageSize"
-for val in small medium large; do
-    path=$(fetch_image "backdrop_imageSize=$val" "backdrop-default" "imageSize=$val" "jpg")
-    add_image "imageSize=$val" "$path"
-done
-end_section
-
-# Combined backdrop: position × badge_direction (needs multiple ratings to see direction)
-add_section "Backdrop - position × badge_direction"
-for pos in bc tc l r tl tr bl br; do
-    for dir in h v; do
-        path=$(fetch_image "backdrop_pos=${pos}_dir=${dir}" "backdrop-default" "position=${pos}&badge_direction=${dir}" "jpg")
-        add_image "position=$pos badge_direction=$dir" "$path"
-    done
-done
-end_section
-
-# Combined backdrop: badge_style × label_style
-add_section "Backdrop - badge_style × label_style"
-for bs in h v; do
-    for ls in t i o; do
-        path=$(fetch_image "backdrop_bs=${bs}_ls=${ls}" "backdrop-default" "badge_style=${bs}&label_style=${ls}" "jpg")
-        add_image "badge_style=$bs label_style=$ls" "$path"
-    done
-done
-end_section
+render_default "Backdrop" "jpg" "backdrop-default"
+render_perm "Backdrop" "badge_style" "h v d" "jpg" "backdrop-default"
+render_perm "Backdrop" "label_style" "t i o" "jpg" "backdrop-default"
+render_perm "Backdrop" "text_size" "50 75 100 150 200" "jpg" "backdrop-default"
+render_perm "Backdrop" "badge_direction" "h v d" "jpg" "backdrop-default"
+render_perm "Backdrop" "position" "bc tc l r tl tr bl br" "jpg" "backdrop-default"
+render_perm "Backdrop" "image_source" "t f" "jpg" "backdrop-default"
+render_perm "Backdrop" "ratings_limit" "0 1 3 5 8" "jpg" "backdrop-default"
+render_perm "Backdrop" "imageSize" "small medium large" "jpg" "backdrop-default"
+render_combined "Backdrop" "position" "bc tc l r tl tr bl br" "badge_direction" "h v" "jpg" "backdrop-default"
+render_combined "Backdrop" "badge_style" "h v" "label_style" "t i o" "jpg" "backdrop-default"
 
 echo "Fetching episode permutations..."
-
-# --- Episodes ---
-
-add_section "Episode - Default"
-path=$(fetch_image "episode_default" "episode-default" "ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-add_image "default" "$path"
-end_section
-
-add_section "Episode - badge_style"
-for val in h v d; do
-    path=$(fetch_image "episode_badge_style=$val" "episode-default" "badge_style=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "badge_style=$val" "$path"
-done
-end_section
-
-add_section "Episode - label_style"
-for val in t i o; do
-    path=$(fetch_image "episode_label_style=$val" "episode-default" "label_style=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "label_style=$val" "$path"
-done
-end_section
-
-add_section "Episode - text_size"
-for val in 50 75 100 150 200; do
-    path=$(fetch_image "episode_text_size=$val" "episode-default" "text_size=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "text_size=$val" "$path"
-done
-end_section
-
-add_section "Episode - badge_direction"
-for val in h v d; do
-    path=$(fetch_image "episode_badge_direction=$val" "episode-default" "badge_direction=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "badge_direction=$val" "$path"
-done
-end_section
-
-add_section "Episode - position"
-for val in bc tc l r tl tr bl br; do
-    path=$(fetch_image "episode_position=$val" "episode-default" "position=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "position=$val" "$path"
-done
-end_section
-
-add_section "Episode - blur"
-for val in true false; do
-    path=$(fetch_image "episode_blur=$val" "episode-default" "blur=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "blur=$val" "$path"
-done
-end_section
-
-add_section "Episode - ratings_limit"
-for val in 0 1 3 5 8; do
-    path=$(fetch_image "episode_ratings_limit=$val" "episode-default" "ratings_limit=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "ratings_limit=$val" "$path"
-done
-end_section
-
-add_section "Episode - imageSize"
-for val in medium large; do
-    path=$(fetch_image "episode_imageSize=$val" "episode-default" "imageSize=$val&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-    add_image "imageSize=$val" "$path"
-done
-end_section
-
-# Combined episode: position × badge_direction (needs 2 ratings to see direction)
-add_section "Episode - position × badge_direction"
-for pos in bc tc l r tl tr bl br; do
-    for dir in h v; do
-        path=$(fetch_image "ep_pos=${pos}_dir=${dir}" "episode-default" "position=${pos}&badge_direction=${dir}&ratings_limit=2&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-        add_image "position=$pos badge_direction=$dir" "$path"
-    done
-done
-end_section
-
-# Combined episode: badge_style × label_style
-add_section "Episode - badge_style × label_style"
-for bs in h v; do
-    for ls in t i o; do
-        path=$(fetch_image "ep_bs=${bs}_ls=${ls}" "episode-default" "badge_style=${bs}&label_style=${ls}&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-        add_image "badge_style=$bs label_style=$ls" "$path"
-    done
-done
-end_section
-
-# Combined episode: blur × badge_style
-add_section "Episode - blur × badge_style"
-for blur in true false; do
-    for bs in h v d; do
-        path=$(fetch_image "ep_blur=${blur}_bs=${bs}" "episode-default" "blur=${blur}&badge_style=${bs}&ratings_order=imdb,tmdb" "jpg" "imdb" "$EPISODE_ID")
-        add_image "blur=$blur badge_style=$bs" "$path"
-    done
-done
-end_section
+render_default "Episode" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "badge_style" "h v d" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "label_style" "t i o" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "text_size" "50 75 100 150 200" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "badge_direction" "h v d" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "position" "bc tc l r tl tr bl br" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "blur" "true false" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "ratings_limit" "0 1 3 5 8" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_perm "Episode" "imageSize" "medium large" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+# Combined position × badge_direction: needs ratings_limit=2 to show direction.
+render_combined "Episode" "position" "bc tc l r tl tr bl br" "badge_direction" "h v" "jpg" "episode-default" "$EPISODE_ID" "ratings_limit=2&${EP_EXTRA}"
+render_combined "Episode" "badge_style" "h v" "label_style" "t i o" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
+render_combined "Episode" "blur" "true false" "badge_style" "h v d" "jpg" "episode-default" "$EPISODE_ID" "$EP_EXTRA"
 
 echo "Generating HTML report..."
 

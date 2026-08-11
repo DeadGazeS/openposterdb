@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"openposterdb/internal/httpx"
 	appimg "openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
@@ -17,11 +18,11 @@ import (
 // be whitelisted by the image package.
 func HandleIcon(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, 405, "Method not allowed")
+		httpx.WriteError(w, 405, "Method not allowed")
 		return
 	}
 	if !appimg.ServeIcon(w, r.PathValue("kind"), r.PathValue("key")) {
-		writeError(w, 404, "icon not found")
+		httpx.WriteError(w, 404, "icon not found")
 	}
 }
 
@@ -38,23 +39,23 @@ func HandleIcon(w http.ResponseWriter, r *http.Request) {
 func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeError(w, 405, "Method not allowed")
+			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
 		src := services.SourceFromKey(r.URL.Query().Get("source"))
 		if src == nil {
-			writeError(w, 400, "unknown source")
+			httpx.WriteError(w, 400, "unknown source")
 			return
 		}
 		value := r.URL.Query().Get("value")
 		if value == "" {
-			writeError(w, 400, "missing value")
+			httpx.WriteError(w, 400, "missing value")
 			return
 		}
 
-		globals, err := services.GetGlobalSettings(db)
+		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
-			writeError(w, 500, "failed to load settings")
+			httpx.WriteError(w, 500, "failed to load settings")
 			return
 		}
 		settings := services.ParseGlobalRenderSettings(globals)
@@ -110,7 +111,7 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 		valueFace := appimg.GetValueFontFace()
 		labelFace := appimg.GetFontFace()
 		if valueFace == nil || labelFace == nil {
-			writeError(w, 500, "font not loaded")
+			httpx.WriteError(w, 500, "font not loaded")
 			return
 		}
 
@@ -141,13 +142,13 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 			}
 		}
 		if target == nil {
-			writeError(w, 500, "render failed")
+			httpx.WriteError(w, 500, "render failed")
 			return
 		}
 
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, target); err != nil {
-			writeError(w, 500, "render failed")
+			httpx.WriteError(w, 500, "render failed")
 			return
 		}
 		w.Header().Set("Content-Type", "image/png")

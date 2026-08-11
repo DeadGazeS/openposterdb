@@ -123,3 +123,58 @@ func TestMemCacheSetReplacesWeight(t *testing.T) {
 		t.Errorf("Get(a) should return the new value")
 	}
 }
+
+func TestMemCacheGetDue_DisabledByDefault(t *testing.T) {
+	c := NewMemCache(0, 0, time.Hour, 0)
+	c.Set("k", []byte("v"), 1)
+	v, ok, due := c.GetDue("k")
+	if !ok || string(v.([]byte)) != "v" {
+		t.Fatalf("GetDue: ok=%v v=%v", ok, v)
+	}
+	if due {
+		t.Fatal("revalidation must be disabled when revalidateAfter is 0")
+	}
+}
+
+func TestMemCacheGetDue_WindowElapsed(t *testing.T) {
+	c := NewMemCache(0, 0, time.Hour, 0)
+	c.SetRevalidateAfter(20 * time.Millisecond)
+	c.Set("k", []byte("v"), 1)
+
+	// Immediately after Set, lastChecked is fresh → not due.
+	if _, ok, due := c.GetDue("k"); !ok || due {
+		t.Fatalf("fresh entry must not be due (ok=%v due=%v)", ok, due)
+	}
+	time.Sleep(40 * time.Millisecond)
+	_, ok, due := c.GetDue("k")
+	if !ok || !due {
+		t.Fatalf("entry past the window must be due (ok=%v due=%v)", ok, due)
+	}
+
+	// Touch resets the clock → not due again.
+	c.Touch("k")
+	if _, _, due := c.GetDue("k"); due {
+		t.Fatal("Touch must reset the revalidation clock")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if _, _, due := c.GetDue("k"); !due {
+		t.Fatal("entry must become due again after the window")
+	}
+}
+
+func TestMemCacheTouch_MissingKeyNoop(t *testing.T) {
+	c := NewMemCache(0, 0, time.Hour, 0)
+	c.Touch("missing") // must not panic
+}
+
+func TestMemCacheGetDue_ExpiredStillRemoves(t *testing.T) {
+	c := NewMemCache(0, 0, 10*time.Millisecond, 0)
+	c.Set("k", []byte("v"), 1)
+	time.Sleep(30 * time.Millisecond)
+	if _, ok, _ := c.GetDue("k"); ok {
+		t.Fatal("TTL-expired entry must be removed on GetDue")
+	}
+	if c.Len() != 0 {
+		t.Fatalf("expired entry not removed, Len=%d", c.Len())
+	}
+}

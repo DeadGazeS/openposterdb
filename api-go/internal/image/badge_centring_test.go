@@ -13,7 +13,7 @@ import (
 // horizontalValueSection returns the value section x-range [x0,x1) for a
 // rendered horizontal badge, mirroring renderBadgeInner's layout math.
 func horizontalValueSection(badge *services.RatingBadge, style services.BadgeStyle, labelFontFace, valueFontFace font.Face, labelStyle services.LabelStyle, dims scaledDims, textScale float32) (x0, x1 int) {
-	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale, 1.0)
+	maxLabelW := labelWidthForStyle(badge, labelStyle, labelFontFace, dims, textScale)
 	maxValueW := baseTextWidth(badge.Value, valueFontFace, textScale)
 	labelSectionW := 0
 	if labelStyle.UsesIcon() {
@@ -21,10 +21,9 @@ func horizontalValueSection(badge *services.RatingBadge, style services.BadgeSty
 		// equal outer margin + tiny inward gap), mirroring renderBadgeInner.
 		if icon := iconForBadge(badge, labelStyle); icon != nil {
 			baseIconW, baseIconH2 := badgeIconAndSize(badge, labelStyle, dims.iconHeight, icon)
-			iconPad := (int(dims.badgeHeight) - int(baseIconH2)) / 2 // pillPad = 0 for rounded
-			if iconPad < 0 {
-				iconPad = 0
-			}
+			iconPad := max(
+				// pillPad = 0 for rounded
+				(int(dims.badgeHeight)-int(baseIconH2))/2, 0)
 			labelSectionW = int(baseIconW) + iconPad + badgeInwardGap
 		}
 	} else {
@@ -226,13 +225,13 @@ func TestOversizedValueClippedToValueSection(t *testing.T) {
 
 	// Both badges share the same label section width.
 	dims := newScaledDims(1.0)
-	labelSectionW := int(labelWidthForStyle(&services.RatingBadge{Source: services.SourceImdb}, services.LabelStyleText, labelFace, dims, 2.0, 1.0)) + 2*int(dims.textLabelPadH)
+	labelSectionW := int(labelWidthForStyle(&services.RatingBadge{Source: services.SourceImdb}, services.LabelStyleText, labelFace, dims, 2.0)) + 2*int(dims.textLabelPadH)
 	if labelSectionW > full.Bounds().Dx() || labelSectionW > control.Bounds().Dx() {
 		t.Fatalf("label section %d exceeds badge widths %d/%d", labelSectionW, full.Bounds().Dx(), control.Bounds().Dx())
 	}
 
 	for y := 0; y < full.Bounds().Dy(); y++ {
-		for x := 0; x < labelSectionW; x++ {
+		for x := range labelSectionW {
 			a := full.RGBAAt(x, y)
 			b := control.RGBAAt(x, y)
 			if a != b {
@@ -273,8 +272,8 @@ func TestValueTextCentredWithIconLabel(t *testing.T) {
 	// A synthetic 48x48 square icon matches every real source icon (white
 	// icons are 48x48, official/highRes are fit in a 48x48 box).
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -359,7 +358,7 @@ func TestUniformRowValueTextCentred(t *testing.T) {
 	dims := newScaledDims(1.0)
 	var maxLabelW, maxValueW int
 	for i := range row {
-		if w := labelWidthForStyle(&row[i], services.LabelStyleText, lf, dims, 1.0, 1.0); w > maxLabelW {
+		if w := labelWidthForStyle(&row[i], services.LabelStyleText, lf, dims, 1.0); w > maxLabelW {
 			maxLabelW = w
 		}
 		if w := baseTextWidth(row[i].Value, vf, 1.0); w > maxValueW {
@@ -407,8 +406,8 @@ func TestContentNeverTouchesBadgeBorder(t *testing.T) {
 
 	// A synthetic 48x48 square icon matches every real source icon.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -542,8 +541,8 @@ func TestLogoDecoupledFromBadgeScale(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -647,7 +646,7 @@ func TestBadgeBoxScalesPerAxis(t *testing.T) {
 	// only the value section widens. Compute the fixed label and base value
 	// widths from the same layout math used by renderBadgeInner.
 	dims := newScaledDims(1.0)
-	labelSectionW := int(labelWidthForStyle(&badge, services.LabelStyleText, lf, dims, 1.0, 1.0)) + 2*int(dims.textLabelPadH)
+	labelSectionW := int(labelWidthForStyle(&badge, services.LabelStyleText, lf, dims, 1.0)) + 2*int(dims.textLabelPadH)
 	valueSectionW := baseTextWidth(badge.Value, vf, 1.0) + int(dims.badgeValuePad) + int(dims.badgeValuePad)/2 + 2
 
 	if expectedWideW := labelSectionW + 2*valueSectionW; ww != expectedWideW {
@@ -681,8 +680,8 @@ func TestLogoUniformOuterMarginsAndInwardMinimal(t *testing.T) {
 
 	// A synthetic 48x48 square icon matches every real default source icon.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -821,8 +820,8 @@ func TestLogoAnchorMarginConstantAcrossBadgeSize(t *testing.T) {
 
 	// A synthetic square icon makes the margins predictable.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -921,8 +920,8 @@ func TestSliderOrthogonality(t *testing.T) {
 	defer valueFace2.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -1112,8 +1111,8 @@ func TestOversizedLogoClippingPreservesAnchor(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}

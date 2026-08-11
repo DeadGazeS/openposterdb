@@ -5,7 +5,7 @@ import FreeApiKeyCard from '@/components/FreeApiKeyCard.vue'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { DEFAULT_RATINGS_ORDER } from '@/lib/constants'
-import type { FreeKeyDefaults } from '@/lib/auth-api'
+import type { FreeKeyDefaults } from '@/lib/settings'
 
 vi.mock('@/stores/auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/auth')>()

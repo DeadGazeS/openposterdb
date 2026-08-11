@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { IMAGE_LIST_KINDS, IMAGE_LIST_TITLES } from '@/lib/api'
 
 export async function routeGuard(to: RouteLocationNormalized) {
   const auth = useAuthStore()
@@ -85,30 +86,17 @@ const router = createRouter({
           component: () => import('@/views/DashboardView.vue'),
           meta: { title: 'Dashboard' },
         },
-        {
-          path: 'posters',
-          name: 'posters',
-          component: () => import('@/views/PostersView.vue'),
-          meta: { title: 'Posters' },
-        },
-        {
-          path: 'logos',
-          name: 'logos',
-          component: () => import('@/views/LogosView.vue'),
-          meta: { title: 'Logos' },
-        },
-        {
-          path: 'backdrops',
-          name: 'backdrops',
-          component: () => import('@/views/BackdropsView.vue'),
-          meta: { title: 'Backdrops' },
-        },
-        {
-          path: 'episodes',
-          name: 'episodes',
-          component: () => import('@/views/EpisodesView.vue'),
-          meta: { title: 'Episodes' },
-        },
+        // Admin image gallery — single route per kind, all sharing the
+        // AdminListView wrapper + the per-kind config table in @/lib/api.
+        // Route name + path are kept plural for backward compat with
+        // existing router.push({ name: 'posters' }) callers.
+        ...IMAGE_LIST_KINDS.map((kind) => ({
+          path: `${kind === 'logo' ? 'logo' : kind}s`,
+          name: `${kind === 'logo' ? 'logo' : kind}s`,
+          component: () => import('@/views/AdminListView.vue'),
+          props: { kind },
+          meta: { title: IMAGE_LIST_TITLES[kind] },
+        })),
         {
           path: 'keys',
           redirect: { name: 'settings-api' },
@@ -133,7 +121,7 @@ const router = createRouter({
           path: 'settings/image',
           name: 'settings-image',
           component: () => import('@/views/SettingsView.vue'),
-          meta: { title: 'Global Image' },
+          meta: { title: 'Global Image Settings' },
         },
       ],
     },

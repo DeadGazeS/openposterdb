@@ -1,9 +1,14 @@
 package config
 
 import (
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -22,34 +27,47 @@ type Config struct {
 	ImageMemCacheMB     uint64
 	StaticDir           string
 	CORSOrigin          string
-	EnableCDNRedirects  bool
+	RateLimitRPM        uint64
+	RateLimitCDNRPM     uint64
 	ExternalCacheOnly   bool
+	EnableCDNRedirects  bool
 	FreeKeyEnabled      *bool
 	DisablePublicPages  bool
 	LogLevel            string
+	JWTSecret           []byte
+	SecureCookies       bool
+	AdminUsername       string
+	AdminPassword       string
 }
 
-func FromEnv() *Config {
+func FromEnv() (*Config, error) {
+	// Load .env into the process env if present. Already-set env vars take
+	// precedence (godotenv.Load does not overwrite); quotes/inline comments
+	// are handled by godotenv so the sanitizeValue workaround below is gone.
+	_ = godotenv.Load()
+
 	c := &Config{
-		TMDBAPIKey:          sanitizeValue(optionalSecret("TMDB_API_KEY")),
-		OMDBAPIKey:          sanitizeValue(optionalSecret("OMDB_API_KEY")),
-		MDBListAPIKeys:      sanitizeSecrets(optionalSecrets("MDBLIST_API_KEY")),
-		FanartAPIKey:        sanitizeValue(optionalSecret("FANART_API_KEY")),
-		TraktClientID:       sanitizeValue(optionalSecret("TRAKT_CLIENT_ID")),
-		CacheDir:            sanitizeValue(envOrDefault("CACHE_DIR", "./cache")),
-		DBDir:               sanitizeValue(envOrDefault("DB_DIR", "./db")),
-		ListenAddr:          sanitizeValue(envOrDefault("LISTEN_ADDR", "0.0.0.0:3000")),
+		TMDBAPIKey:          optionalSecret("TMDB_API_KEY"),
+		OMDBAPIKey:          optionalSecret("OMDB_API_KEY"),
+		MDBListAPIKeys:      optionalSecrets("MDBLIST_API_KEY"),
+		FanartAPIKey:        optionalSecret("FANART_API_KEY"),
+		TraktClientID:       optionalSecret("TRAKT_CLIENT_ID"),
+		CacheDir:            envOrDefault("CACHE_DIR", "./cache"),
+		DBDir:               envOrDefault("DB_DIR", "./db"),
+		ListenAddr:          envOrDefault("LISTEN_ADDR", "0.0.0.0:3000"),
 		RatingsMinStaleSecs: envUint64OrDefault("RATINGS_STALE_SECS", 86400),
 		RatingsMaxAgeSecs:   envUint64OrDefault("RATINGS_MAX_AGE_SECS", 31536000),
 		ImageStaleSecs:      envUint64OrDefault("IMAGE_STALE_SECS", 0),
 		ImageQuality:        envUint8OrDefault("IMAGE_QUALITY", 85),
 		ImageMemCacheMB:     envUint64OrDefault("IMAGE_MEM_CACHE_MB", 512),
-		StaticDir:           sanitizeValue(os.Getenv("STATIC_DIR")),
-		CORSOrigin:          sanitizeValue(os.Getenv("CORS_ORIGIN")),
-		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
+		StaticDir:           os.Getenv("STATIC_DIR"),
+		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
+		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
+		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
+		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
-		LogLevel:            sanitizeValue(envOrDefault("LOG_LEVEL", "info")),
+		LogLevel:            envOrDefault("LOG_LEVEL", "info"),
 	}
 
 	if v := os.Getenv("FREE_KEY_ENABLED"); v != "" {
@@ -57,15 +75,45 @@ func FromEnv() *Config {
 		c.FreeKeyEnabled = &b
 	}
 
-	return c
+	jwtSecret, err := loadJWTSecret()
+	if err != nil {
+		return nil, err
+	}
+	c.JWTSecret = jwtSecret
+	c.SecureCookies = loadSecureCookies()
+	c.AdminUsername = os.Getenv("ADMIN_USERNAME")
+	c.AdminPassword = os.Getenv("ADMIN_PASSWORD")
+
+	return c, nil
 }
 
-func requireEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic(key + " must be set")
+// loadJWTSecret reads the required JWT_SECRET env var (64 hex chars = 32
+// bytes) and returns an actionable error when it is missing or invalid.
+func loadJWTSecret() ([]byte, error) {
+	hexStr := os.Getenv("JWT_SECRET")
+	if hexStr == "" {
+		return nil, errors.New("JWT_SECRET is not set. This is required.\n" +
+			"Generate one with: openssl rand -hex 32\n" +
+			"Then add it to your .env file.")
 	}
-	return v
+	bytes, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("JWT_SECRET is not valid hex: %w", err)
+	}
+	if len(bytes) != 32 {
+		return nil, fmt.Errorf("JWT_SECRET must be 32 bytes (64 hex chars), got %d", len(bytes))
+	}
+	return bytes, nil
+}
+
+// loadSecureCookies reports whether cookies get the Secure attribute. Defaults
+// to true unless COOKIE_SECURE is explicitly "false" or "0".
+func loadSecureCookies() bool {
+	val := os.Getenv("COOKIE_SECURE")
+	if val == "" {
+		return true
+	}
+	return val != "false" && val != "0"
 }
 
 func optionalSecret(key string) string {
@@ -123,25 +171,4 @@ func envUint8OrDefault(key string, def uint8) uint8 {
 func envBool(key string) bool {
 	v := os.Getenv(key)
 	return v == "true" || v == "1"
-}
-
-// sanitizeValue guards against trailing annotations accidentally ending up in a
-// value. Docker's env_file does not strip inline comments, so a line like
-// "LOG_LEVEL=debug (optional)" would otherwise set the whole string.
-func sanitizeValue(v string) string {
-	v = strings.TrimSpace(v)
-	if i := strings.IndexAny(v, " \t("); i >= 0 {
-		v = v[:i]
-	}
-	return v
-}
-
-func sanitizeSecrets(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if s := sanitizeValue(k); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
 }

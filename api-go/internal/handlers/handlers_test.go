@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"openposterdb/internal/services"
@@ -27,15 +30,15 @@ func TestHashRefreshTokenDifferent(t *testing.T) {
 }
 
 func TestHashAPIKeyDeterministic(t *testing.T) {
-	a := HashAPIKey("testkey123")
-	b := HashAPIKey("testkey123")
+	a := services.HashAPIKey("testkey123")
+	b := services.HashAPIKey("testkey123")
 	if a != b {
 		t.Error("same input should produce same hash")
 	}
 }
 
 func TestGenerateAPIKey(t *testing.T) {
-	raw, hash, prefix := GenerateAPIKey()
+	raw, hash, prefix := services.GenerateAPIKey()
 	if len(raw) != 64 {
 		t.Errorf("raw key should be 64 chars, got %d", len(raw))
 	}
@@ -45,7 +48,7 @@ func TestGenerateAPIKey(t *testing.T) {
 	if hash == "" {
 		t.Error("hash should not be empty")
 	}
-	if HashAPIKey(raw) != hash {
+	if services.HashAPIKey(raw) != hash {
 		t.Error("hash should match")
 	}
 	if raw[:8] != prefix {
@@ -54,11 +57,11 @@ func TestGenerateAPIKey(t *testing.T) {
 }
 
 func TestHashPassword(t *testing.T) {
-	h1, err := HashPassword("testpassword")
+	h1, err := services.HashPassword("testpassword")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h2, _ := HashPassword("testpassword")
+	h2, _ := services.HashPassword("testpassword")
 	// Passwords should hash differently due to random salt
 	if h1 == h2 {
 		t.Error("same password should produce different hashes due to salt")
@@ -66,12 +69,12 @@ func TestHashPassword(t *testing.T) {
 }
 
 func TestVerifyPassword(t *testing.T) {
-	hash, _ := HashPassword("correctpass")
-	ok, _ := VerifyPassword("correctpass", hash)
+	hash, _ := services.HashPassword("correctpass")
+	ok, _ := services.VerifyPassword("correctpass", hash)
 	if !ok {
 		t.Error("correct password should verify")
 	}
-	ok, _ = VerifyPassword("wrongpass", hash)
+	ok, _ = services.VerifyPassword("wrongpass", hash)
 	if ok {
 		t.Error("wrong password should not verify")
 	}
@@ -210,17 +213,17 @@ func TestApplyQueryOverridesBadgeWidthHeight(t *testing.T) {
 	}
 }
 
-func TestFreeKeySettingsFromRender(t *testing.T) {
+func TestSettingsResponseMap(t *testing.T) {
 	s := services.DefaultRenderSettings()
-	resp := freeKeySettingsFromRender(&s)
-	if resp.ImageSource != "t" {
-		t.Error("wrong image_source")
+	resp := services.SettingsResponseMap(&s)
+	if resp["image_source"] != "t" {
+		t.Errorf("wrong image_source: %v", resp["image_source"])
 	}
-	if resp.Lang != "en" {
-		t.Error("wrong lang")
+	if resp["lang"] != "en" {
+		t.Errorf("wrong lang: %v", resp["lang"])
 	}
-	if resp.RatingsLimit != 3 {
-		t.Error("wrong ratings_limit")
+	if resp["ratings_limit"] != int32(3) {
+		t.Errorf("wrong ratings_limit: %v", resp["ratings_limit"])
 	}
 }
 
@@ -254,7 +257,7 @@ func TestGlobalSettingsBadgeWidthHeightRoundTrip(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("GET failed: %d %s", rec.Code, rec.Body.String())
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
@@ -345,5 +348,309 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 	}
 	if prefs["disclaimer_minimised"] != "minimised" || prefs["other"] != "x" {
 		t.Errorf("merge failed: %v", prefs)
+	}
+}
+
+// TestLogoutRevokesRefreshTokens guards the logout-revocation contract:
+// before the fix, LogoutHandler was a no-op that looked up the user and
+// returned, so refresh tokens outlived logout. The fix calls
+// DeleteRefreshTokensForUser, so every refresh row for the user disappears
+// after LogoutHandler returns.
+func TestLogoutRevokesRefreshTokens(t *testing.T) {
+	db := newHandlersTestDB(t)
+
+	// refresh_tokens isn't in apiKeySettingsTestSchema; create a minimal copy.
+	if _, err := db.Exec(`CREATE TABLE refresh_tokens (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		token_hash TEXT NOT NULL UNIQUE,
+		expires_at TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed an admin user.
+	res, err := db.Exec("INSERT INTO admin_users (username, password_hash) VALUES ('admin', 'x')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := res.LastInsertId()
+
+	// Issue two refresh tokens for this user.
+	if _, err := services.CreateRefreshToken(db, userID, HashRefreshToken("tok-a"), "2099-01-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := services.CreateRefreshToken(db, userID, HashRefreshToken("tok-b"), "2099-01-01 00:00:00"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-condition: both rows present.
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", userID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("setup: want 2 tokens, got %d", count)
+	}
+
+	// Logout.
+	if err := LogoutHandler(context.Background(), db, "admin"); err != nil {
+		t.Fatalf("LogoutHandler: %v", err)
+	}
+
+	// Post-condition: every refresh row for this user is gone.
+	if err := db.QueryRow("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", userID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("after logout: want 0 tokens, got %d", count)
+	}
+}
+
+// TestApplyQueryOverridesEveryKindGetsEveryPerKindField guards the drift class
+// behind the 2026-08-04 badge-width bug: a per-kind setting that reaches some
+// kinds but not others. Each per-kind query param is applied on its own and
+// must land on the target kind's field for all four kinds — and must leave the
+// other three kinds untouched.
+func TestApplyQueryOverridesEveryKindGetsEveryPerKindField(t *testing.T) {
+	kinds := []string{"poster", "logo", "backdrop", "episode"}
+
+	// read returns the per-kind field value for (kind, field) so the test
+	// names the fields independently of applyQueryOverrides' own mapping.
+	read := func(s *services.RenderSettings, kind, field string) any {
+		switch kind {
+		case "poster":
+			switch field {
+			case "ratings_limit":
+				return s.RatingsLimit
+			case "badge_style":
+				return s.PosterBadgeStyle
+			case "label_style":
+				return s.PosterLabelStyle
+			case "text_size":
+				return s.PosterTextSize
+			case "badge_size":
+				return s.PosterBadgeSize
+			case "badge_width":
+				return s.PosterBadgeWidth
+			case "badge_height":
+				return s.PosterBadgeHeight
+			case "logo_size":
+				return s.PosterLogoSize
+			case "badge_shape":
+				return s.PosterBadgeShape
+			case "badge_alpha":
+				return s.PosterBadgeAlpha
+			}
+		case "logo":
+			switch field {
+			case "ratings_limit":
+				return s.LogoRatingsLimit
+			case "badge_style":
+				return s.LogoBadgeStyle
+			case "label_style":
+				return s.LogoLabelStyle
+			case "text_size":
+				return s.LogoTextSize
+			case "badge_size":
+				return s.LogoBadgeSize
+			case "badge_width":
+				return s.LogoBadgeWidth
+			case "badge_height":
+				return s.LogoBadgeHeight
+			case "logo_size":
+				return s.LogoLogoSize
+			case "badge_shape":
+				return s.LogoBadgeShape
+			case "badge_alpha":
+				return s.LogoBadgeAlpha
+			}
+		case "backdrop":
+			switch field {
+			case "ratings_limit":
+				return s.BackdropRatingsLimit
+			case "badge_style":
+				return s.BackdropBadgeStyle
+			case "label_style":
+				return s.BackdropLabelStyle
+			case "text_size":
+				return s.BackdropTextSize
+			case "badge_size":
+				return s.BackdropBadgeSize
+			case "badge_width":
+				return s.BackdropBadgeWidth
+			case "badge_height":
+				return s.BackdropBadgeHeight
+			case "logo_size":
+				return s.BackdropLogoSize
+			case "badge_shape":
+				return s.BackdropBadgeShape
+			case "badge_alpha":
+				return s.BackdropBadgeAlpha
+			}
+		case "episode":
+			switch field {
+			case "ratings_limit":
+				return s.EpisodeRatingsLimit
+			case "badge_style":
+				return s.EpisodeBadgeStyle
+			case "label_style":
+				return s.EpisodeLabelStyle
+			case "text_size":
+				return s.EpisodeTextSize
+			case "badge_size":
+				return s.EpisodeBadgeSize
+			case "badge_width":
+				return s.EpisodeBadgeWidth
+			case "badge_height":
+				return s.EpisodeBadgeHeight
+			case "logo_size":
+				return s.EpisodeLogoSize
+			case "badge_shape":
+				return s.EpisodeBadgeShape
+			case "badge_alpha":
+				return s.EpisodeBadgeAlpha
+			}
+		}
+		t.Fatalf("no accessor for %s/%s", kind, field)
+		return nil
+	}
+
+	i32 := func(v int32) *int32 { return &v }
+	str := func(v string) *string { return &v }
+
+	cases := []struct {
+		field string
+		query func() *ImageQuery
+		want  any
+	}{
+		{"ratings_limit", func() *ImageQuery { return &ImageQuery{RatingsLimit: i32(4)} }, int32(4)},
+		{"badge_style", func() *ImageQuery { return &ImageQuery{BadgeStyle: str("h")} }, services.BadgeStyleLogoLeftValueRight},
+		{"label_style", func() *ImageQuery { return &ImageQuery{LabelStyle: str("i")} }, services.LabelStyleIcon},
+		{"text_size", func() *ImageQuery { return &ImageQuery{TextSize: i32(130)} }, services.ScalePercent(130)},
+		{"badge_size", func() *ImageQuery { return &ImageQuery{BadgeSize: i32(140)} }, services.ScalePercent(140)},
+		{"badge_width", func() *ImageQuery { return &ImageQuery{BadgeWidth: i32(150)} }, services.ScalePercent(150)},
+		{"badge_height", func() *ImageQuery { return &ImageQuery{BadgeHeight: i32(160)} }, services.ScalePercent(160)},
+		{"logo_size", func() *ImageQuery { return &ImageQuery{LogoSize: i32(170)} }, services.ScalePercent(170)},
+		{"badge_shape", func() *ImageQuery { return &ImageQuery{BadgeShape: str("pill")} }, services.BadgeShape("pill")},
+		{"badge_alpha", func() *ImageQuery { return &ImageQuery{BadgeAlpha: i32(80)} }, services.BadgeAlpha(80)},
+	}
+
+	for _, c := range cases {
+		for _, kind := range kinds {
+			base := services.DefaultRenderSettings()
+			got := applyQueryOverrides(&base, c.query(), kind)
+
+			if v := read(got, kind, c.field); v != c.want {
+				t.Errorf("?%s on kind %q: got %v, want %v", c.field, kind, v, c.want)
+			}
+
+			// The other three kinds must be untouched.
+			for _, other := range kinds {
+				if other == kind {
+					continue
+				}
+				if v, orig := read(got, other, c.field), read(&base, other, c.field); v != orig {
+					t.Errorf("?%s on kind %q leaked into kind %q: got %v, want %v",
+						c.field, kind, other, v, orig)
+				}
+			}
+		}
+	}
+}
+
+// TestApplyQueryOverridesBadgeDirectionPerKind pins badge_direction's
+// deliberate asymmetry: it applies to poster/backdrop/episode but never to
+// logo, whose badge layout is direction-agnostic.
+func TestApplyQueryOverridesBadgeDirectionPerKind(t *testing.T) {
+	dir := "tb"
+	for _, kind := range []string{"poster", "backdrop", "episode"} {
+		base := services.DefaultRenderSettings()
+		got := applyQueryOverrides(&base, &ImageQuery{BadgeDirection: &dir}, kind)
+		var v services.BadgeDirection
+		switch kind {
+		case "poster":
+			v = got.PosterBadgeDirection
+		case "backdrop":
+			v = got.BackdropBadgeDirection
+		case "episode":
+			v = got.EpisodeBadgeDirection
+		}
+		if v != services.BadgeDirection("tb") {
+			t.Errorf("kind %q: badge_direction not applied, got %q", kind, v)
+		}
+	}
+
+	base := services.DefaultRenderSettings()
+	got := applyQueryOverrides(&base, &ImageQuery{BadgeDirection: &dir}, "logo")
+	if got.PosterBadgeDirection != base.PosterBadgeDirection ||
+		got.BackdropBadgeDirection != base.BackdropBadgeDirection ||
+		got.EpisodeBadgeDirection != base.EpisodeBadgeDirection {
+		t.Error("badge_direction on kind logo must not touch any direction field")
+	}
+}
+
+// TestApplyQueryOverridesInvalidRatingsLimitRejectsAll pins the all-or-nothing
+// contract: an out-of-range ?ratings_limit returns the original settings, so
+// no other override in the same request is applied either.
+func TestApplyQueryOverridesInvalidRatingsLimitRejectsAll(t *testing.T) {
+	base := services.DefaultRenderSettings()
+	w := int32(150)
+	bad := int32(999)
+	got := applyQueryOverrides(&base, &ImageQuery{RatingsLimit: &bad, BadgeWidth: &w}, "poster")
+	if got != &base {
+		t.Error("invalid ratings_limit should return the original settings pointer")
+	}
+	if got.PosterBadgeWidth != base.PosterBadgeWidth {
+		t.Error("invalid ratings_limit must reject the whole override set")
+	}
+}
+
+// TestApplyQueryOverridesUnknownKind pins that an unrecognised kind applies no
+// per-kind override, while the kind-independent image_source still lands.
+func TestApplyQueryOverridesUnknownKind(t *testing.T) {
+	base := services.DefaultRenderSettings()
+	w := int32(150)
+	src := "fanart"
+	got := applyQueryOverrides(&base, &ImageQuery{BadgeWidth: &w, ImageSource: &src}, "banner")
+	if got.PosterBadgeWidth != base.PosterBadgeWidth || got.LogoBadgeWidth != base.LogoBadgeWidth ||
+		got.BackdropBadgeWidth != base.BackdropBadgeWidth || got.EpisodeBadgeWidth != base.EpisodeBadgeWidth {
+		t.Error("unknown kind must not apply per-kind overrides")
+	}
+	if got.ImageSource != services.ImageSource("fanart") {
+		t.Errorf("image_source is kind-independent, got %q", got.ImageSource)
+	}
+}
+
+// TestRenderSettingFieldsSpecIsComplete is a regression guard for the
+// 2026-08-04 badge-width bug. Now that updateSettingsRequest and
+// RenderSettingsToMap both iterate the shared services.RenderSettingFields
+// spec, the spec itself is the single source of truth — drift between the
+// two sides is structurally impossible. This test asserts the spec is
+// internally consistent: JSONNames are unique, GoNames exist on
+// RenderSettings, and the spec covers every static key RenderSettingsToMap
+// produces.
+func TestRenderSettingFieldsSpecIsComplete(t *testing.T) {
+	specByName := map[string]services.FieldSpec{}
+	for _, spec := range services.RenderSettingFields {
+		if _, dup := specByName[spec.JSONName]; dup {
+			t.Errorf("spec has duplicate JSONName %q", spec.JSONName)
+		}
+		specByName[spec.JSONName] = spec
+	}
+	rsType := reflect.TypeOf(services.RenderSettings{})
+	for _, spec := range services.RenderSettingFields {
+		if _, ok := rsType.FieldByName(spec.GoName); !ok {
+			t.Errorf("spec JSONName=%q references GoName=%q which does not exist on RenderSettings", spec.JSONName, spec.GoName)
+		}
+	}
+	for key := range services.RenderSettingsToMap(&services.RenderSettings{}) {
+		if strings.HasPrefix(key, "color_") {
+			continue // dynamic from colorsToMap; covered by TestColorsRoundTrip
+		}
+		if _, ok := specByName[key]; !ok {
+			t.Errorf("RenderSettingsToMap produces key %q but spec has no entry for it", key)
+		}
 	}
 }

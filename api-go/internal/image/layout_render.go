@@ -22,9 +22,9 @@ type layoutBlock struct {
 func renderSideBlock(badges []*image.RGBA, perRow, rows int, spacing, rowSpacing uint32) *image.RGBA {
 	var grid [][]*image.RGBA
 	idx := 0
-	for r := 0; r < rows; r++ {
+	for range rows {
 		var row []*image.RGBA
-		for c := 0; c < perRow; c++ {
+		for range perRow {
 			if idx >= len(badges) {
 				break
 			}
@@ -94,10 +94,7 @@ func distributeLayout(badgeImages []*image.RGBA, layout *services.ImageLayout) m
 		if cap <= 0 || len(remaining) == 0 {
 			continue
 		}
-		n := cap
-		if n > len(remaining) {
-			n = len(remaining)
-		}
+		n := min(cap, len(remaining))
 		bySide[side] = remaining[:n]
 		remaining = remaining[n:]
 	}

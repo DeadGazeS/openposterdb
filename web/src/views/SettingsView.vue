@@ -3,7 +3,11 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
-import { adminApi, type SaveSettingsPayload } from '@/lib/api'
+import { useSavedFlash } from '@/composables/useSavedFlash'
+import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
+import { parseApiError, okOrThrow } from '@/lib/api-error'
+import { adminApi } from '@/lib/api'
+import type { RenderSettings, SaveSettingsPayload } from '@/lib/settings'
 import { FREE_API_KEY } from '@/lib/constants'
 import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
@@ -21,12 +25,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
 
 const route = useRoute()
 
 // The active section is derived from the route — each section is its own page
-// (Settings → API / Global Image / Backup).
+// (Settings → API / Global Image Settings / Backup).
 const section = computed(() => {
   switch (route.name) {
     case 'settings-backup':
@@ -44,7 +47,6 @@ type ServiceKey = { locked: boolean; has_key: boolean; masked: string | null; ke
 type ServiceKeysResponse = { tmdb: ServiceKey; mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
 
 const freeApiKeyEnabled = ref(false)
-const freeKeyLoading = ref(false)
 const freeKeyError = ref('')
 
 const serviceKeysSaving = ref<string | null>(null)
@@ -73,11 +75,7 @@ const {
   refetch: refetchServiceKeys,
 } = useQuery<ServiceKeysResponse>({
   queryKey: ['service-keys'],
-  queryFn: async () => {
-    const res = await adminApi.getServiceKeys()
-    if (!res.ok) throw new Error('Failed to fetch service keys')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<ServiceKeysResponse>(await adminApi.getServiceKeys(), 'Failed to fetch service keys'),
 })
 
 // Seed the chips from the server's real keys once loaded.
@@ -195,32 +193,24 @@ const {
   // edits survive Refresh. A fresh reference re-applies the saved config
   // (same path as discard, plus pulling the latest save).
   structuralSharing: false,
-  queryFn: async () => {
-    const res = await adminApi.getSettings()
-    if (!res.ok) throw new Error('Failed to fetch settings')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<SettingsResponse>(await adminApi.getSettings(), 'Failed to fetch settings'),
 })
 
 watch(settings, (s) => {
   if (s) freeApiKeyEnabled.value = s.free_api_key_enabled
 }, { immediate: true })
 
-async function loadSettings(): Promise<RenderSettings | null> {
-  const res = await adminApi.getSettings()
-  if (!res.ok) return null
-  return res.json()
-}
-
-async function saveSettings(s: SaveSettingsPayload): Promise<string | null> {
-  const res = await adminApi.updateSettings({
-    ...s,
-    free_api_key_enabled: freeApiKeyEnabled.value,
-  })
-  if (res.ok) return null
-  const data = await res.json().catch(() => null)
-  return data?.error || 'Failed to save settings'
-}
+// Shared load/save/reset pattern — same composable the key view uses. The
+// onSave hook merges the transient free_api_key_enabled flag into the
+// payload before POST so this view doesn't need its own saveSettings shape.
+const { loadSettings, saveSettings } = useRenderSettingsForm<SaveSettingsPayload>({
+  api: {
+    load: () => adminApi.getSettings(),
+    save: (p) => adminApi.updateSettings(p),
+  },
+  onSave: (s) => ({ ...s, free_api_key_enabled: freeApiKeyEnabled.value }),
+  saveErrorMessage: 'Failed to save settings',
+})
 
 function toggleFreeApiKey() {
   if (!settings.value || settings.value.free_api_key_locked) return
@@ -258,14 +248,7 @@ const freeKeyDirty = computed(
   () => !!settings.value && freeApiKeyEnabled.value !== settings.value.free_api_key_enabled,
 )
 
-const apiSavedCheck = ref(false)
-let apiSavedTimeout: ReturnType<typeof setTimeout> | null = null
-
-function showApiSaved() {
-  apiSavedCheck.value = true
-  if (apiSavedTimeout) clearTimeout(apiSavedTimeout)
-  apiSavedTimeout = setTimeout(() => (apiSavedCheck.value = false), 1500)
-}
+const { active: apiSavedCheck, flash: showApiSaved } = useSavedFlash()
 
 async function saveFreeApiKeyToggle(): Promise<void> {
   if (!settings.value) return
@@ -440,7 +423,7 @@ async function onImportFile(e: Event) {
                 type="button"
                 role="switch"
                 :aria-checked="freeApiKeyEnabled"
-                :disabled="freeKeyLoading || !settings || settings?.free_api_key_locked"
+                :disabled="!settings || settings?.free_api_key_locked"
                 class="relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 :class="freeApiKeyEnabled ? 'bg-primary' : 'bg-input'"
                 @click="toggleFreeApiKey"
@@ -653,11 +636,8 @@ async function onImportFile(e: Event) {
         :show-actions="false"
         :load-settings="loadSettings"
         :save-settings="saveSettings"
-        :fetch-preview="adminApi.previewPoster"
-        :fetch-logo-preview="adminApi.previewLogo"
-        :fetch-backdrop-preview="adminApi.previewBackdrop"
-        :fetch-episode-preview="adminApi.previewEpisode"
-      />
+        :fetch-preview="adminApi.preview"
+                              />
     </div>
   </div>
 </template>

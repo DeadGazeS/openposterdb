@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, type FreeKeyDefaults } from '@/lib/auth-api'
+import { authApi } from '@/lib/auth-api'
+import type { FreeKeyDefaults } from '@/lib/settings'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('token'))

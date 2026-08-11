@@ -37,7 +37,7 @@ const items = [
 
 const settingsItems = [
   { title: 'API', to: '/admin/settings/api' },
-  { title: 'Global Image', to: '/admin/settings/image' },
+  { title: 'Global Image Settings', to: '/admin/settings/image' },
   { title: 'Backup', to: '/admin/settings/backup' },
 ]
 
@@ -87,24 +87,16 @@ function isNewer(a: number[], b: number[]): boolean {
 onMounted(async () => {
   try {
     const res = await fetch(
-      'https://api.github.com/users/DeadGazeS/packages/container/openposterdb/versions?per_page=100',
+      'https://api.github.com/repos/DeadGazeS/openposterdb/releases/latest',
     )
     if (!res.ok) return
-    const versions = (await res.json()) as { metadata?: { container?: { tags?: string[] } } }[]
-    let best: number[] | null = null
-    let bestTag = ''
-    for (const v of versions) {
-      for (const tag of v.metadata?.container?.tags ?? []) {
-        const p = parseVersion(tag)
-        if (p.length === 3 && (!best || isNewer(p, best))) {
-          best = p
-          bestTag = tag
-        }
-      }
-    }
+    const release = (await res.json()) as { tag_name?: string }
+    const tag = release.tag_name
+    if (!tag) return
+    const remote = parseVersion(tag)
     const local = parseVersion(version)
-    if (best && local.length === 3 && isNewer(best, local)) {
-      latestVersion.value = bestTag
+    if (remote.length === 3 && local.length === 3 && isNewer(remote, local)) {
+      latestVersion.value = tag
     }
   } catch {
     // network/API errors: no indicator

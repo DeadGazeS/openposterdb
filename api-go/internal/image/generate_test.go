@@ -12,8 +12,8 @@ import (
 // so any blur must visibly smooth the hard edges.
 func checkerboardRGBA(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			v := uint8(255)
 			if ((x/4)+(y/4))%2 == 0 {
 				v = 0

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -40,16 +41,12 @@ var officialIconKeys = []string{
 func iconKeyAllowed(kind, key string) bool {
 	switch kind {
 	case "white", "default":
-		for _, k := range iconSourceKeys {
-			if k == key {
-				return true
-			}
+		if slices.Contains(iconSourceKeys, key) {
+			return true
 		}
 	case "official":
-		for _, k := range officialIconKeys {
-			if k == key {
-				return true
-			}
+		if slices.Contains(officialIconKeys, key) {
+			return true
 		}
 	}
 	return false
@@ -114,8 +111,8 @@ func loadIcon(path string) (*image.RGBA, error) {
 	if img, err := loadPNG(path); err == nil {
 		return img, nil
 	}
-	if strings.HasSuffix(path, ".png") {
-		webpPath := strings.TrimSuffix(path, ".png") + ".webp"
+	if before, ok := strings.CutSuffix(path, ".png"); ok {
+		webpPath := before + ".webp"
 		f, err := os.Open(webpPath)
 		if err != nil {
 			return nil, err

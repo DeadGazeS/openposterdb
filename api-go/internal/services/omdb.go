@@ -1,10 +1,12 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"openposterdb/internal/errors"
 )
@@ -22,9 +24,9 @@ func NewOmdbClient(keys []string, httpClient *http.Client) *OmdbClient {
 }
 
 type OmdbResponse struct {
-	Ratings   []OmdbRating `json:"Ratings"`
-	IMDBRating *string     `json:"imdbRating"`
-	Metascore  *string     `json:"Metascore"`
+	Ratings    []OmdbRating `json:"Ratings"`
+	IMDBRating *string      `json:"imdbRating"`
+	Metascore  *string      `json:"Metascore"`
 }
 
 type OmdbRating struct {
@@ -32,13 +34,19 @@ type OmdbRating struct {
 	Value  string `json:"Value"`
 }
 
-func (c *OmdbClient) GetRatings(imdbID string) (*OmdbResponse, error) {
+func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbResponse, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", apiKey, imdbID)
 
+	start := time.Now()
 	resp, err := SendWithRetry(&OMDBRetry, func() (*http.Response, error) {
-		return c.HTTP.Get(url)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		return c.HTTP.Do(req)
 	})
+	logSlow("OMDb", time.Since(start).Milliseconds())
 	if err != nil {
 		return nil, errors.NewAPIError(err)
 	}
@@ -54,4 +62,8 @@ func (c *OmdbClient) GetRatings(imdbID string) (*OmdbResponse, error) {
 		return nil, errors.NewAPIError(err)
 	}
 	return &result, nil
+}
+
+func (c *OmdbClient) GetRatings(imdbID string) (*OmdbResponse, error) {
+	return c.GetRatingsCtx(context.Background(), imdbID)
 }

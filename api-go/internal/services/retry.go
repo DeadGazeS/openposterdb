@@ -2,11 +2,14 @@ package services
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
+
+	apperr "openposterdb/internal/errors"
 )
 
 type RetryConfig struct {
@@ -44,15 +47,6 @@ var OMDBRetry = RetryConfig{
 	ServiceName: "omdb",
 }
 
-func NewRetryConfig(maxRetries uint32, baseDelay, maxDelay time.Duration, serviceName string) RetryConfig {
-	return RetryConfig{
-		MaxRetries:  maxRetries,
-		BaseDelay:   baseDelay,
-		MaxDelay:    maxDelay,
-		ServiceName: serviceName,
-	}
-}
-
 var MDBListRetry = RetryConfig{
 	MaxRetries:  1,
 	BaseDelay:   2 * time.Second,
@@ -70,10 +64,7 @@ var TraktRetry = RetryConfig{
 func retryAfterDelay(resp *http.Response, config *RetryConfig, attempt uint32) time.Duration {
 	if val := resp.Header.Get("Retry-After"); val != "" {
 		if secs, err := strconv.ParseUint(val, 10, 64); err == nil {
-			capped := time.Duration(secs) * time.Second
-			if capped > config.MaxDelay {
-				capped = config.MaxDelay
-			}
+			capped := min(time.Duration(secs)*time.Second, config.MaxDelay)
 			return addJitter(capped)
 		}
 	}
@@ -81,10 +72,7 @@ func retryAfterDelay(resp *http.Response, config *RetryConfig, attempt uint32) t
 }
 
 func backoffDelay(config *RetryConfig, attempt uint32) time.Duration {
-	delay := config.BaseDelay * (1 << attempt)
-	if delay > config.MaxDelay {
-		delay = config.MaxDelay
-	}
+	delay := min(config.BaseDelay*(1<<attempt), config.MaxDelay)
 	return addJitter(delay)
 }
 
@@ -106,7 +94,7 @@ func SendWithRetry(config *RetryConfig, requestFn RequestFunc) (*http.Response, 
 		if err != nil {
 			slog.Warn(fmt.Sprintf("%s connection error, retrying", config.ServiceName),
 				"attempt", fmt.Sprintf("%d/%d", attempt+1, config.MaxRetries),
-				"error", err,
+				"error", apperr.RedactURLSecrets(err),
 			)
 			if attempt == config.MaxRetries {
 				return nil, fmt.Errorf("request failed after %d retries: %w", config.MaxRetries, err)
@@ -131,6 +119,8 @@ func SendWithRetry(config *RetryConfig, requestFn RequestFunc) (*http.Response, 
 				"delay_ms", delay.Milliseconds(),
 			)
 			time.Sleep(delay)
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 			continue
 		}
 
@@ -147,6 +137,8 @@ func SendWithRetry(config *RetryConfig, requestFn RequestFunc) (*http.Response, 
 				"delay_ms", delay.Milliseconds(),
 			)
 			time.Sleep(delay)
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 			continue
 		}
 

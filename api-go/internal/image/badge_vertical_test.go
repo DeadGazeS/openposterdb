@@ -435,8 +435,8 @@ func TestVerticalBadgeLogoMarginsMatchHorizontal(t *testing.T) {
 	// the accent/value backgrounds or the white text). All real source icons
 	// are square-ish, so a square synthetic is representative.
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -578,8 +578,8 @@ func TestVerticalLogoSizeIndependentOfBadgeHeight(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -631,8 +631,8 @@ func TestVerticalNumberSectionAbsorbsHeightGrowth(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}
@@ -703,8 +703,8 @@ func TestVerticalLogoSizeIndependentOfBadgeWidth(t *testing.T) {
 	defer lf.Close()
 
 	synthetic := image.NewRGBA(image.Rect(0, 0, 48, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 48; x++ {
+	for y := range 48 {
+		for x := range 48 {
 			synthetic.Set(x, y, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 		}
 	}

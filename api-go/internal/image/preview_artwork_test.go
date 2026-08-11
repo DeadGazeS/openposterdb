@@ -16,9 +16,9 @@ import (
 // pixel-distinct rather than collapsing onto one another.
 func gradientArtwork(w, h int) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
+	for y := range h {
 		v := uint8(20 + (y*220)/h)
-		for x := 0; x < w; x++ {
+		for x := range w {
 			img.Set(x, y, color.RGBA{v, v, v, 255})
 		}
 	}
@@ -68,8 +68,8 @@ func TestPosterPreviewArtworkPassthrough(t *testing.T) {
 func TestPosterPreviewArtworkDecodesJPEG(t *testing.T) {
 	// Build a JPEG-encoded 2:3 source (what the TMDB cache serves).
 	img := image.NewRGBA(image.Rect(0, 0, 300, 450))
-	for y := 0; y < 450; y++ {
-		for x := 0; x < 300; x++ {
+	for y := range 450 {
+		for x := range 300 {
 			img.Set(x, y, color.RGBA{uint8(x % 256), uint8(y % 256), 128, 255})
 		}
 	}

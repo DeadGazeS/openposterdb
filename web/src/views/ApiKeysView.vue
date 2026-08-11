@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
+import { useSavedFlash } from '@/composables/useSavedFlash'
+import { parseApiError, okOrThrow } from '@/lib/api-error'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { keysApi, adminApi, type SaveSettingsPayload } from '@/lib/api'
+import { keysApi, adminApi } from '@/lib/api'
+import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
-import type { RenderSettings } from '@/components/RenderSettingsForm.vue'
+import type { RenderSettings } from '@/lib/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Settings, Plus, Loader2, Check } from 'lucide-vue-next'
@@ -20,11 +23,7 @@ const queryClient = useQueryClient()
 
 const { data: keys = ref([]) } = useQuery<ApiKey[]>({
   queryKey: ['api-keys'],
-  queryFn: async () => {
-    const res = await keysApi.list()
-    if (!res.ok) throw new Error('Failed to fetch keys')
-    return res.json()
-  },
+  queryFn: async () => okOrThrow<ApiKey[]>(await keysApi.list(), 'Failed to fetch keys'),
   initialData: [],
 })
 
@@ -32,8 +31,7 @@ const newKeyName = ref('')
 const newKeyValue = ref<string | null>(null)
 const error = ref('')
 const loading = ref(false)
-const showCreateCheck = ref(false)
-let createCheckTimeout: ReturnType<typeof setTimeout> | null = null
+const { active: showCreateCheck, flash: flashCreated } = useSavedFlash()
 
 // Per-key settings state
 const expandedKey = ref<number | null>(null)
@@ -94,7 +92,6 @@ async function createKey() {
   error.value = ''
   loading.value = true
   showCreateCheck.value = false
-  if (createCheckTimeout) clearTimeout(createCheckTimeout)
   try {
     const res = await keysApi.create(newKeyName.value.trim())
     if (res.ok) {
@@ -102,11 +99,9 @@ async function createKey() {
       newKeyValue.value = data.key
       newKeyName.value = ''
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
-      showCreateCheck.value = true
-      createCheckTimeout = setTimeout(() => (showCreateCheck.value = false), 1500)
+      flashCreated()
     } else {
-      const data = await res.json()
-      error.value = data.error || 'Failed to create key'
+      error.value = await parseApiError(res, 'Failed to create key')
     }
   } catch {
     error.value = 'Failed to create key'
@@ -234,11 +229,8 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
             :load-settings="makeLoadSettings(key.id)"
             :save-settings="makeSaveSettings(key.id)"
             :reset-settings="makeResetSettings(key.id)"
-            :fetch-preview="adminApi.previewPoster"
-            :fetch-logo-preview="adminApi.previewLogo"
-            :fetch-backdrop-preview="adminApi.previewBackdrop"
-            :fetch-episode-preview="adminApi.previewEpisode"
-          />
+            :fetch-preview="adminApi.preview"
+                                              />
         </div>
       </div>
     </div>

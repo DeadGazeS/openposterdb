@@ -64,7 +64,7 @@ func TestAPIKeySettingsUnmarshalLegacyStringLayouts(t *testing.T) {
 	backdrop := `{"right":{"per_row":2,"rows":1,"start":"t"}}`
 	episode := `{"left":{"per_row":1,"rows":2,"start":"b"}}`
 
-	payload, err := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]any{
 		"image_source":    "f",
 		"poster_layout":   poster,
 		"logo_layout":     logo,

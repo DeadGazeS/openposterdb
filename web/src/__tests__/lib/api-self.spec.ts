@@ -13,7 +13,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 import { selfApi } from '@/lib/api'
-import type { SaveSettingsPayload } from '@/lib/api'
+import type { SaveSettingsPayload } from '@/lib/settings'
 
 function makeFetchResponse(status: number, body: unknown = {}) {
   return {
@@ -178,118 +178,79 @@ describe('selfApi', () => {
     expect(options.credentials).toBeUndefined()
   })
 
-  it('previewPoster includes layout when provided', async () => {
+  it('preview calls GET with the kind path and params', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewPoster(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"bottom":{"per_row":2}}')
+    await selfApi.preview('poster', { ratingsLimit: 3, ratingsOrder: 'imdb,rt,tmdb' })
+
+    const [url] = fetchMock.mock.calls[0]!
+    expect(url).toContain('/api/key/me/preview/poster')
+    expect(url).toContain('ratings_limit=3')
+    expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
+  })
+
+  it('preview includes layout when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await selfApi.preview('poster', { ratingsLimit: 3, ratingsOrder: 'imdb,rt', layout: '{"bottom":{"per_row":2}}' })
 
     const [url] = fetchMock.mock.calls[0]!
     expect(url).toContain('layout=%7B%22bottom%22%3A%7B%22per_row%22%3A2%7D%7D')
   })
 
-  it('previewPoster includes label_style when provided', async () => {
+  it('preview includes label_style when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewPoster(3, 'imdb,rt', 'h', 'i')
+    await selfApi.preview('logo', { ratingsLimit: 3, ratingsOrder: 'imdb,rt', badgeStyle: 'h', labelStyle: 'i' })
 
     const [url] = fetchMock.mock.calls[0]!
+    expect(url).toContain('/api/key/me/preview/logo')
     expect(url).toContain('label_style=i')
   })
 
-  it('previewPoster includes badge_direction when provided', async () => {
+  it('preview includes badge_direction when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewPoster(3, 'imdb,rt', 'h', 'i', 'v')
+    await selfApi.preview('poster', { ratingsLimit: 3, ratingsOrder: 'imdb,rt', badgeStyle: 'h', labelStyle: 'i', badgeDirection: 'v' })
 
     const [url] = fetchMock.mock.calls[0]!
     expect(url).toContain('badge_direction=v')
   })
 
-  it('previewLogo includes label_style when provided', async () => {
+  it('preview episode includes blur=true when enabled', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewLogo(3, 'imdb,rt', 'h', 'i')
-
-    const [url] = fetchMock.mock.calls[0]!
-    expect(url).toContain('label_style=i')
-  })
-
-  it('previewBackdrop includes label_style when provided', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await selfApi.previewBackdrop(3, 'imdb,rt', 'v', 'i')
-
-    const [url] = fetchMock.mock.calls[0]!
-    expect(url).toContain('label_style=i')
-  })
-
-  it('previewEpisode calls GET with correct URL and params', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await selfApi.previewEpisode(3, 'imdb,rt,tmdb')
-
-    const [url] = fetchMock.mock.calls[0]!
-    expect(url).toContain('/api/key/me/preview/episode')
-    expect(url).toContain('ratings_limit=3')
-    expect(url).toContain('ratings_order=imdb%2Crt%2Ctmdb')
-  })
-
-  it('previewEpisode includes layout when provided', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, undefined, '{"right":{"per_row":1}}')
-
-    const [url] = fetchMock.mock.calls[0]!
-    expect(url).toContain('layout=%7B%22right%22%3A%7B%22per_row%22%3A1%7D%7D')
-  })
-
-  it('previewEpisode includes badge_direction when provided', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, 'h')
-
-    const [url] = fetchMock.mock.calls[0]!
-    expect(url).toContain('badge_direction=h')
-  })
-
-  it('previewEpisode includes blur=true when enabled', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, true)
+    await selfApi.preview('episode', { ratingsLimit: 3, ratingsOrder: 'imdb,rt', blur: true })
 
     const [url] = fetchMock.mock.calls[0]!
     expect(url).toContain('blur=true')
   })
 
-  it('previewEpisode omits blur when false', async () => {
+  it('preview episode omits blur when false', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewEpisode(3, 'imdb,rt', undefined, undefined, undefined, undefined, false)
+    await selfApi.preview('episode', { ratingsLimit: 3, ratingsOrder: 'imdb,rt', blur: false })
 
     const [url] = fetchMock.mock.calls[0]!
     expect(url).not.toContain('blur')
   })
 
-  it('previewEpisode includes label_style when provided', async () => {
+  it('preview backdrop includes edge insets when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200))
     vi.stubGlobal('fetch', fetchMock)
 
-    await selfApi.previewEpisode(3, 'imdb,rt', 'v', 'i')
+    await selfApi.preview('backdrop', { ratingsLimit: 3, ratingsOrder: 'imdb,rt', edgeInsetX: 8, edgeInsetY: 3 })
 
     const [url] = fetchMock.mock.calls[0]!
-    expect(url).toContain('label_style=i')
+    expect(url).toContain('edge_inset_x=8')
+    expect(url).toContain('edge_inset_y=3')
   })
-
   it('updateSettings includes episode fields', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(200, { ok: true }))
     vi.stubGlobal('fetch', fetchMock)

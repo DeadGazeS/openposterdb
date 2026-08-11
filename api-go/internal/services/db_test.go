@@ -303,11 +303,11 @@ func TestDefaultRenderSettings(t *testing.T) {
 
 func TestParseGlobalRenderSettings(t *testing.T) {
 	globals := map[string]string{
-		"image_source":       "f",
-		"poster_badge_style": "v",
-		"lang":               "de",
-		"ratings_limit":      "5",
-		"poster_fit":         "pad",
+		"image_source":        "f",
+		"poster_badge_style":  "v",
+		"lang":                "de",
+		"ratings_limit":       "5",
+		"poster_fit":          "pad",
 		"poster_badge_width":  "150",
 		"poster_badge_height": "80",
 	}

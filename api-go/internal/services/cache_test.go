@@ -134,21 +134,6 @@ func TestDateStrToEpochLeapDay(t *testing.T) {
 	}
 }
 
-func TestIsLeap(t *testing.T) {
-	if !isLeap(2000) {
-		t.Error("2000 should be leap")
-	}
-	if !isLeap(2024) {
-		t.Error("2024 should be leap")
-	}
-	if isLeap(1900) {
-		t.Error("1900 should not be leap")
-	}
-	if isLeap(2023) {
-		t.Error("2023 should not be leap")
-	}
-}
-
 func TestComputeCDNMaxAge(t *testing.T) {
 	rd := "2024-01-01"
 	age := ComputeCDNMaxAge(&rd, 86400, 31536000)

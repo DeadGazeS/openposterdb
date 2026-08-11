@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { toQueryParams } from '@/lib/api'
 import {
   FREE_API_KEY,
   LANGUAGES,
@@ -258,51 +259,57 @@ const idPlaceholder = computed(() => {
 })
 
 const queryString = computed(() => {
-  const params = new URLSearchParams()
+  // Clamp helper: parse a numeric ref, return a clamped int within [min, max]
+  // or undefined if the input is empty / non-numeric. Default value triggers
+  // omission (no query param emitted).
+  const clamp = (ref: unknown, min: number, max: number): number | undefined => {
+    const s = String(ref).trim()
+    if (s === '') return undefined
+    const n = Math.round(Number(s))
+    if (!Number.isFinite(n)) return undefined
+    return Math.min(max, Math.max(min, n))
+  }
+  // Default-value omit helper.
+  const setIf = (ref: unknown, def: string): string | undefined => {
+    const s = String(ref)
+    return s !== def ? s : undefined
+  }
+
+  const params: Record<string, string | number | undefined> = {}
+
   const langVal = lang.value === 'any' ? '' : lang.value
-  if (langVal.trim()) params.set('lang', langVal.trim())
+  if (langVal.trim()) params.lang = langVal.trim()
   const sizeVal = imageSize.value === 'default' ? '' : imageSize.value
-  if (sizeVal) params.set('imageSize', sizeVal)
-  if (ratingsOrderChanged.value) params.set('ratings_order', ratingsOrderList.value.join(','))
+  if (sizeVal) params.imageSize = sizeVal
+
+  if (ratingsOrderChanged.value) params.ratings_order = ratingsOrderList.value.join(',')
   // Emit even when empty, so unchecking the server's exclusions clears them.
-  if (ratingsExcludeChanged.value) params.set('ratings_exclude', ratingsExcludeList.value.join(','))
-  if (badgeStyle.value !== 'default') params.set('badge_style', badgeStyle.value)
-  if (labelStyle.value !== 'default') params.set('label_style', labelStyle.value)
-  const textSizeVal = String(textSize.value).trim()
-  if (textSizeVal !== '') {
-    const n = Math.round(Number(textSizeVal))
-    if (Number.isFinite(n)) params.set('text_size', String(Math.min(400, Math.max(50, n))))
+  if (ratingsExcludeChanged.value) params.ratings_exclude = ratingsExcludeList.value.join(',')
+
+  params.badge_style = setIf(badgeStyle.value, 'default')
+  params.label_style = setIf(labelStyle.value, 'default')
+  params.text_size = clamp(textSize.value, 50, 400)
+  params.badge_size = clamp(badgeSizePct.value, 50, 400)
+  params.logo_size = clamp(logoSizePct.value, 50, 400)
+  params.badge_shape = setIf(badgeShape.value, 'default')
+  params.badge_alpha = clamp(badgeAlpha.value, 0, 100)
+  params.ratings_limit = setIf(ratingsLimit.value, 'default')
+
+  if (imageType.value !== 'logo') params.badge_direction = setIf(badgeDirection.value, 'default')
+  if (imageType.value !== 'episode') params.image_source = setIf(imageSource.value, 'default')
+  if (imageType.value === 'poster') {
+    params.textless = setIf(textless.value, 'default')
+    params.fit = setIf(posterFit.value, 'default')
   }
-  const badgeSizeVal = String(badgeSizePct.value).trim()
-  if (badgeSizeVal !== '') {
-    const n = Math.round(Number(badgeSizeVal))
-    if (Number.isFinite(n)) params.set('badge_size', String(Math.min(400, Math.max(50, n))))
-  }
-  const logoSizeVal = String(logoSizePct.value).trim()
-  if (logoSizeVal !== '') {
-    const n = Math.round(Number(logoSizeVal))
-    if (Number.isFinite(n)) params.set('logo_size', String(Math.min(400, Math.max(50, n))))
-  }
-  if (badgeShape.value !== 'default') params.set('badge_shape', badgeShape.value)
-  const badgeAlphaVal = String(badgeAlpha.value).trim()
-  if (badgeAlphaVal !== '') {
-    const n = Math.round(Number(badgeAlphaVal))
-    if (Number.isFinite(n)) params.set('badge_alpha', String(Math.min(100, Math.max(0, n))))
-  }
-  if (ratingsLimit.value !== 'default') params.set('ratings_limit', ratingsLimit.value)
-  if (imageType.value !== 'logo' && badgeDirection.value !== 'default') params.set('badge_direction', badgeDirection.value)
-  if (imageType.value !== 'episode' && imageSource.value !== 'default') params.set('image_source', imageSource.value)
-  if (imageType.value === 'poster' && textless.value !== 'default') params.set('textless', textless.value)
-  if (imageType.value === 'poster' && posterFit.value !== 'default') params.set('fit', posterFit.value)
   if (imageType.value === 'backdrop') {
     const ex = insetParam(edgeInsetX.value)
-    if (ex !== null) params.set('edge_inset_x', ex)
+    if (ex !== null) params.edge_inset_x = ex
     const ey = insetParam(edgeInsetY.value)
-    if (ey !== null) params.set('edge_inset_y', ey)
+    if (ey !== null) params.edge_inset_y = ey
   }
-  if (imageType.value === 'episode' && blur.value !== 'default') params.set('blur', blur.value)
-  const qs = params.toString()
-  return qs ? `?${qs}` : ''
+  if (imageType.value === 'episode') params.blur = setIf(blur.value, 'default')
+
+  return toQueryParams(params)
 })
 
 const curlExample = computed(() => {

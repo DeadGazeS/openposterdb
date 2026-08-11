@@ -45,7 +45,7 @@ jobs:
         id: build
         with:
           context: .
-          file: Containerfile
+          file: Dockerfile
           platforms: ${{ matrix.platform }}
           # Disable BuildKit's automatic attestation manifests. These embed an
           # extra image-index entry per platform that registries (e.g. GHCR)
