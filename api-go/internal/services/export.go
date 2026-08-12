@@ -2,12 +2,21 @@ package services
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // ExportPayload is the JSON structure used for settings backup/restore. The
@@ -23,6 +32,110 @@ type ExportPayload struct {
 	Settings    map[string]string `json:"settings"`
 	ServiceKeys map[string]string `json:"service_keys,omitempty"`
 	APIKeys     []ExportedAPIKey  `json:"api_keys,omitempty"`
+}
+
+// EncryptedExport wraps an ExportPayload with a passphrase-derived AES-256-GCM
+// seal when the user opts in. The on-disk file carries `kind =
+// "openposterdb/settings-encrypted"` so the import endpoint can route it
+// through DecryptPayload instead of treating it as plain JSON.
+type EncryptedExport struct {
+	Kind        string `json:"kind"`
+	Version     int    `json:"version"`
+	KDF         string `json:"kdf"`
+	KDFIterations int  `json:"kdf_iterations"`
+	Salt        string `json:"salt"`
+	Ciphertext  string `json:"ciphertext"`
+}
+
+// pbkdf2Iterations is the iteration count for the passphrase-derived KEK.
+// 600k is the OWASP 2023 recommendation for PBKDF2-HMAC-SHA256.
+const pbkdf2Iterations = 600_000
+
+// EncryptPayload seals an ExportPayload with a passphrase-derived AES-256-GCM
+// key. The passphrase is required to decrypt on import; the file itself carries
+// only the salt + ciphertext, so leaking the file without the passphrase is
+// inert. PBKDF2-HMAC-SHA256 with 600k iterations is the 2023 OWASP floor.
+func EncryptPayload(payload *ExportPayload, passphrase string) (*EncryptedExport, error) {
+	if passphrase == "" {
+		return nil, errors.New("passphrase must not be empty")
+	}
+	plain, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	key := pbkdf2.Key([]byte(passphrase), salt, pbkdf2Iterations, 32, sha256.New)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	ct := gcm.Seal(nonce, nonce, plain, nil)
+	return &EncryptedExport{
+		Kind:          "openposterdb/settings-encrypted",
+		Version:       1,
+		KDF:           "pbkdf2-sha256",
+		KDFIterations: pbkdf2Iterations,
+		Salt:          base64.StdEncoding.EncodeToString(salt),
+		Ciphertext:    base64.StdEncoding.EncodeToString(ct),
+	}, nil
+}
+
+// DecryptPayload is the inverse of EncryptPayload. Returns an error on a wrong
+// passphrase (GCM auth failure) so the import endpoint can surface a clear
+// message instead of a generic JSON parse error.
+func DecryptPayload(enc *EncryptedExport, passphrase string) (*ExportPayload, error) {
+	if enc == nil {
+		return nil, errors.New("nil encrypted payload")
+	}
+	if passphrase == "" {
+		return nil, errors.New("passphrase required for encrypted export")
+	}
+	salt, err := base64.StdEncoding.DecodeString(enc.Salt)
+	if err != nil {
+		return nil, fmt.Errorf("salt base64: %w", err)
+	}
+	ct, err := base64.StdEncoding.DecodeString(enc.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("ciphertext base64: %w", err)
+	}
+	iter := enc.KDFIterations
+	if iter <= 0 {
+		iter = pbkdf2Iterations
+	}
+	key := pbkdf2.Key([]byte(passphrase), salt, iter, 32, sha256.New)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(ct) < nonceSize {
+		return nil, errors.New("ciphertext too short")
+	}
+	nonce, sealed := ct[:nonceSize], ct[nonceSize:]
+	plain, err := gcm.Open(nil, nonce, sealed, nil)
+	if err != nil {
+		return nil, errors.New("decryption failed — wrong passphrase or corrupted file")
+	}
+	var payload ExportPayload
+	if err := json.Unmarshal(plain, &payload); err != nil {
+		return nil, fmt.Errorf("decrypted payload is not valid JSON: %w", err)
+	}
+	return &payload, nil
 }
 
 // ExportedAPIKey is one API key's importable metadata + per-key settings.
@@ -169,7 +282,18 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 			id = existing.ID
 		} else {
 			raw, hash, prefix := GenerateAPIKey()
-			newID, err := CreateAPIKeyCtx(ctx, db, ek.Name, hash, prefix, 1)
+			// Encrypt the regenerated raw key so the admin can reveal it from
+			// the API Keys view after restore (same model as fresh creates).
+			encrypted := ""
+			if keys != nil && keys.SecretsKey != nil {
+				enc, encErr := EncryptAPIKey(raw, keys.SecretsKey)
+				if encErr != nil {
+					slog.Error("failed to encrypt regenerated api key", "name", ek.Name, "error", encErr)
+				} else {
+					encrypted = enc
+				}
+			}
+			newID, err := CreateAPIKeyCtx(ctx, db, ek.Name, hash, prefix, encrypted, 1)
 			if err != nil {
 				return result, err
 			}

@@ -26,6 +26,7 @@ func main() {
 	}
 	app.SetupLogging(cfg.LogLevel)
 	slog.Info("JWT_SECRET loaded from environment")
+	slog.Info("SECRETS_KEY loaded from environment")
 	logConfig(cfg)
 
 	dbPath, dbDir := app.DBPath(cfg.DBDir)
@@ -62,7 +63,7 @@ func main() {
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 
-	mgr := services.NewServiceKeyManager(db, cfg.JWTSecret, httpClient,
+	mgr := services.NewServiceKeyManager(db, cfg.SecretsKey, cfg.JWTSecret, httpClient,
 		cfg.TMDBAPIKey, cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID)
 	mgr.Init()
 
@@ -85,6 +86,7 @@ func main() {
 		ServiceKeys:   mgr,
 		SecureCookies: cfg.SecureCookies,
 		JWTSecret:     cfg.JWTSecret,
+		SecretsKey:    cfg.SecretsKey,
 	}
 
 	// Process-wide in-memory caches (mirroring the Rust moka caches): rendered

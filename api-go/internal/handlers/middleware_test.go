@@ -26,6 +26,7 @@ CREATE TABLE api_keys (
 	name TEXT NOT NULL,
 	key_hash TEXT NOT NULL UNIQUE,
 	key_prefix TEXT NOT NULL,
+	encrypted_key TEXT,
 	created_by INTEGER NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	last_used_at TEXT
@@ -53,7 +54,7 @@ func TestRequireAPIKeyAuth_RecordsKeyUse(t *testing.T) {
 
 	// Create a key + a JWT for it.
 	raw, hash, prefix := services.GenerateAPIKey()
-	if _, err := services.CreateAPIKey(db, "test", hash, prefix, 1); err != nil {
+	if _, err := services.CreateAPIKey(db, "test", hash, prefix, "", 1); err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
 	// Re-derive the key_id the same way auth.go does: hash → lookup.

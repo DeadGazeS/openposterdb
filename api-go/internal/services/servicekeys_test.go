@@ -1,8 +1,12 @@
 package services
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"database/sql"
+	"encoding/base64"
 	"net/http"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -31,74 +35,149 @@ func newServiceKeysTestDB(t *testing.T) *sql.DB {
 func newServiceKeysManager(t *testing.T, db *sql.DB, secret string,
 	envTMDB string, envMDBList []string, envOMDB, envFanart, envTrakt string) *ServiceKeyManager {
 	t.Helper()
-	mgr := NewServiceKeyManager(db, []byte(secret), &http.Client{},
+	mgr := NewServiceKeyManager(db, []byte(secret), nil, &http.Client{},
 		envTMDB, envMDBList, envOMDB, envFanart, envTrakt)
 	mgr.Init()
 	return mgr
 }
 
-// TestEncryptDecrypt_RoundTrip guards the AES-GCM helper: encrypt then
+// TestEncryptDecrypt_RoundTrip guards the v2 envelope helper: encrypt then
 // decrypt must return the original plaintext.
 func TestEncryptDecrypt_RoundTrip(t *testing.T) {
-	mgr := newServiceKeysManager(t, newServiceKeysTestDB(t), "round-trip-secret", "", nil, "", "", "")
-	plaintext := "hello-world"
-	encrypted := encrypt(plaintext, mgr.GCM)
-	got, err := decrypt(encrypted, mgr.GCM)
+	secretsKey := []byte("round-trip-secret-32-bytes-aaa")
+	plaintext := []byte("hello-world")
+	encrypted, err := encryptSecret(plaintext, secretsKey, "tmdb")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	got, err := decryptV2(encrypted, secretsKey, "tmdb")
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
-	if got != plaintext {
+	if string(got) != string(plaintext) {
 		t.Errorf("decrypted=%q, want %q", got, plaintext)
 	}
 }
 
 // TestEncrypt_DifferentIV guards the IV randomness contract: the same
 // plaintext encrypted twice must produce different ciphertexts (because the
-// nonce/IV is fresh each time).
+// DEK and the two nonces are fresh each time).
 func TestEncrypt_DifferentIV(t *testing.T) {
-	mgr := newServiceKeysManager(t, newServiceKeysTestDB(t), "iv-test-secret", "", nil, "", "", "")
-	plaintext := "same-plaintext"
-	a := encrypt(plaintext, mgr.GCM)
-	b := encrypt(plaintext, mgr.GCM)
+	secretsKey := []byte("iv-test-secret-32-bytes-aaaaaa")
+	plaintext := []byte("same-plaintext")
+	a, err := encryptSecret(plaintext, secretsKey, "tmdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := encryptSecret(plaintext, secretsKey, "tmdb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if a == b {
-		t.Error("same plaintext produced identical ciphertext (IV reuse)")
+		t.Error("same plaintext produced identical ciphertext (IV/DEK reuse)")
 	}
 	// Both must still decrypt to the same plaintext.
 	for i, ct := range []string{a, b} {
-		got, err := decrypt(ct, mgr.GCM)
+		got, err := decryptV2(ct, secretsKey, "tmdb")
 		if err != nil {
 			t.Fatalf("decrypt %d: %v", i, err)
 		}
-		if got != plaintext {
+		if string(got) != string(plaintext) {
 			t.Errorf("decrypted[%d]=%q, want %q", i, got, plaintext)
 		}
 	}
 }
 
-// TestDecrypt_Tampered_Fails guards integrity: flipping a bit in the
+// TestDecrypt_Tampered_Fails guards integrity: flipping a bit in the v2
 // ciphertext must cause GCM authentication to fail.
 func TestDecrypt_Tampered_Fails(t *testing.T) {
-	mgr := newServiceKeysManager(t, newServiceKeysTestDB(t), "tamper-secret", "", nil, "", "", "")
-	encrypted := encrypt("original", mgr.GCM)
+	secretsKey := []byte("tamper-secret-32-bytes-aaaaaa")
+	encrypted, err := encryptSecret([]byte("original"), secretsKey, "tmdb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(encrypted) < 8 {
 		t.Fatal("encrypted value unexpectedly short")
 	}
-	// Flip one byte in the middle.
-	tampered := encrypted[:len(encrypted)/2] + "X" + encrypted[len(encrypted)/2+1:]
-	if _, err := decrypt(tampered, mgr.GCM); err == nil {
-		t.Error("decrypt of tampered ciphertext should fail")
+	// Flip one byte in the middle (skip the v2: prefix + a few chars so we
+	// hit the b64 payload, not the version header).
+	idx := len(encrypted)/2 + 1
+	tampered := encrypted[:idx] + "X" + encrypted[idx+1:]
+	if _, err := decryptV2(tampered, secretsKey, "tmdb"); err == nil {
+		t.Error("decrypt of tampered v2 ciphertext should fail")
 	}
 }
 
-// TestDecrypt_WrongKey_Fails guards key-binding: a ciphertext encrypted
-// with one key cannot be decrypted with a different key.
+// TestDecrypt_WrongKey_Fails guards key-binding: a v2 envelope sealed with
+// one SECRETS_KEY cannot be unwrapped with a different one.
 func TestDecrypt_WrongKey_Fails(t *testing.T) {
-	encMgr := newServiceKeysManager(t, newServiceKeysTestDB(t), "secret-one", "", nil, "", "", "")
-	decMgr := newServiceKeysManager(t, newServiceKeysTestDB(t), "secret-two", "", nil, "", "", "")
+	encKey := []byte("secret-one-32-bytes-aaaaaa")
+	decKey := []byte("secret-two-32-bytes-aaaaaa")
+	encrypted, err := encryptSecret([]byte("plaintext"), encKey, "tmdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decryptV2(encrypted, decKey, "tmdb"); err == nil {
+		t.Error("decrypt with wrong SECRETS_KEY should fail")
+	}
+}
 
-	encrypted := encrypt("plaintext", encMgr.GCM)
-	if _, err := decrypt(encrypted, decMgr.GCM); err == nil {
-		t.Error("decrypt with wrong key should fail")
+// TestDecrypt_WrongService_Fails guards per-service KEK isolation: a v2
+// envelope sealed for "tmdb" must not decrypt under the "omdb" KEK.
+func TestDecrypt_WrongService_Fails(t *testing.T) {
+	secretsKey := []byte("isolated-32-bytes-secret-key!")
+	encrypted, err := encryptSecret([]byte("plaintext"), secretsKey, "tmdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decryptV2(encrypted, secretsKey, "omdb"); err == nil {
+		t.Error("decrypt with wrong service KEK should fail")
+	}
+}
+
+// TestDecryptLegacy_V1Ciphertext guards the migration shim: a pre-tier-1
+// ciphertext (no `v2:` prefix) decrypts under the legacy JWT_SECRET-derived
+// KEK, then re-encrypts as v2 on next read.
+func TestDecryptLegacy_V1Ciphertext(t *testing.T) {
+	db := newServiceKeysTestDB(t)
+	jwtSecret := []byte("legacy-jwt-secret-32-bytes-aaa")
+	secretsKey := []byte("new-secrets-key-32-bytes-aaa")
+
+	// Manually encrypt a v1-format value with the legacy KEK.
+	plaintext := "legacy-value"
+	kek := deriveKekLegacy(jwtSecret)
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	for i := range nonce {
+		nonce[i] = byte(i)
+	}
+	v1 := base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plaintext), nil))
+
+	if err := SetGlobalSetting(db, "service_key_tmdb", v1); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewServiceKeyManager(db, secretsKey, jwtSecret, &http.Client{}, "", nil, "", "", "")
+	mgr.Init()
+
+	// Init must have decrypted the legacy value...
+	if got := mgr.TMDBKey(); got != plaintext {
+		t.Errorf("TMDBKey after legacy migration: got %q, want %q", got, plaintext)
+	}
+	// ...and rewritten it as v2.
+	newVal, err := GetGlobalSetting(db, "service_key_tmdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(newVal, "v2:") {
+		t.Errorf("expected v2: prefix after migration, got %q", newVal)
 	}
 }
 
@@ -153,7 +232,7 @@ func TestInit_LoadsFromDB(t *testing.T) {
 	}
 
 	// Fresh manager reads from the DB.
-	mgr2 := NewServiceKeyManager(db, []byte("init-secret"), &http.Client{}, "", nil, "", "", "")
+	mgr2 := NewServiceKeyManager(db, []byte("init-secret"), nil, &http.Client{}, "", nil, "", "", "")
 	mgr2.Init()
 	if got := mgr2.TMDBKey(); got != tmdbVal {
 		t.Errorf("TMDBKey after Init: got %q, want %q", got, tmdbVal)
@@ -171,7 +250,7 @@ func TestInit_EnvOverridesDB(t *testing.T) {
 	}
 
 	// Fresh manager with envTMDB set.
-	mgr2 := NewServiceKeyManager(db, []byte("secret"), &http.Client{}, "tmdb-from-env", nil, "", "", "")
+	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "tmdb-from-env", nil, "", "", "")
 	mgr2.Init()
 	if got := mgr2.TMDBKey(); got != "tmdb-from-env" {
 		t.Errorf("TMDBKey: got %q, want tmdb-from-env (env must win)", got)
@@ -233,7 +312,7 @@ func TestClearKeys_RemovesAll(t *testing.T) {
 	}
 
 	// Fresh manager reads — must be empty.
-	mgr2 := NewServiceKeyManager(db, []byte("secret"), &http.Client{}, "", nil, "", "", "")
+	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "", nil, "", "", "")
 	mgr2.Init()
 	if got := mgr2.TMDBKey(); got != "" {
 		t.Errorf("TMDBKey after clear: got %q, want \"\"", got)
@@ -249,7 +328,7 @@ func TestClearKeys_NilDB_NoPanic(t *testing.T) {
 			t.Errorf("Init on nil DB panicked: %v", r)
 		}
 	}()
-	mgr := &ServiceKeyManager{DB: nil, GCM: nil, HTTP: &http.Client{}}
+	mgr := &ServiceKeyManager{DB: nil, SecretsKey: nil, HTTP: &http.Client{}}
 	// Just calling accessor methods should not panic.
 	_ = mgr.TMDBKey()
 	_ = mgr.OMDBKeys()

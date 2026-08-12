@@ -30,6 +30,7 @@ CREATE TABLE api_keys (
 	name TEXT NOT NULL,
 	key_hash TEXT NOT NULL UNIQUE,
 	key_prefix TEXT NOT NULL,
+	encrypted_key TEXT,
 	created_by INTEGER NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	last_used_at TEXT

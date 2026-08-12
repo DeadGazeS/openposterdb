@@ -20,7 +20,24 @@ import (
 	apperr "openposterdb/internal/errors"
 )
 
-func deriveCipherKey(jwtSecret []byte) []byte {
+// deriveKek returns the per-service Key Encryption Key — an AES-256 key
+// derived from the master SECRETS_KEY via HKDF-SHA256, with a service-scoped
+// info string so each service has an isolated KEK. Random DEKs (per-secret
+// data encryption keys) are wrapped by this KEK; the wrapped DEK travels
+// alongside the ciphertext in the same DB row.
+func deriveKek(secretsKey []byte, service string) []byte {
+	h := hkdf.New(sha256.New, secretsKey, nil, []byte("service-key:"+service+":v2"))
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(h, key); err != nil {
+		panic("HKDF expand should not fail for 32 bytes: " + err.Error())
+	}
+	return key
+}
+
+// deriveKekLegacy is the pre-tier-1 derivation: HKDF(JWT_SECRET, info="openposterdb-service-keys").
+// Kept for one release so existing ciphertexts can be decrypted and re-encrypted
+// in v2 format. Drop after the next version.
+func deriveKekLegacy(jwtSecret []byte) []byte {
 	h := hkdf.New(sha256.New, jwtSecret, nil, []byte("openposterdb-service-keys"))
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(h, key); err != nil {
@@ -29,30 +46,132 @@ func deriveCipherKey(jwtSecret []byte) []byte {
 	return key
 }
 
-func encrypt(value string, gcm cipher.AEAD) string {
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		panic("failed to generate nonce: " + err.Error())
+// encryptSecret produces the v2 envelope-encrypted form: a randomly generated
+// DEK encrypts the plaintext with AES-256-GCM, and the DEK itself is wrapped
+// by the per-service KEK derived from SECRETS_KEY. Storage layout is
+// `v2:<b64(wrappedDEK)>:<b64(nonce||ciphertext)>` so the entire secret round
+// trips in a single DB row.
+func encryptSecret(value []byte, secretsKey []byte, service string) (string, error) {
+	// 1. Random DEK.
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return "", fmt.Errorf("read random DEK: %w", err)
 	}
-	ciphertext := gcm.Seal(nonce, nonce, []byte(value), nil)
-	return base64.StdEncoding.EncodeToString(ciphertext)
+
+	// 2. Encrypt plaintext with DEK.
+	dekBlock, err := aes.NewCipher(dek)
+	if err != nil {
+		return "", err
+	}
+	dekGcm, err := cipher.NewGCM(dekBlock)
+	if err != nil {
+		return "", err
+	}
+	dekNonce := make([]byte, dekGcm.NonceSize())
+	if _, err := rand.Read(dekNonce); err != nil {
+		return "", fmt.Errorf("read DEK nonce: %w", err)
+	}
+	ciphertext := dekGcm.Seal(dekNonce, dekNonce, value, nil)
+
+	// 3. Wrap DEK with per-service KEK.
+	kek := deriveKek(secretsKey, service)
+	kekBlock, err := aes.NewCipher(kek)
+	if err != nil {
+		return "", err
+	}
+	kekGcm, err := cipher.NewGCM(kekBlock)
+	if err != nil {
+		return "", err
+	}
+	kekNonce := make([]byte, kekGcm.NonceSize())
+	if _, err := rand.Read(kekNonce); err != nil {
+		return "", fmt.Errorf("read KEK nonce: %w", err)
+	}
+	wrappedDek := kekGcm.Seal(kekNonce, kekNonce, dek, nil)
+
+	// 4. Format: v2:<b64(wrappedDEK)>:<b64(ciphertext)>
+	return "v2:" + base64.StdEncoding.EncodeToString(wrappedDek) + ":" + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-func decrypt(encrypted string, gcm cipher.AEAD) (string, error) {
+// decryptV2 is the inverse of encryptSecret for the v2 layout.
+func decryptV2(encrypted string, secretsKey []byte, service string) ([]byte, error) {
+	parts := strings.SplitN(encrypted[3:], ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("malformed v2 ciphertext")
+	}
+	wrappedDek, err := base64.StdEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("v2 wrapped DEK base64: %w", err)
+	}
+	ciphertext, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("v2 ciphertext base64: %w", err)
+	}
+
+	// Unwrap DEK with the per-service KEK.
+	kek := deriveKek(secretsKey, service)
+	kekBlock, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
+	}
+	kekGcm, err := cipher.NewGCM(kekBlock)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := kekGcm.NonceSize()
+	if len(wrappedDek) < nonceSize {
+		return nil, fmt.Errorf("v2 wrapped DEK too short")
+	}
+	nonce, wrappedCt := wrappedDek[:nonceSize], wrappedDek[nonceSize:]
+	dek, err := kekGcm.Open(nil, nonce, wrappedCt, nil)
+	if err != nil {
+		return nil, fmt.Errorf("v2 DEK unwrap: %w", err)
+	}
+
+	// Decrypt ciphertext with DEK.
+	dekBlock, err := aes.NewCipher(dek)
+	if err != nil {
+		return nil, err
+	}
+	dekGcm, err := cipher.NewGCM(dekBlock)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) < nonceSize {
+		return nil, fmt.Errorf("v2 ciphertext too short")
+	}
+	nonce, ct := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	return dekGcm.Open(nil, nonce, ct, nil)
+}
+
+// decryptLegacy attempts the pre-tier-1 format: a single AES-256-GCM seal
+// using a KEK derived from JWT_SECRET. Returns an error if the ciphertext
+// isn't valid v1 (no `v2:` prefix, base64-decodable, GCM-authenticating).
+// Kept as a one-release migration shim.
+func decryptLegacy(encrypted string, jwtSecret []byte) ([]byte, error) {
 	data, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
-		return "", fmt.Errorf("base64 decode: %w", err)
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+	kek := deriveKekLegacy(jwtSecret)
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
 	}
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize {
-		return "", fmt.Errorf("encrypted data too short")
+		return nil, fmt.Errorf("encrypted data too short")
 	}
-	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	nonce, ct := data[:nonceSize], data[nonceSize:]
+	plain, err := gcm.Open(nil, nonce, ct, nil)
 	if err != nil {
-		return "", fmt.Errorf("decryption failed — JWT_SECRET may have changed")
+		return nil, fmt.Errorf("decryption failed — JWT_SECRET may have changed")
 	}
-	return string(plaintext), nil
+	return plain, nil
 }
 
 func MaskKey(key string) string {
@@ -71,9 +190,6 @@ func MaskKey(key string) string {
 		revSuf[i], revSuf[j] = revSuf[j], revSuf[i]
 	}
 
-
-
-
 	return fmt.Sprintf("%s...%s", prefix, string(revSuf))
 }
 
@@ -85,17 +201,22 @@ type keyCache struct {
 	trakt   []string
 }
 
+// ServiceKeyManager stores source API keys (TMDB / MDBList / OMDb / Fanart.tv /
+// Trakt) encrypted at rest. SECRETS_KEY derives the per-service KEKs (HKDF).
+// LegacyJWTSecret is held for one release so existing v1 ciphertexts can be
+// decrypted and re-encrypted as v2 on first read; drop it in the next release.
 type ServiceKeyManager struct {
-	DB         *sql.DB
-	GCM        cipher.AEAD
-	HTTP       *http.Client
-	Keys       keyCache
-	mu         sync.RWMutex
-	EnvTMDB    bool
-	EnvMDBList bool
-	EnvOMDB    bool
-	EnvFanart  bool
-	EnvTrakt   bool
+	DB             *sql.DB
+	SecretsKey     []byte
+	LegacyJWTSecret []byte
+	HTTP           *http.Client
+	Keys           keyCache
+	mu             sync.RWMutex
+	EnvTMDB        bool
+	EnvMDBList     bool
+	EnvOMDB        bool
+	EnvFanart      bool
+	EnvTrakt       bool
 }
 
 type ServiceKeyStatus struct {
@@ -123,18 +244,12 @@ type ServiceKeysUpdate struct {
 	Trakt   *string `json:"trakt"`
 }
 
-func NewServiceKeyManager(db *sql.DB, jwtSecret []byte, httpClient *http.Client,
+// NewServiceKeyManager builds a manager with the v2 KEK seed (SECRETS_KEY) and
+// the legacy JWT secret kept only for the one-release migration shim. Pass nil
+// for legacyJWTSecret on fresh installs; the manager will treat any pre-v2
+// ciphertext as missing.
+func NewServiceKeyManager(db *sql.DB, secretsKey []byte, legacyJWTSecret []byte, httpClient *http.Client,
 	envTMDB string, envMDBList []string, envOMDB, envFanart, envTrakt string) *ServiceKeyManager {
-
-	cipherKey := deriveCipherKey(jwtSecret)
-	aesCipher, err := aes.NewCipher(cipherKey)
-	if err != nil {
-		panic("AES-256-GCM: " + err.Error())
-	}
-	gcm, err := cipher.NewGCM(aesCipher)
-	if err != nil {
-		panic("AES-256-GCM: " + err.Error())
-	}
 
 	cache := keyCache{
 		mdblist: envMDBList,
@@ -156,15 +271,16 @@ func NewServiceKeyManager(db *sql.DB, jwtSecret []byte, httpClient *http.Client,
 	}
 
 	return &ServiceKeyManager{
-		DB:         db,
-		GCM:        gcm,
-		HTTP:       httpClient,
-		Keys:       cache,
-		EnvTMDB:    envTMDB != "",
-		EnvMDBList: envMDBListLocked,
-		EnvOMDB:    envOMDB != "",
-		EnvFanart:  envFanart != "",
-		EnvTrakt:   envTrakt != "",
+		DB:              db,
+		SecretsKey:      secretsKey,
+		LegacyJWTSecret: legacyJWTSecret,
+		HTTP:            httpClient,
+		Keys:            cache,
+		EnvTMDB:         envTMDB != "",
+		EnvMDBList:      envMDBListLocked,
+		EnvOMDB:         envOMDB != "",
+		EnvFanart:       envFanart != "",
+		EnvTrakt:        envTrakt != "",
 	}
 }
 
@@ -196,17 +312,49 @@ func (m *ServiceKeyManager) Init() {
 	}
 }
 
+// decryptStored picks the right path for a stored ciphertext. v2 envelopes
+// are decrypted directly; pre-v2 rows are decrypted with the legacy KEK
+// derived from JWT_SECRET, then re-encrypted as v2 and persisted so the
+// migration is one-shot per row. The success log fires once per row (the
+// next read sees v2 and skips this branch); the error logs surface any
+// migration failure so it can be diagnosed.
+func (m *ServiceKeyManager) decryptStored(encrypted, service string) ([]byte, error) {
+	if strings.HasPrefix(encrypted, "v2:") {
+		return decryptV2(encrypted, m.SecretsKey, service)
+	}
+	if m.LegacyJWTSecret != nil {
+		plain, err := decryptLegacy(encrypted, m.LegacyJWTSecret)
+		if err != nil {
+			slog.Error("service key v1 decryption failed — legacy ciphertext cannot be migrated",
+				"service", service, "error", err)
+			return nil, err
+		}
+		reEncrypted, encErr := encryptSecret(plain, m.SecretsKey, service)
+		if encErr != nil {
+			slog.Error("service key v1→v2 re-encrypt failed", "service", service, "error", encErr)
+			return plain, nil
+		}
+		if err := SetGlobalSetting(m.DB, "service_key_"+service, reEncrypted); err != nil {
+			slog.Error("service key v1→v2 persist failed", "service", service, "error", err)
+			return plain, nil
+		}
+		slog.Info("service key migrated v1→v2", "service", service)
+		return plain, nil
+	}
+	return nil, fmt.Errorf("unsupported ciphertext format")
+}
+
 func (m *ServiceKeyManager) loadFromDB(service string) *[]string {
 	encrypted, err := GetGlobalSetting(m.DB, "service_key_"+service)
 	if err != nil || encrypted == "" {
 		return nil
 	}
-	plain, err := decrypt(encrypted, m.GCM)
+	plain, err := m.decryptStored(encrypted, service)
 	if err != nil {
 		return nil
 	}
 	var keys []string
-	for k := range strings.SplitSeq(plain, ",") {
+	for k := range strings.SplitSeq(string(plain), ",") {
 		k = strings.TrimSpace(k)
 		if k != "" {
 			keys = append(keys, k)
@@ -361,7 +509,10 @@ func (m *ServiceKeyManager) UpdateKeys(update *ServiceKeysUpdate) error {
 }
 
 func (m *ServiceKeyManager) storeKey(service, value string) error {
-	encrypted := encrypt(value, m.GCM)
+	encrypted, err := encryptSecret([]byte(value), m.SecretsKey, service)
+	if err != nil {
+		return err
+	}
 	return SetGlobalSetting(m.DB, "service_key_"+service, encrypted)
 }
 

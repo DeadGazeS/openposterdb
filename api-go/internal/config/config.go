@@ -35,6 +35,7 @@ type Config struct {
 	DisablePublicPages  bool
 	LogLevel            string
 	JWTSecret           []byte
+	SecretsKey          []byte
 	SecureCookies       bool
 	AdminUsername       string
 	AdminPassword       string
@@ -80,6 +81,13 @@ func FromEnv() (*Config, error) {
 		return nil, err
 	}
 	c.JWTSecret = jwtSecret
+
+	secretsKey, err := loadSecretsKey()
+	if err != nil {
+		return nil, err
+	}
+	c.SecretsKey = secretsKey
+
 	c.SecureCookies = loadSecureCookies()
 	c.AdminUsername = os.Getenv("ADMIN_USERNAME")
 	c.AdminPassword = os.Getenv("ADMIN_PASSWORD")
@@ -102,6 +110,29 @@ func loadJWTSecret() ([]byte, error) {
 	}
 	if len(bytes) != 32 {
 		return nil, fmt.Errorf("JWT_SECRET must be 32 bytes (64 hex chars), got %d", len(bytes))
+	}
+	return bytes, nil
+}
+
+// loadSecretsKey reads the required SECRETS_KEY env var (64 hex chars = 32
+// bytes). It is the KEK for the encrypted source API keys at rest (TMDB,
+// MDBList, OMDb, Fanart.tv, Trakt) — separate from JWT_SECRET so that
+// JWT_SECRET rotation does not invalidate every stored secret, and so that
+// JWT_SECRET compromise (the secret most likely to leak in error logs /
+// debug dumps) does not directly expose the at-rest ciphertexts.
+func loadSecretsKey() ([]byte, error) {
+	hexStr := os.Getenv("SECRETS_KEY")
+	if hexStr == "" {
+		return nil, errors.New("SECRETS_KEY is not set. This is required for encrypting source API keys at rest.\n" +
+			"Generate one with: openssl rand -hex 32\n" +
+			"Then add it to your .env file.")
+	}
+	bytes, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("SECRETS_KEY is not valid hex: %w", err)
+	}
+	if len(bytes) != 32 {
+		return nil, fmt.Errorf("SECRETS_KEY must be 32 bytes (64 hex chars), got %d", len(bytes))
 	}
 	return bytes, nil
 }

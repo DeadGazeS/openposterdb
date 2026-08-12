@@ -46,4 +46,9 @@ env:
 		sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$${SEC}/" .env; \
 		echo "JWT_SECRET auto-generated"; \
 	fi
-	@echo ".env ready — set your TMDB_API_KEY and other secrets in .env"
+	@if ! grep -qE '^SECRETS_KEY=.+' .env 2>/dev/null; then \
+		SEC=$$(openssl rand -hex 32); \
+		sed -i "s/^SECRETS_KEY=.*/SECRETS_KEY=$${SEC}/" .env; \
+		echo "SECRETS_KEY auto-generated"; \
+	fi
+	@echo ".env ready — set your TMDB_API_KEY and other secrets in .env or in the UI"

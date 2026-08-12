@@ -12,8 +12,10 @@ func setEnv(t *testing.T, key, value string) {
 }
 
 func TestMain(m *testing.M) {
-	// JWT_SECRET is required by FromEnv; use a fixed valid value for tests.
+	// JWT_SECRET and SECRETS_KEY are required by FromEnv; use fixed valid
+	// 32-byte hex values for tests.
 	os.Setenv("JWT_SECRET", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	os.Setenv("SECRETS_KEY", "101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f")
 	os.Exit(m.Run())
 }
 

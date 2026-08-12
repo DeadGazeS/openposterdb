@@ -28,6 +28,7 @@ CREATE TABLE api_keys (
 	name TEXT NOT NULL,
 	key_hash TEXT NOT NULL UNIQUE,
 	key_prefix TEXT NOT NULL,
+	encrypted_key TEXT,
 	created_by INTEGER NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	last_used_at TEXT
@@ -70,7 +71,7 @@ func TestHandleCreateKey_ValidatesName(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		HandleCreateKey(db)(rec, req)
+		HandleCreateKey(db, testSecretsKey)(rec, req)
 		if rec.Code != c.want {
 			t.Errorf("name %q: got %d want %d (body %s)", c.name, rec.Code, c.want, rec.Body.String())
 		}
