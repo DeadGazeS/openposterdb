@@ -29,6 +29,7 @@ type AppState struct {
 	CDNHashes       *services.HashRegistry
 	Inflight        *image.InflightSet
 	JWTSecret       []byte
+	SecretsKey      []byte
 	LastUsedFlusher *services.LastUsedFlusher
 
 	// clientsMu protects the rating-provider client fields (TMDB/OMDB/MDBList/

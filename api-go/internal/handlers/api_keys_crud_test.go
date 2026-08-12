@@ -15,6 +15,11 @@ import (
 	"openposterdb/internal/services"
 )
 
+// testSecretsKey is a fixed 32-byte value used by the api_keys handler tests
+// for encrypting raw keys at create time and decrypting them on list. Real
+// deployments use cfg.SecretsKey from the env.
+var testSecretsKey = []byte("api-keys-test-secrets-key-32-by")
+
 // crudTestDB returns the schema used by the api_keys tests (defined in
 // api_keys_test.go) so CRUD tests can exercise the same code path.
 func crudTestDB(t *testing.T) *sql.DB {
@@ -55,7 +60,7 @@ func TestListKeys_EmptyDB(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/keys", nil)
 	rec := httptest.NewRecorder()
-	HandleListKeys(db)(rec, req)
+	HandleListKeys(db, testSecretsKey)(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("status: got %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -79,7 +84,7 @@ func TestListKeys_Seeded(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/keys", nil)
 	rec := httptest.NewRecorder()
-	HandleListKeys(db)(rec, req)
+	HandleListKeys(db, testSecretsKey)(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("status: got %d, want 200", rec.Code)
 	}
@@ -110,7 +115,7 @@ func TestCreateKey_Valid_201_WithKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, req)
 	if rec.Code != 201 {
 		t.Fatalf("status: got %d, want 201 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -146,7 +151,7 @@ func TestCreateKey_RejectsEmptyName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, req)
 	if rec.Code != 400 {
 		t.Errorf("status: got %d, want 400", rec.Code)
 	}
@@ -171,7 +176,7 @@ func TestCreateKey_AllowsDuplicateName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, req)
 	if rec.Code != 201 {
 		t.Fatalf("first create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -180,7 +185,7 @@ func TestCreateKey_AllowsDuplicateName(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
-	HandleCreateKey(db)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, req)
 	if rec.Code != 201 {
 		t.Errorf("second create: status %d, want 201 (current contract allows dup names)", rec.Code)
 	}
@@ -393,7 +398,7 @@ func TestListKeys_RejectsWrongMethod(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", nil)
 	rec := httptest.NewRecorder()
-	HandleListKeys(db)(rec, req)
+	HandleListKeys(db, testSecretsKey)(rec, req)
 	if rec.Code != 405 {
 		t.Errorf("status: got %d, want 405", rec.Code)
 	}
@@ -407,7 +412,7 @@ func TestCreateKey_RejectsBadJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, req)
 	if rec.Code != 400 {
 		t.Errorf("status: got %d, want 400", rec.Code)
 	}

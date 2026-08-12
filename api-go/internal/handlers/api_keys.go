@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -12,7 +13,7 @@ import (
 	"openposterdb/internal/services"
 )
 
-func HandleListKeys(db *sql.DB) http.HandlerFunc {
+func HandleListKeys(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpx.WriteError(w, 405, "Method not allowed")
@@ -29,26 +30,40 @@ func HandleListKeys(db *sql.DB) http.HandlerFunc {
 			ID         int64   `json:"id"`
 			Name       string  `json:"name"`
 			KeyPrefix  string  `json:"key_prefix"`
+			// Key holds the raw key, decrypted from the api_keys.encrypted_key
+			// column. Empty when the row pre-dates the encrypted_key column
+			// (raw is gone with the dismissed create banner) — the frontend
+			// shows the prefix-only fallback for those rows.
+			Key        string  `json:"key,omitempty"`
 			CreatedAt  string  `json:"created_at"`
 			LastUsedAt *string `json:"last_used_at"`
 		}
 
 		result := make([]keyResp, len(keys))
 		for i, k := range keys {
-			result[i] = keyResp{
+			row := keyResp{
 				ID:         k.ID,
 				Name:       k.Name,
 				KeyPrefix:  k.KeyPrefix,
 				CreatedAt:  k.CreatedAt,
 				LastUsedAt: k.LastUsedAt,
 			}
+			if k.EncryptedKey != nil && *k.EncryptedKey != "" {
+				raw, decErr := services.DecryptAPIKey(*k.EncryptedKey, secretsKey)
+				if decErr != nil {
+					slog.Error("failed to decrypt api key for list response", "id", k.ID, "error", decErr)
+				} else {
+					row.Key = raw
+				}
+			}
+			result[i] = row
 		}
 
 		httpx.WriteJSON(w, 200, result)
 	}
 }
 
-func HandleCreateKey(db *sql.DB) http.HandlerFunc {
+func HandleCreateKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
@@ -68,9 +83,14 @@ func HandleCreateKey(db *sql.DB) http.HandlerFunc {
 		}
 
 		raw, hash, prefix := services.GenerateAPIKey()
+		encrypted, err := services.EncryptAPIKey(raw, secretsKey)
+		if err != nil {
+			httpx.WriteError(w, 500, "Failed to encrypt key")
+			return
+		}
 
 		var createdBy int64 = 1
-		id, err := services.CreateAPIKeyCtx(r.Context(), db, body.Name, hash, prefix, createdBy)
+		id, err := services.CreateAPIKeyCtx(r.Context(), db, body.Name, hash, prefix, encrypted, createdBy)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to create key")
 			return

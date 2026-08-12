@@ -7,11 +7,36 @@ import (
 	"strings"
 )
 
-func CreateAPIKeyCtx(ctx context.Context, db *sql.DB, name, keyHash, keyPrefix string, createdBy int64) (int64, error) {
+// apiKeyCipherService is the domain label used as the per-service KEK input
+// for envelope encryption. Keeping it separate from the source-key services
+// (<tmdb>, <omdb>, etc.) means the api_keys KEK is isolated from every other
+// at-rest secret — a compromised source key ciphertext can't be retried under
+// the api-key KEK.
+const apiKeyCipherService = "api-key"
+
+// EncryptAPIKey seals the raw key with the same v2 envelope scheme used for
+// source keys. The result is a string suitable for the api_keys.encrypted_key
+// column; the plaintext is never persisted.
+func EncryptAPIKey(raw string, secretsKey []byte) (string, error) {
+	return encryptSecret([]byte(raw), secretsKey, apiKeyCipherService)
+}
+
+// DecryptAPIKey is the inverse of EncryptAPIKey. Returns an error if the
+// ciphertext is missing the v2: prefix, has a bad base64, or fails the GCM
+// auth check (which catches both tampering and a wrong SECRETS_KEY).
+func DecryptAPIKey(encrypted string, secretsKey []byte) (string, error) {
+	plain, err := decryptV2(encrypted, secretsKey, apiKeyCipherService)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
+func CreateAPIKeyCtx(ctx context.Context, db *sql.DB, name, keyHash, keyPrefix, encryptedKey string, createdBy int64) (int64, error) {
 	now := nowUTC()
 	result, err := db.ExecContext(ctx,
-		"INSERT INTO api_keys (name, key_hash, key_prefix, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-		name, keyHash, keyPrefix, createdBy, now,
+		"INSERT INTO api_keys (name, key_hash, key_prefix, encrypted_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		name, keyHash, keyPrefix, encryptedKey, createdBy, now,
 	)
 	if err != nil {
 		return 0, err
@@ -19,26 +44,32 @@ func CreateAPIKeyCtx(ctx context.Context, db *sql.DB, name, keyHash, keyPrefix s
 	return result.LastInsertId()
 }
 
-func CreateAPIKey(db *sql.DB, name, keyHash, keyPrefix string, createdBy int64) (int64, error) {
-	return CreateAPIKeyCtx(context.Background(), db, name, keyHash, keyPrefix, createdBy)
+func CreateAPIKey(db *sql.DB, name, keyHash, keyPrefix, encryptedKey string, createdBy int64) (int64, error) {
+	return CreateAPIKeyCtx(context.Background(), db, name, keyHash, keyPrefix, encryptedKey, createdBy)
 }
 
+// APIKey models a row in api_keys. EncryptedKey holds the v2 envelope form of
+// the raw key (or nil for legacy rows that pre-date the encrypted_key column
+// and cannot be revealed — their raw was never persisted).
 type APIKey struct {
-	ID         int64
-	Name       string
-	KeyHash    string
-	KeyPrefix  string
-	CreatedBy  int64
-	CreatedAt  string
-	LastUsedAt *string
+	ID           int64
+	Name         string
+	KeyHash      string
+	KeyPrefix    string
+	EncryptedKey *string
+	CreatedBy    int64
+	CreatedAt    string
+	LastUsedAt   *string
 }
+
+const apiKeySelectColumns = "id, name, key_hash, key_prefix, encrypted_key, created_by, created_at, last_used_at"
 
 func FindAPIKeyByHashCtx(ctx context.Context, db *sql.DB, keyHash string) (*APIKey, error) {
 	var k APIKey
 	err := db.QueryRowContext(ctx,
-		"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at FROM api_keys WHERE key_hash = ?",
+		"SELECT "+apiKeySelectColumns+" FROM api_keys WHERE key_hash = ?",
 		keyHash,
-	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
+	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.EncryptedKey, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -55,9 +86,9 @@ func FindAPIKeyByHash(db *sql.DB, keyHash string) (*APIKey, error) {
 func FindAPIKeyByIDCtx(ctx context.Context, db *sql.DB, id int64) (*APIKey, error) {
 	var k APIKey
 	err := db.QueryRowContext(ctx,
-		"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at FROM api_keys WHERE id = ?",
+		"SELECT "+apiKeySelectColumns+" FROM api_keys WHERE id = ?",
 		id,
-	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
+	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.EncryptedKey, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -76,9 +107,9 @@ func FindAPIKeyByID(db *sql.DB, id int64) (*APIKey, error) {
 func FindAPIKeyByNameCtx(ctx context.Context, db *sql.DB, name string) (*APIKey, error) {
 	var k APIKey
 	err := db.QueryRowContext(ctx,
-		"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at FROM api_keys WHERE name = ?",
+		"SELECT "+apiKeySelectColumns+" FROM api_keys WHERE name = ?",
 		name,
-	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
+	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.EncryptedKey, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -93,7 +124,7 @@ func FindAPIKeyByName(db *sql.DB, name string) (*APIKey, error) {
 }
 
 func ListAPIKeysCtx(ctx context.Context, db *sql.DB) ([]APIKey, error) {
-	rows, err := db.QueryContext(ctx, "SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at FROM api_keys")
+	rows, err := db.QueryContext(ctx, "SELECT "+apiKeySelectColumns+" FROM api_keys")
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +133,7 @@ func ListAPIKeysCtx(ctx context.Context, db *sql.DB) ([]APIKey, error) {
 	var keys []APIKey
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.EncryptedKey, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)

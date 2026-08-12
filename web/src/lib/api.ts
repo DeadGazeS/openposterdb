@@ -200,10 +200,20 @@ export const adminApi = {
   updateSettings: (settings: Partial<SaveSettingsPayload> & { image_source: string; free_api_key_enabled?: boolean }): Promise<Response> => put('/api/admin/settings', settings),
   getPrefs: (): Promise<Response> => get('/api/admin/prefs'),
   updatePrefs: (prefs: Record<string, string>): Promise<Response> => put('/api/admin/prefs', prefs),
-  exportSettings: (includeServiceKeys: boolean, includeAPIKeys: boolean): Promise<Response> =>
-    get(`/api/admin/settings/export?include_service_keys=${includeServiceKeys ? '1' : '0'}&include_api_keys=${includeAPIKeys ? '1' : '0'}`),
-  importSettings: (payload: unknown): Promise<Response> =>
-    post('/api/admin/settings/import', payload),
+  exportSettings: (includeServiceKeys: boolean, includeAPIKeys: boolean, passphrase?: string): Promise<Response> => {
+    const params = new URLSearchParams({
+      include_service_keys: includeServiceKeys ? '1' : '0',
+      include_api_keys: includeAPIKeys ? '1' : '0',
+    })
+    if (passphrase) params.set('passphrase', passphrase)
+    return get(`/api/admin/settings/export?${params.toString()}`)
+  },
+  importSettings: (payload: unknown, passphrase?: string): Promise<Response> => {
+    // Encrypted exports carry the passphrase in the body so the file alone
+    // is self-describing for the import endpoint.
+    const body = passphrase ? { passphrase, payload } : payload
+    return post('/api/admin/settings/import', body)
+  },
   getServiceKeys: (): Promise<Response> => get('/api/admin/settings/services'),
   updateServiceKeys: (keys: Record<string, string | null>): Promise<Response> => put('/api/admin/settings/services', keys),
   preview: (kind: PreviewKind, params: PreviewParams): Promise<Response> =>

@@ -446,4 +446,14 @@ var Migrations = []Migration{
 		SQL:           "ALTER TABLE image_meta ADD COLUMN last_accessed INTEGER NOT NULL DEFAULT 0",
 		ExpectedError: "duplicate column",
 	},
+	{
+		// Stores the raw key in v2 envelope form (same scheme as source keys
+		// — encryptSecret → "v2:<b64(wrappedDEK)>:<b64(nonce||ciphertext)>")
+		// so the admin UI can reveal the full key after the create banner is
+		// dismissed. Existing rows have NULL here: those keys can never be
+		// revealed (the raw is gone with the dismissed banner) and the UI
+		// shows the prefix-only fallback.
+		SQL:           "ALTER TABLE api_keys ADD COLUMN encrypted_key TEXT",
+		ExpectedError: "duplicate column",
+	},
 }

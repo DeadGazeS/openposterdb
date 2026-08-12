@@ -150,9 +150,9 @@ func (r *Router) registerKeyRoutes() {
 	r.mux.Handle("/api/keys", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleListKeys(s.DB)(w, req)
+			handlers.HandleListKeys(s.DB, s.SecretsKey)(w, req)
 		case http.MethodPost:
-			handlers.HandleCreateKey(s.DB)(w, req)
+			handlers.HandleCreateKey(s.DB, s.SecretsKey)(w, req)
 		default:
 			httpx.WriteError(w, 405, "Method not allowed")
 		}
