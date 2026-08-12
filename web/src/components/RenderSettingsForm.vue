@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useSavedFlash } from '@/composables/useSavedFlash'
 import { Loader2, Check } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -31,8 +32,10 @@ const props = withDefaults(defineProps<{
   saveSettings: (s: SaveSettingsPayload) => Promise<string | null>
   resetSettings?: () => Promise<boolean>
   fetchPreview: (kind: PreviewKind, params: PreviewParams) => Promise<Response>
+  tabKey?: string
 }>(), {
   showActions: true,
+  tabKey: 'tab',
 })
 
 // The backend's DefaultPosterBadgeStyle is 'd' (Auto) and legacy 'h' values
@@ -45,9 +48,33 @@ function normalizePosterBadgeStyle(value: string | undefined): string {
   return value === 'd' || value === 'h' || !value ? 'lr' : value
 }
 
-const TAB_STORAGE_KEY = 'render-settings-active-tab'
-const activeTab = ref(localStorage.getItem(TAB_STORAGE_KEY) || 'image-settings')
-watch(activeTab, (v) => localStorage.setItem(TAB_STORAGE_KEY, v))
+// The settings form's section is driven by a `?{tabKey}=` query param so the
+// active view survives reloads, lands on the right tab when shared via link,
+// and respects the back/forward buttons — replaces the previous localStorage
+// approach so the URL itself is the source of truth.
+//
+// The query key is configurable via the `tabKey` prop so this component can
+// be embedded inside a parent that also uses `?tab=` (e.g. the per-key
+// settings panel inside the api-keys list) without the two layers
+// overwriting each other.
+type FormTab = 'image-settings' | 'rating-order' | 'rating-colours' | 'poster' | 'logo' | 'backdrop' | 'episode'
+const validFormTabs: FormTab[] = ['image-settings', 'rating-order', 'rating-colours', 'poster', 'logo', 'backdrop', 'episode']
+
+const route = useRoute()
+const router = useRouter()
+const queryKey = computed(() => props.tabKey ?? 'tab')
+const activeTab = computed<FormTab>({
+  get() {
+    const raw = route.query[queryKey.value]
+    const q = Array.isArray(raw) ? raw[0] : raw
+    return (validFormTabs as string[]).includes(q ?? '') ? (q as FormTab) : 'image-settings'
+  },
+  set(v) {
+    const next = { ...route.query }
+    next[queryKey.value] = v
+    void router.replace({ query: next })
+  },
+})
 
 const editFanart = ref(props.settings.image_source === 'f')
 const editLang = ref(props.settings.lang || 'en')
@@ -671,9 +698,6 @@ function onDocumentClick(e: MouseEvent) {
 onMounted(() => document.addEventListener('click', onDocumentClick))
 
 onBeforeUnmount(() => {
-  // Leaving the settings page resets the tab to the first category on return;
-  // a hard refresh does NOT run this hook, so the tab still persists there.
-  localStorage.removeItem(TAB_STORAGE_KEY)
   document.removeEventListener('click', onDocumentClick)
   if (galleryTimer) clearTimeout(galleryTimer)
   if (posterPreviewTimer) clearTimeout(posterPreviewTimer)
@@ -727,10 +751,11 @@ function toggleExclude(key: string, checked: boolean) {
       </Button>
     </div>
 
-    <Tabs :model-value="activeTab" @update:model-value="activeTab = String($event)" :unmount-on-hide="false">
+    <Tabs v-model="activeTab" :unmount-on-hide="false">
       <TabsList class="h-auto flex-wrap">
         <TabsTrigger value="image-settings" data-testid="form-tab-image-settings">Image Settings</TabsTrigger>
-        <TabsTrigger value="ratings" data-testid="form-tab-ratings">Ratings</TabsTrigger>
+        <TabsTrigger value="rating-order" data-testid="form-tab-rating-order">Rating Order</TabsTrigger>
+        <TabsTrigger value="rating-colours" data-testid="form-tab-rating-colours">Rating Colours</TabsTrigger>
         <TabsTrigger value="poster" data-testid="form-tab-poster">Poster</TabsTrigger>
         <TabsTrigger value="logo" data-testid="form-tab-logo">Logo</TabsTrigger>
         <TabsTrigger value="backdrop" data-testid="form-tab-backdrop">Backdrop</TabsTrigger>
@@ -785,107 +810,101 @@ function toggleExclude(key: string, checked: boolean) {
         </div>
       </TabsContent>
 
-      <TabsContent value="ratings" class="mt-3">
-        <div class="space-y-4">
-          <div class="rounded-md border p-4 space-y-3">
-            <p class="text-sm font-semibold">Rating Display</p>
-
-      <div class="space-y-2">
-        <p class="text-xs text-muted-foreground">Use the arrows to reorder. Higher items have priority. Use the eye to hide or show a rating source.</p>
-        <RatingsOrderList
-          v-model="editRatingsOrder"
-          :excluded="editRatingsExclude"
-          toggleable
-          @toggle-exclude="(key) => toggleExclude(key, !isExcluded(key))"
-        />
-      </div>
-    </div>
-
-    <!-- Rating Colours (global only) -->
-    <template v-if="uid === 'global'">
-      <div class="rounded-md border p-4 space-y-3">
-        <p class="text-sm font-semibold">Rating Colours</p>
-        <p class="text-xs text-muted-foreground">Customize each rating source's badge colours. The badge background opacity is set by the background-opacity sliders above.</p>
-        <div class="space-y-1 text-xs text-muted-foreground">
-          <span class="flex items-center gap-2">
-            <span aria-hidden="true">-</span>
-            Logo background — background behind the rating source logo
-          </span>
-          <span class="flex items-center gap-2">
-            <span aria-hidden="true">-</span>
-            Text background — background behind the rating number
-          </span>
-          <span class="flex items-center gap-2">
-            <span aria-hidden="true">-</span>
-            Border — outline around the badge (off by default)
-          </span>
-          <span class="flex items-center gap-2">
-            <span aria-hidden="true">-</span>
-            Text colour — colour of the rating number
-          </span>
+      <TabsContent value="rating-order" class="mt-3">
+        <div class="rounded-md border p-4 space-y-3">
+          <p class="text-sm font-semibold">Rating Order</p>
+          <p class="text-xs text-muted-foreground">Use the arrows to reorder. Higher items have priority. Use the eye to hide or show a rating source.</p>
+          <RatingsOrderList
+            v-model="editRatingsOrder"
+            :excluded="editRatingsExclude"
+            toggleable
+            @toggle-exclude="(key) => toggleExclude(key, !isExcluded(key))"
+          />
         </div>
-        <div class="grid grid-cols-1 gap-x-4 gap-y-2">
-          <div
-            v-for="source in RATING_COLOR_ROWS"
-            :key="source.key"
-            class="flex items-start gap-2 pt-1"
-          >
-            <Label class="w-44 text-sm font-normal shrink-0">{{ source.label }}</Label>
-            <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
-              <img
-                v-for="sample in badgeSamplesForRow(source)"
-                :key="sample.value"
-                :src="badgePreviewUrl(baseSourceKey(source), sample.value)"
-                :alt="`${source.label} badge (${sample.label})`"
-                :title="`${source.label} badge — ${sample.label}`"
-                class="h-10 w-auto"
+      </TabsContent>
+
+      <TabsContent v-if="uid === 'global'" value="rating-colours" class="mt-3">
+        <div class="rounded-md border p-4 space-y-3">
+          <p class="text-sm font-semibold">Rating Colours</p>
+          <p class="text-xs text-muted-foreground">Customize each rating source's badge colours. The badge background opacity is set by the background-opacity sliders above.</p>
+          <div class="space-y-1 text-xs text-muted-foreground">
+            <span class="flex items-center gap-2">
+              <span aria-hidden="true">-</span>
+              Logo background — background behind the rating source logo
+            </span>
+            <span class="flex items-center gap-2">
+              <span aria-hidden="true">-</span>
+              Text background — background behind the rating number
+            </span>
+            <span class="flex items-center gap-2">
+              <span aria-hidden="true">-</span>
+              Border — outline around the badge (off by default)
+            </span>
+            <span class="flex items-center gap-2">
+              <span aria-hidden="true">-</span>
+              Text colour — colour of the rating number
+            </span>
+          </div>
+          <div class="grid grid-cols-1 gap-x-4 gap-y-2">
+            <div
+              v-for="source in RATING_COLOR_ROWS"
+              :key="source.key"
+              class="flex items-start gap-2 pt-1"
+            >
+              <Label class="w-44 text-sm font-normal shrink-0">{{ source.label }}</Label>
+              <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
+                <img
+                  v-for="sample in badgeSamplesForRow(source)"
+                  :key="sample.value"
+                  :src="badgePreviewUrl(baseSourceKey(source), sample.value)"
+                  :alt="`${source.label} badge (${sample.label})`"
+                  :title="`${source.label} badge — ${sample.label}`"
+                  class="h-10 w-auto"
+                />
+              </div>
+              <input
+                type="color"
+                :value="(editColors[source.key] && (editColors[source.key] as SourceColors).accent) || '#000000'"
+                :aria-label="`${source.label} logo background`"
+                :title="`${source.label} — logo background`"
+                class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5"
+                @input="setColor(source.key, 'accent', ($event.target as HTMLInputElement).value)"
+              />
+              <input
+                type="color"
+                :value="(editColors[source.key] && (editColors[source.key] as SourceColors).value) || '#000000'"
+                :aria-label="`${source.label} text background`"
+                :title="`${source.label} — text background`"
+                class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5"
+                @input="setColor(source.key, 'value', ($event.target as HTMLInputElement).value)"
+              />
+              <Checkbox
+                :id="inputId(`border-${source.key}`)"
+                :model-value="borderEnabled(source.key)"
+                :aria-label="`${source.label} border on/off`"
+                :title="`${source.label}: toggle border`"
+                data-testid="border-toggle"
+                @update:model-value="(v) => toggleBorder(source.key, !!v)"
+              />
+              <input
+                type="color"
+                :value="(editColors[source.key] && (editColors[source.key] as SourceColors).border) || '#ffffff'"
+                :disabled="!borderEnabled(source.key)"
+                :aria-label="`${source.label} border color`"
+                :title="`${source.label} border — outline around the badge`"
+                class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5 disabled:cursor-not-allowed disabled:opacity-40"
+                @input="setColor(source.key, 'border', ($event.target as HTMLInputElement).value)"
+              />
+              <input
+                type="color"
+                :value="(editColors[source.key] && (editColors[source.key] as SourceColors).text) || '#ffffff'"
+                :aria-label="`${source.label} text colour`"
+                :title="`${source.label} — text colour`"
+                class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5"
+                @input="setColor(source.key, 'text', ($event.target as HTMLInputElement).value)"
               />
             </div>
-            <input
-              type="color"
-              :value="(editColors[source.key] && (editColors[source.key] as SourceColors).accent) || '#000000'"
-              :aria-label="`${source.label} logo background`"
-              :title="`${source.label} — logo background`"
-              class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5"
-              @input="setColor(source.key, 'accent', ($event.target as HTMLInputElement).value)"
-            />
-            <input
-              type="color"
-              :value="(editColors[source.key] && (editColors[source.key] as SourceColors).value) || '#000000'"
-              :aria-label="`${source.label} text background`"
-              :title="`${source.label} — text background`"
-              class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5"
-              @input="setColor(source.key, 'value', ($event.target as HTMLInputElement).value)"
-            />
-            <Checkbox
-              :id="inputId(`border-${source.key}`)"
-              :model-value="borderEnabled(source.key)"
-              :aria-label="`${source.label} border on/off`"
-              :title="`${source.label}: toggle border`"
-              data-testid="border-toggle"
-              @update:model-value="(v) => toggleBorder(source.key, !!v)"
-            />
-            <input
-              type="color"
-              :value="(editColors[source.key] && (editColors[source.key] as SourceColors).border) || '#ffffff'"
-              :disabled="!borderEnabled(source.key)"
-              :aria-label="`${source.label} border color`"
-              :title="`${source.label} border — outline around the badge`"
-              class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5 disabled:cursor-not-allowed disabled:opacity-40"
-              @input="setColor(source.key, 'border', ($event.target as HTMLInputElement).value)"
-            />
-            <input
-              type="color"
-              :value="(editColors[source.key] && (editColors[source.key] as SourceColors).text) || '#ffffff'"
-              :aria-label="`${source.label} text colour`"
-              :title="`${source.label} — text colour`"
-              class="h-7 w-9 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0.5"
-              @input="setColor(source.key, 'text', ($event.target as HTMLInputElement).value)"
-            />
           </div>
-        </div>
-      </div>
-    </template>
         </div>
       </TabsContent>
 

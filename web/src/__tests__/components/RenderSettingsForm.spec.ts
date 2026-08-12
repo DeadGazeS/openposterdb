@@ -5,6 +5,11 @@ import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import type { RenderSettings } from '@/lib/settings'
 import { shadcnStubs, SelectStub } from '@/__tests__/stubs'
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} as Record<string, string | undefined> }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
+
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return actual

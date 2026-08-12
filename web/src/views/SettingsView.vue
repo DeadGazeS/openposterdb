@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Check, Loader2, Download, Upload } from 'lucide-vue-next'
 import { useQuery } from '@tanstack/vue-query'
 import { useSavedFlash } from '@/composables/useSavedFlash'
@@ -8,12 +8,15 @@ import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
 import { parseApiError, okOrThrow } from '@/lib/api-error'
 import { adminApi } from '@/lib/api'
 import type { RenderSettings, SaveSettingsPayload } from '@/lib/settings'
+import { maskKey } from '@/lib/utils'
 import { FREE_API_KEY } from '@/lib/constants'
 import RefreshButton from '@/components/RefreshButton.vue'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import ApiKeysView from '@/views/ApiKeysView.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
@@ -27,9 +30,11 @@ import {
 } from '@/components/ui/dialog'
 
 const route = useRoute()
+const router = useRouter()
 
 // The active section is derived from the route — each section is its own page
-// (Settings → API / Global Image Settings / Backup).
+// (Settings → API / Global Image Settings / Backup). API and Global Image
+// Settings each have sub-tabs driven by `?tab=`.
 const section = computed(() => {
   switch (route.name) {
     case 'settings-backup':
@@ -39,6 +44,27 @@ const section = computed(() => {
     default:
       return 'api'
   }
+})
+
+// Tab state for the API route. The Settings page has 3 tabs (Free API Key /
+// API Keys / Source API Keys); the underlying reka-ui Tabs is uncontrolled by
+// default, which means the active tab resets to the default on every reload.
+// Persist via the `?tab=` query param so reloads land on the same tab the
+// user was last viewing (matches the back/forward-button expectation). The
+// query param is always present in the URL — even for the default tab — so a
+// hard reload, a shared link, or an open-in-new-tab action always lands on
+// the right view.
+type ApiTab = 'free-api-key' | 'api-keys' | 'source-api-keys'
+const validApiTabs: ApiTab[] = ['free-api-key', 'api-keys', 'source-api-keys']
+const apiTab = computed<ApiTab>({
+  get() {
+    const q = route.query.tab
+    const v = Array.isArray(q) ? q[0] : q
+    return (validApiTabs as string[]).includes(v ?? '') ? (v as ApiTab) : 'free-api-key'
+  },
+  set(v) {
+    void router.replace({ query: { ...route.query, tab: v } })
+  },
 })
 
 type SettingsResponse = RenderSettings & { free_api_key_enabled: boolean; free_api_key_locked: boolean }
@@ -51,6 +77,37 @@ const freeKeyError = ref('')
 
 const serviceKeysSaving = ref<string | null>(null)
 const serviceKeysError = ref('')
+
+// Per-chip Copy feedback ('idle' | 'copied'). Keyed by `${svc}:${key}` so
+// each chip toggles its own label briefly when clicked. Only revealed chips
+// render the button, but the state stays a flat record for simplicity.
+const serviceCopyState = ref<Record<string, 'idle' | 'copied'>>({})
+async function copyServiceKey(svc: string, key: string) {
+  const id = `${svc}:${key}`
+  try {
+    await navigator.clipboard.writeText(key)
+    serviceCopyState.value[id] = 'copied'
+    setTimeout(() => {
+      serviceCopyState.value = { ...serviceCopyState.value, [id]: 'idle' }
+    }, 1500)
+  } catch {
+    const el = document.createElement('textarea')
+    el.value = key
+    el.style.position = 'fixed'
+    el.style.opacity = '0'
+    document.body.appendChild(el)
+    el.select()
+    try {
+      document.execCommand('copy')
+      serviceCopyState.value[id] = 'copied'
+      setTimeout(() => {
+        serviceCopyState.value = { ...serviceCopyState.value, [id]: 'idle' }
+      }, 1500)
+    } finally {
+      document.body.removeChild(el)
+    }
+  }
+}
 
 // Per-service key chips. Each chip is one key; the whole list is saved
 // (comma-joined, matching the backend's multi-key format) whenever a chip is
@@ -98,14 +155,10 @@ function splitServiceKeys(s: string): string[] {
     .filter(Boolean)
 }
 
-// maskKey mirrors the backend MaskKey: first len/4 (max 4) chars + "..." +
+// maskKey is imported from @/lib/utils — shared with ApiKeysView so both
+// surfaces obfuscate identically. Mirror of the backend MaskKey at
+// api-go/internal/services/servicekeys.go: first len/4 (max 4) chars + "..." +
 // last len/4 chars, always hiding at least half of the key.
-function maskKey(key: string): string {
-  let n = Math.floor(key.length / 4)
-  if (n > 4) n = 4
-  if (n === 0) return '****'
-  return key.slice(0, n) + '...' + key.slice(-n)
-}
 
 // Keys the user has chosen to reveal (per service+key); everything else stays
 // masked until clicked.
@@ -275,10 +328,10 @@ async function handleSave() {
     // Minimal partial PUT: the backend keeps omitted fields, so only the
     // toggle (and the key the API is tied to) is sent.
     await saveFreeApiKeyToggle()
+    await apiKeysRef.value?.saveExpanded()
   } else {
     await formRef.value?.save()
   }
-  await apiKeysRef.value?.saveExpanded()
 }
 
 function handleDiscard() {
@@ -304,6 +357,7 @@ async function handleRefresh() {
 const exportDialogOpen = ref(false)
 const exportServiceKeys = ref(true)
 const exportAPIKeys = ref(true)
+const exportPassphrase = ref('')
 const exportLoading = ref(false)
 const exportError = ref('')
 
@@ -321,7 +375,11 @@ async function runExport() {
   exportLoading.value = true
   exportError.value = ''
   try {
-    const res = await adminApi.exportSettings(exportServiceKeys.value, exportAPIKeys.value)
+    const res = await adminApi.exportSettings(
+      exportServiceKeys.value,
+      exportAPIKeys.value,
+      exportPassphrase.value || undefined,
+    )
     if (!res.ok) {
       const data = await res.json().catch(() => null)
       exportError.value = data?.error || 'Export failed'
@@ -331,12 +389,14 @@ async function runExport() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `openposterdb-settings-${new Date().toISOString().slice(0, 10)}.json`
+    const suffix = exportPassphrase.value ? '.enc' : ''
+    a.download = `openposterdb-settings-${new Date().toISOString().slice(0, 10)}${suffix}.json`
     document.body.appendChild(a)
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
     exportDialogOpen.value = false
+    exportPassphrase.value = ''
   } catch {
     exportError.value = 'Export failed'
   } finally {
@@ -353,8 +413,25 @@ async function onImportFile(e: Event) {
   importError.value = ''
   importResult.value = null
   try {
-    const payload = JSON.parse(await file.text())
-    const res = await adminApi.importSettings(payload)
+    const parsed = JSON.parse(await file.text())
+    if (parsed?.kind === 'openposterdb/settings-encrypted') {
+      const passphrase = window.prompt('This file is encrypted. Enter the passphrase:')
+      if (!passphrase) {
+        importError.value = 'Import cancelled — passphrase required for encrypted export'
+        importBusy.value = false
+        return
+      }
+      const res = await adminApi.importSettings(parsed, passphrase)
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        importError.value = data?.error || 'Import failed'
+        return
+      }
+      importResult.value = data
+      await refetch()
+      return
+    }
+    const res = await adminApi.importSettings(parsed)
     const data = await res.json().catch(() => null)
     if (!res.ok) {
       importError.value = data?.error || 'Import failed'
@@ -402,7 +479,7 @@ async function onImportFile(e: Event) {
         Free API key, poster-serving API keys, and keys for external rating and image providers.
       </p>
 
-      <Tabs default-value="free-api-key" :unmount-on-hide="false">
+      <Tabs v-model="apiTab">
         <TabsList class="h-auto flex-wrap">
           <TabsTrigger value="free-api-key">Free API Key</TabsTrigger>
           <TabsTrigger value="api-keys">API Keys</TabsTrigger>
@@ -468,14 +545,14 @@ async function onImportFile(e: Event) {
                 <span v-if="serviceKeys?.[service]?.locked" class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">env</span>
                 <span v-if="serviceKeysSaving === service" class="text-xs text-muted-foreground">Saving…</span>
               </label>
-              <div v-if="serviceKeys?.[service]?.locked" class="text-sm text-muted-foreground font-mono">
+              <div v-if="serviceKeys?.[service]?.locked" class="text-sm text-muted-foreground">
                 {{ serviceKeys?.[service]?.masked }}
               </div>
               <div v-else class="flex flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 min-h-9">
                 <span
                   v-for="key in serviceKeyChips[service]"
                   :key="key"
-                  class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs font-mono"
+                  class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
                 >
                   <button
                     type="button"
@@ -483,6 +560,13 @@ async function onImportFile(e: Event) {
                     :title="isRevealed(service, key) ? 'Hide key' : 'Reveal key'"
                     @click="toggleReveal(service, key)"
                   >{{ isRevealed(service, key) ? key : maskKey(key) }}</button>
+                  <button
+                    v-if="isRevealed(service, key)"
+                    type="button"
+                    class="hover:text-foreground"
+                    :title="serviceCopyState[`${service}:${key}`] === 'copied' ? 'Copied' : 'Copy to clipboard'"
+                    @click="copyServiceKey(service, key)"
+                  >{{ serviceCopyState[`${service}:${key}`] === 'copied' ? 'Copied' : 'Copy' }}</button>
                   <button
                     type="button"
                     class="hover:text-destructive disabled:opacity-50"
@@ -559,6 +643,21 @@ async function onImportFile(e: Event) {
                   </span>
                 </span>
               </label>
+              <div class="space-y-1">
+                <Label for="export-passphrase" class="text-sm">Encrypt export (optional)</Label>
+                <Input
+                  id="export-passphrase"
+                  v-model="exportPassphrase"
+                  type="password"
+                  placeholder="Passphrase — leave blank for plain JSON"
+                  autocomplete="new-password"
+                  class="font-mono"
+                />
+                <p class="text-xs text-muted-foreground">
+                  When set, the export file is encrypted with a passphrase-derived
+                  key (PBKDF2 + AES-256-GCM). The passphrase is required to import.
+                </p>
+              </div>
               <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
             </div>
             <DialogFooter>
@@ -616,11 +715,11 @@ async function onImportFile(e: Event) {
             <Check class="size-4" />
             Saved
           </span>
+          <span v-if="formRef?.error" class="text-sm text-destructive">{{ formRef.error }}</span>
           <Button size="sm" data-testid="save-settings-button" @click="handleSave">
             <Loader2 v-if="formRef?.saving" class="size-4 animate-spin mr-1" />
             Save
           </Button>
-          <span v-if="formRef?.error" class="text-sm text-destructive">{{ formRef.error }}</span>
           <RefreshButton :fetching="userRefreshing" @refresh="handleRefresh" />
         </div>
       </div>

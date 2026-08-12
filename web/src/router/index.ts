@@ -110,6 +110,14 @@ const router = createRouter({
           name: 'settings-api',
           component: () => import('@/views/SettingsView.vue'),
           meta: { title: 'API' },
+          // /admin/settings/api without a ?tab= always lands on the default
+          // tab so reload + bookmark + share-link all carry the active view in
+          // the URL itself.
+          beforeEnter: (to) => {
+            if (!('tab' in to.query)) {
+              return { name: 'settings-api', query: { ...to.query, tab: 'free-api-key' } }
+            }
+          },
         },
         {
           path: 'settings/backup',
@@ -122,6 +130,14 @@ const router = createRouter({
           name: 'settings-image',
           component: () => import('@/views/SettingsView.vue'),
           meta: { title: 'Global Image Settings' },
+          // /admin/settings/image without a ?tab= always lands on the default
+          // form tab (image-settings) so reload + bookmark + share-link all
+          // carry the active view in the URL itself.
+          beforeEnter: (to) => {
+            if (!('tab' in to.query)) {
+              return { name: 'settings-image', query: { ...to.query, tab: 'image-settings' } }
+            }
+          },
         },
       ],
     },

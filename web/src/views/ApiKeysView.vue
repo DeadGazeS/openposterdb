@@ -7,6 +7,7 @@ import { keysApi, adminApi } from '@/lib/api'
 import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import type { RenderSettings } from '@/lib/settings'
+import { maskKey } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Settings, Plus, Loader2, Check } from 'lucide-vue-next'
@@ -15,6 +16,11 @@ interface ApiKey {
   id: number
   name: string
   key_prefix: string
+  // Raw key, decrypted server-side from the api_keys.encrypted_key column.
+  // Empty string for keys that pre-date the encrypted_key column (created
+  // before this feature shipped) — the UI shows the prefix-only fallback for
+  // those rows since the raw is gone with the dismissed create banner.
+  key: string
   created_at: string
   last_used_at: string | null
 }
@@ -33,16 +39,48 @@ const error = ref('')
 const loading = ref(false)
 const { active: showCreateCheck, flash: flashCreated } = useSavedFlash()
 
-// Per-row prefix reveal state — mirrors the Source API Keys reveal UX in
-// SettingsView.vue. Each click toggles the prefix between a masked placeholder
-// and the actual `key_prefix` value (the server only stores the prefix, not
-// the full key — that's shown once at creation time via `newKeyValue`).
+// Per-row reveal state — mirrors the Source API Keys reveal UX in
+// SettingsView.vue. Each click toggles between the dotted placeholder and the
+// raw key (decrypted server-side from the v2 envelope in api_keys.encrypted_key).
+// Keys created before encrypted_key shipped have an empty `key` field; the
+// reveal button is disabled for those and the prefix-only fallback is shown.
 const revealedKeyIds = ref<Set<number>>(new Set())
 function toggleKeyReveal(id: number) {
   const next = new Set(revealedKeyIds.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
   revealedKeyIds.value = next
+}
+
+// Per-row "Copy" feedback ('idle' | 'copied'). Briefly flips to 'copied' after
+// a successful clipboard write so the user gets visual confirmation.
+const copyState = ref<Record<number, 'idle' | 'copied'>>({})
+async function copyKey(raw: string, id: number) {
+  try {
+    await navigator.clipboard.writeText(raw)
+    copyState.value[id] = 'copied'
+    setTimeout(() => {
+      copyState.value = { ...copyState.value, [id]: 'idle' }
+    }, 1500)
+  } catch {
+    // Older browsers / non-secure contexts — fall back to the legacy
+    // document.execCommand path so the copy still works.
+    const el = document.createElement('textarea')
+    el.value = raw
+    el.style.position = 'fixed'
+    el.style.opacity = '0'
+    document.body.appendChild(el)
+    el.select()
+    try {
+      document.execCommand('copy')
+      copyState.value[id] = 'copied'
+      setTimeout(() => {
+        copyState.value = { ...copyState.value, [id]: 'idle' }
+      }, 1500)
+    } finally {
+      document.body.removeChild(el)
+    }
+  }
 }
 
 // Per-key settings state
@@ -201,7 +239,7 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
 
       <!-- Show newly created key -->
       <div v-if="newKeyValue" class="rounded-md border border-yellow-500 bg-yellow-50 dark:bg-yellow-950 p-4 space-y-2">
-        <p class="text-sm font-medium">Copy your API key now. It won't be shown again.</p>
+        <p class="text-sm font-medium">Here's your API key. You can view it later again in the UI.</p>
         <code class="block text-sm bg-background border rounded px-3 py-2 break-all select-all">{{ newKeyValue }}</code>
         <Button variant="outline" size="sm" @click="newKeyValue = null">Dismiss</Button>
       </div>
@@ -216,18 +254,29 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
           <div class="space-y-1">
             <p class="font-medium text-sm">{{ key.name }}</p>
             <p class="text-xs text-muted-foreground">
-              <button
-                type="button"
-                class="font-mono hover:underline"
-                :title="revealedKeyIds.has(key.id) ? 'Hide key' : 'Reveal key'"
-                @click="toggleKeyReveal(key.id)"
-              >{{ revealedKeyIds.has(key.id) ? `${key.key_prefix}...` : '••••••••' }}</button>
+              <span class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-foreground">
+                <button
+                  type="button"
+                  class="hover:underline"
+                  :title="revealedKeyIds.has(key.id) ? 'Hide key' : 'Reveal key'"
+                  :disabled="!key.key"
+                  @click="toggleKeyReveal(key.id)"
+                >{{ revealedKeyIds.has(key.id) ? key.key : maskKey(key.key) }}</button>
+                <Button
+                  v-if="revealedKeyIds.has(key.id) && key.key"
+                  variant="ghost"
+                  size="sm"
+                  class="h-5 px-1.5 text-xs hover:text-foreground"
+                  title="Copy to clipboard"
+                  @click="copyKey(key.key, key.id)"
+                >{{ copyState[key.id] === 'copied' ? 'Copied' : 'Copy' }}</Button>
+              </span>
               &middot; Created {{ key.created_at }}
               <template v-if="key.last_used_at"> &middot; Last used {{ key.last_used_at }}</template>
             </p>
           </div>
           <div class="flex items-center gap-2">
-            <Button variant="outline" size="sm" @click="toggleSettings(key.id)">
+            <Button variant="outline" size="sm" :data-testid="`key-settings-${key.id}`" @click="toggleSettings(key.id)">
               <Settings class="h-4 w-4" />
             </Button>
             <Button variant="destructive" size="sm" @click="deleteKey(key.id)">Delete</Button>
@@ -247,6 +296,7 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
             :save-settings="makeSaveSettings(key.id)"
             :reset-settings="makeResetSettings(key.id)"
             :fetch-preview="adminApi.preview"
+            :tab-key="`key-${key.id}-tab`"
                                               />
         </div>
       </div>

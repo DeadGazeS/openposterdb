@@ -11,10 +11,12 @@ import { shadcnStubs } from '@/__tests__/stubs'
 const mockRoute = vi.hoisted(() => ({
   name: 'settings-general',
   path: '/admin/settings/general',
+  query: {} as Record<string, string | undefined>,
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => mockRoute,
+  useRouter: () => ({ replace: vi.fn() }),
 }))
 
 const mockAdminApi = vi.hoisted(() => ({
@@ -109,6 +111,7 @@ describe('SettingsView', () => {
     vi.clearAllMocks()
     mockRoute.name = 'settings-api'
     mockRoute.path = '/admin/settings/api'
+    mockRoute.query = { tab: 'free-api-key' }
     mockAdminApi.getSettings.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(defaultSettings),
