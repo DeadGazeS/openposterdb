@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"sort"
 	"strings"
 	"testing"
 
@@ -336,4 +337,129 @@ func TestSchemaToMigrations_FreshDB(t *testing.T) {
 			t.Errorf("table %q missing after full bootstrap (got %v)", want, tables)
 		}
 	}
+}
+
+// requiredTableColumns is the canonical list of columns every production table
+// must have after the full bootstrap (RunSchema → RunMigrations → RunUpgrades).
+// This is the #10.6 generic table→columns guard: a regression that drops or
+// never creates a column this list declares (no matter which table) trips a
+// single assertion here instead of silently breaking production.
+//
+// api_key_settings is intentionally exhaustive because handlers/services
+// reference every column directly (#10.1 / #10.2 hot path); the smaller tables
+// list every column production code references so a column drop anywhere is
+// caught at code-review time.
+var requiredTableColumns = []struct {
+	table   string
+	columns []string
+}{
+	{"image_meta", []string{
+		"cache_key", "release_date", "created_at", "updated_at",
+		"last_accessed", "image_type",
+	}},
+	{"admin_users", []string{
+		"id", "username", "password_hash", "created_at", "prefs",
+	}},
+	{"refresh_tokens", []string{
+		"id", "user_id", "token_hash", "expires_at", "created_at",
+	}},
+	{"api_keys", []string{
+		"id", "name", "key_hash", "key_prefix", "created_by",
+		"created_at", "last_used_at", "encrypted_key",
+	}},
+	{"global_settings", []string{
+		"key", "value",
+	}},
+	{"available_ratings", []string{
+		"id_key", "sources", "updated_at", "release_date",
+	}},
+	{"api_key_settings", []string{
+		"api_key_id", "image_source", "lang", "textless",
+		"ratings_limit", "ratings_order", "ratings_exclude",
+		"poster_layout", "logo_layout", "backdrop_layout", "episode_layout",
+		"logo_ratings_limit", "backdrop_ratings_limit", "episode_ratings_limit",
+		"poster_badge_style", "logo_badge_style", "backdrop_badge_style", "episode_badge_style",
+		"poster_label_style", "logo_label_style", "backdrop_label_style", "episode_label_style",
+		"poster_badge_direction", "backdrop_badge_direction", "episode_badge_direction",
+		"poster_fit", "poster_text_size", "logo_text_size", "backdrop_text_size", "episode_text_size",
+		"poster_badge_size", "logo_badge_size", "backdrop_badge_size", "episode_badge_size",
+		"poster_badge_width", "poster_badge_height",
+		"logo_badge_width", "logo_badge_height",
+		"backdrop_badge_width", "backdrop_badge_height",
+		"episode_badge_width", "episode_badge_height",
+		"poster_logo_size", "logo_logo_size", "backdrop_logo_size", "episode_logo_size",
+		"episode_blur",
+		"poster_badge_shape", "logo_badge_shape", "backdrop_badge_shape", "episode_badge_shape",
+		"poster_badge_alpha", "logo_badge_alpha", "backdrop_badge_alpha", "episode_badge_alpha",
+		"backdrop_edge_inset_x", "backdrop_edge_inset_y",
+		"colors",
+	}},
+}
+
+// TestFullBootstrap_AllTableColumnsPresent (#10.6) extends the original
+// api_key_settings-only guard to every production table: a full bootstrap on a
+// fresh in-memory SQLite must produce every column in requiredTableColumns.
+// A migration that drops or never creates a declared column trips this test
+// in CI, before the broken schema reaches a real database.
+func TestFullBootstrap_AllTableColumnsPresent(t *testing.T) {
+	db := newSchemaTestDB(t)
+	if err := RunSchema(db, SchemaSQL); err != nil {
+		t.Fatalf("RunSchema: %v", err)
+	}
+	if err := RunMigrations(db, Migrations); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+	if err := services.RunUpgrades(db, t.TempDir(), true); err != nil {
+		t.Fatalf("RunUpgrades: %v", err)
+	}
+
+	for _, tc := range requiredTableColumns {
+		present, err := tableColumnSet(t, db, tc.table)
+		if err != nil {
+			t.Fatalf("table_info(%s): %v", tc.table, err)
+		}
+		var missing []string
+		for _, want := range tc.columns {
+			if !present[want] {
+				missing = append(missing, want)
+			}
+		}
+		if len(missing) > 0 {
+			t.Errorf("%s missing columns after full bootstrap: %v (present: %v)", tc.table, missing, sortedKeys(present))
+		}
+	}
+}
+
+// tableColumnSet returns the set of column names present on `table` per
+// PRAGMA table_info — used by the #10.6 generic guard to assert each table
+// has every column production code references.
+func tableColumnSet(t *testing.T, db *sql.DB, table string) (map[string]bool, error) {
+	t.Helper()
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, declType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &declType, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
+// sortedKeys returns a deterministic iteration order over m for stable error
+// messages (map iteration is randomised in Go).
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
