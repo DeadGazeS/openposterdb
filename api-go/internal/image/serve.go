@@ -314,6 +314,38 @@ type ServeParams struct {
 	Inflight            *InflightSet
 }
 
+// resolveWithFallback tries the requested idType first; on failure, falls
+// back through the other ID sources in order imdb → tmdb → tvdb (skipping
+// the requested source) so a URL whose path-source doesn't match the
+// idValue's format still resolves. Example: /imdb/poster-default/
+// series-124364.jpg — the idValue is a tmdb series format, so the strict
+// imdb call (TMDB /find/series-124364?external_source=imdb_id) returns no
+// match; the fallback tmdb call recognises the series- prefix and returns
+// the show via /tv/124364. The cache key used downstream by ServeImage is
+// the originally-requested (idType, idValue), so the rendered bytes land
+// in cache under the URL the user actually hit and the next request is a
+// direct cache hit with no fallback fired. Hits on the strict path skip
+// the fallback chain entirely (the feature only fires on miss).
+func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, tmdb *services.TmdbClient) (*services.ResolvedID, error) {
+	resolve := func(t services.IDType) (*services.ResolvedID, error) {
+		return services.ResolveIDCachedCtx(ctx, cache, t, idValue, tmdb)
+	}
+	resolved, strictErr := resolve(idType)
+	if strictErr == nil {
+		return resolved, nil
+	}
+	for _, alt := range []services.IDType{services.IDTypeIMDB, services.IDTypeTMDB, services.IDTypeTVDB} {
+		if alt == idType {
+			continue
+		}
+		if r, err := resolve(alt); err == nil {
+			slog.Debug("image request: source fallback hit", "requested", idType.String(), "resolved_via", alt.String(), "id", idValue)
+			return r, nil
+		}
+	}
+	return nil, strictErr
+}
+
 func ServeImage(p ServeParams) ([]byte, string, error) {
 	if p.Context == nil {
 		p.Context = context.Background()
@@ -367,8 +399,15 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 
 	// Resolve the ID, uplifting episodes to their parent series for poster,
-	// logo, and backdrop endpoints.
-	resolved, err := services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, idType, p.IDValue, p.TMDB)
+	// logo, and backdrop endpoints. resolveWithFallback retries the same
+	// idValue under the other ID sources (imdb → tmdb → tvdb, skipping the
+	// requested source) so a misrouted URL like
+	// /imdb/poster-default/series-124364.jpg still resolves: the strict
+	// imdb call fails (no tt prefix), the fallback tmdb call recognises the
+	// series- prefix and returns the show. The cache key downstream stays
+	// the originally-requested (idType, idValue) so the next request hits
+	// cache directly with no fallback fired.
+	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, p.TMDB)
 	if err != nil {
 		return nil, "", err
 	}
