@@ -281,6 +281,180 @@ func TestEncryptAPIKey_WrongSecretsKey_Fails(t *testing.T) {
 	}
 }
 
+// TestPreFixImportMergesOntoExisting (#10.4): a pre-fix export (Version <
+// MinExportVersion) doesn't carry badge_size / badge_alpha / edge_inset columns
+// — the 2026-08-14 outage class. Importing such an export onto an existing
+// per-key row must preserve the user's stored values for those columns instead
+// of zero-filling (which would clamp to 50 and silently degrade the rendered
+// output). The version on a fresh export is MinExportVersion; this test
+// constructs the export with an older Version to exercise the merge branch.
+func TestPreFixImportMergesOntoExisting(t *testing.T) {
+	db := newExportTestDB(t)
+	defer db.Close()
+
+	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	keys.Init()
+
+	// Seed: an api key with stored per-key settings carrying non-default
+	// badge_size / badge_alpha / edge_inset values the user wants to keep.
+	_, hash, prefix := GenerateAPIKey()
+	id, err := CreateAPIKey(db, "test-key", hash, prefix, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := &APIKeySettings{
+		APIKeyID:           id,
+		ImageSource:        "t",
+		Lang:               "de",
+		RatingsLimit:       5,
+		LogoRatingsLimit:   4,
+		PosterBadgeSize:    130,
+		LogoBadgeSize:      120,
+		BackdropBadgeSize:  110,
+		EpisodeBadgeSize:   100,
+		PosterBadgeAlpha:   75,
+		LogoBadgeAlpha:     70,
+		BackdropBadgeAlpha: 65,
+		EpisodeBadgeAlpha:  60,
+		BackdropEdgeInsetX: 25,
+		BackdropEdgeInsetY: 15,
+	}
+	if err := UpsertAPIKeySettings(db, stored); err != nil {
+		t.Fatal(err)
+	}
+
+	// Construct a pre-fix export: Version < MinExportVersion, Settings only
+	// carries the columns that existed before the 2026-08-14 fix. The export
+	// has badge_size=0, badge_alpha=0, edge_inset=0 (they weren't in the
+	// schema when the export was produced).
+	preFix := &ExportPayload{
+		Kind:       "openposterdb/settings",
+		Version:    MinExportVersion - 1, // pre-fix marker
+		ExportedAt: "2026-08-13T00:00:00Z",
+		APIKeys: []ExportedAPIKey{
+			{
+				Name: "test-key",
+				Settings: &APIKeySettings{
+					// Intentionally zero on badge_size / badge_alpha / edge_inset
+					// to mimic a pre-fix export's missing columns.
+					APIKeyID:  id,
+					Lang:      "en", // explicit override from the export
+					ImageSource: "f",
+					RatingsLimit: 9,
+				},
+			},
+		},
+	}
+
+	// Import into the same db (the existing row is the merge target).
+	if _, err := ApplyImportPayload(db, keys, preFix); err != nil {
+		t.Fatalf("ApplyImportPayload: %v", err)
+	}
+
+	got, err := GetAPIKeySettings(db, id)
+	if err != nil || got == nil {
+		t.Fatalf("GetAPIKeySettings: %v", err)
+	}
+
+	// Non-zero import fields win over existing.
+	if got.Lang != "en" {
+		t.Errorf("Lang=%q, want %q (export override should win)", got.Lang, "en")
+	}
+	if got.ImageSource != "f" {
+		t.Errorf("ImageSource=%q, want %q (export override should win)", got.ImageSource, "f")
+	}
+	if got.RatingsLimit != 9 {
+		t.Errorf("RatingsLimit=%d, want 9 (export override should win)", got.RatingsLimit)
+	}
+
+	// Zero/empty import fields (the missing-from-export columns) preserve
+	// the stored value — this is the bug the merge fixes.
+	if got.PosterBadgeSize != 130 {
+		t.Errorf("PosterBadgeSize=%d, want 130 (pre-fix import must preserve stored value)", got.PosterBadgeSize)
+	}
+	if got.LogoBadgeSize != 120 {
+		t.Errorf("LogoBadgeSize=%d, want 120", got.LogoBadgeSize)
+	}
+	if got.BackdropBadgeSize != 110 {
+		t.Errorf("BackdropBadgeSize=%d, want 110", got.BackdropBadgeSize)
+	}
+	if got.EpisodeBadgeSize != 100 {
+		t.Errorf("EpisodeBadgeSize=%d, want 100", got.EpisodeBadgeSize)
+	}
+	if got.PosterBadgeAlpha != 75 {
+		t.Errorf("PosterBadgeAlpha=%d, want 75", got.PosterBadgeAlpha)
+	}
+	if got.LogoBadgeAlpha != 70 {
+		t.Errorf("LogoBadgeAlpha=%d, want 70", got.LogoBadgeAlpha)
+	}
+	if got.BackdropBadgeAlpha != 65 {
+		t.Errorf("BackdropBadgeAlpha=%d, want 65", got.BackdropBadgeAlpha)
+	}
+	if got.EpisodeBadgeAlpha != 60 {
+		t.Errorf("EpisodeBadgeAlpha=%d, want 60", got.EpisodeBadgeAlpha)
+	}
+	if got.BackdropEdgeInsetX != 25 {
+		t.Errorf("BackdropEdgeInsetX=%d, want 25", got.BackdropEdgeInsetX)
+	}
+	if got.BackdropEdgeInsetY != 15 {
+		t.Errorf("BackdropEdgeInsetY=%d, want 15", got.BackdropEdgeInsetY)
+	}
+}
+
+// TestCurrentVersionImportUpsertsNormally (#10.4 sanity check): a current-
+// version (Version >= MinExportVersion) import behaves exactly like before —
+// upserts the per-key row directly without the merge branch. The full payload
+// carries every column, so no preservation is needed.
+func TestCurrentVersionImportUpsertsNormally(t *testing.T) {
+	db := newExportTestDB(t)
+	defer db.Close()
+
+	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	keys.Init()
+
+	_, hash, prefix := GenerateAPIKey()
+	id, err := CreateAPIKey(db, "test-key", hash, prefix, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Current-version export with all columns populated (mimics BuildExportPayloadCtx output).
+	current := &ExportPayload{
+		Kind:       "openposterdb/settings",
+		Version:    MinExportVersion,
+		ExportedAt: "2026-08-14T00:00:00Z",
+		APIKeys: []ExportedAPIKey{
+			{
+				Name: "test-key",
+				Settings: &APIKeySettings{
+					APIKeyID:         id,
+					Lang:             "de",
+					PosterBadgeSize:  130,
+					LogoBadgeSize:    120,
+					BackdropBadgeSize: 110,
+					EpisodeBadgeSize: 100,
+				},
+			},
+		},
+	}
+
+	if _, err := ApplyImportPayload(db, keys, current); err != nil {
+		t.Fatalf("ApplyImportPayload: %v", err)
+	}
+
+	got, err := GetAPIKeySettings(db, id)
+	if err != nil || got == nil {
+		t.Fatalf("GetAPIKeySettings: %v", err)
+	}
+	if got.PosterBadgeSize != 130 || got.LogoBadgeSize != 120 || got.BackdropBadgeSize != 110 || got.EpisodeBadgeSize != 100 {
+		t.Errorf("current-version import: got badge sizes %d/%d/%d/%d, want 130/120/110/100",
+			got.PosterBadgeSize, got.LogoBadgeSize, got.BackdropBadgeSize, got.EpisodeBadgeSize)
+	}
+	if got.Lang != "de" {
+		t.Errorf("Lang=%q, want 'de'", got.Lang)
+	}
+}
+
 // TestCreateAPIKey_StoresEncryptedKey_ReadableOnList guards the end-to-end
 // happy path: create encrypts, list decrypts. Mirrors the admin UI flow.
 func TestCreateAPIKey_StoresEncryptedKey_ReadableOnList(t *testing.T) {
