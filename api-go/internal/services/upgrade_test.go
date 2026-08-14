@@ -14,8 +14,9 @@ import (
 )
 
 // upgradeTestSchema is a minimal copy of the production schema: enough for
-// upgrade.go's image_meta queries. We can't import internal/app here because
-// app/seed.go imports services (cycle), so we duplicate the parts we need.
+// upgrade.go's image_meta queries and v004's api_key_settings column work.
+// We can't import internal/app here because app/seed.go imports services
+// (cycle), so we duplicate the parts we need.
 const upgradeTestSchema = `
 CREATE TABLE IF NOT EXISTS image_meta (
 	cache_key TEXT PRIMARY KEY,
@@ -23,6 +24,9 @@ CREATE TABLE IF NOT EXISTS image_meta (
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	image_type TEXT NOT NULL DEFAULT 'poster'
+);
+CREATE TABLE IF NOT EXISTS api_key_settings (
+	api_key_id INTEGER PRIMARY KEY
 );
 `
 
@@ -43,7 +47,7 @@ func upgradeTestDB(t *testing.T) *sql.DB {
 
 // TestRunUpgrades_CreatesUpgradesTable guards the bookkeeping table: a fresh
 // DB + RunUpgrades must create the upgrades table and insert one row per
-// v*** upgrade (v001, v002, v003).
+// v*** upgrade (v001, v002, v003, v004).
 func TestRunUpgrades_CreatesUpgradesTable(t *testing.T) {
 	db := upgradeTestDB(t)
 
@@ -62,6 +66,7 @@ func TestRunUpgrades_CreatesUpgradesTable(t *testing.T) {
 		"v001_backdrop_cache_keys",
 		"v002_backdrop_position_direction_cache",
 		"v003_badge_shape_background_cache",
+		"v004_badge_size_int_columns",
 	}
 	var got []string
 	for rows.Next() {
@@ -95,8 +100,8 @@ func TestRunUpgrades_Idempotent(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM upgrades").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 {
-		t.Errorf("upgrades rows after rerun: got %d, want 3", count)
+	if count != 4 {
+		t.Errorf("upgrades rows after rerun: got %d, want 4", count)
 	}
 }
 
@@ -461,7 +466,7 @@ func TestStringInt(t *testing.T) {
 
 // TestRunUpgrades_ConcurrentCallersRunFnOnce guards the run-once contract
 // under concurrency: 5 goroutines all calling RunUpgrades must observe
-// each v*** migration run at most once (and end up with exactly 3 rows in
+// each v*** migration run at most once (and end up with exactly 4 rows in
 // the upgrades table).
 //
 // The shared DB is opened with shared cache + a single connection so all
@@ -500,7 +505,126 @@ func TestRunUpgrades_ConcurrentCallersRunFnOnce(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM upgrades").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 {
-		t.Errorf("upgrades rows after concurrent runs: got %d, want 3", count)
+	if count != 4 {
+		t.Errorf("upgrades rows after concurrent runs: got %d, want 4", count)
+	}
+}
+
+// v004TestDB opens an in-memory SQLite with the given api_key_settings DDL —
+// each v004 test drives a different historical database state.
+func v004TestDB(t *testing.T, ddl string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(ddl); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	return db
+}
+
+// TestUpgradeV004_CreatesMissingColumns reproduces the 2026-08-14 production
+// state: databases bootstrapped while the DROP entries followed the INTEGER
+// ADDs in the flat migration list have no *_badge_size columns at all, which
+// broke every per-key settings read/write ("table api_key_settings has no
+// column named poster_badge_size"). v004 must create them as INTEGER NOT NULL
+// DEFAULT 100.
+func TestUpgradeV004_CreatesMissingColumns(t *testing.T) {
+	db := v004TestDB(t, `CREATE TABLE api_key_settings (api_key_id INTEGER PRIMARY KEY)`)
+	if _, err := db.Exec(`INSERT INTO api_key_settings (api_key_id) VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := upgradeV004Ctx(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+
+	cols, err := tableColumnTypes(context.Background(), db, "api_key_settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"poster", "logo", "backdrop", "episode"} {
+		if got := cols[kind+"_badge_size"]; got != "INTEGER" {
+			t.Errorf("%s_badge_size: got type %q, want INTEGER", kind, got)
+		}
+	}
+	// The pre-existing row picks up the column default.
+	var v int
+	if err := db.QueryRow(`SELECT poster_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != 100 {
+		t.Errorf("poster_badge_size default: got %d, want 100", v)
+	}
+}
+
+// TestUpgradeV004_ConvertsLegacyTextColumns covers databases from before the
+// percent-scale rework: TEXT enum columns ('s'/'m'/'l') are dropped and
+// recreated as INTEGER, values replaced by the 100% default (same convention
+// as the badge_background migration).
+func TestUpgradeV004_ConvertsLegacyTextColumns(t *testing.T) {
+	db := v004TestDB(t, `CREATE TABLE api_key_settings (
+		api_key_id INTEGER PRIMARY KEY,
+		poster_badge_size TEXT NOT NULL DEFAULT 'm',
+		logo_badge_size TEXT NOT NULL DEFAULT 'm',
+		backdrop_badge_size TEXT NOT NULL DEFAULT 'm',
+		episode_badge_size TEXT NOT NULL DEFAULT 'l'
+	)`)
+	if _, err := db.Exec(`INSERT INTO api_key_settings (api_key_id, poster_badge_size, episode_badge_size) VALUES (1, 'xl', 's')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := upgradeV004Ctx(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+
+	cols, err := tableColumnTypes(context.Background(), db, "api_key_settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"poster", "logo", "backdrop", "episode"} {
+		if got := cols[kind+"_badge_size"]; got != "INTEGER" {
+			t.Errorf("%s_badge_size: got type %q, want INTEGER", kind, got)
+		}
+	}
+	// Legacy enum values are gone; the row carries the percent default and —
+	// critically — scans into a Go int without a conversion error (TEXT 'm'
+	// would fail the services SELECT).
+	var poster, episode int
+	if err := db.QueryRow(`SELECT poster_badge_size, episode_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&poster, &episode); err != nil {
+		t.Fatal(err)
+	}
+	if poster != 100 || episode != 100 {
+		t.Errorf("converted values: got poster=%d episode=%d, want 100/100", poster, episode)
+	}
+}
+
+// TestUpgradeV004_PreservesIntegerValues guards the steady state after the
+// one-shot upgrade has run: already-INTEGER columns are a no-op, so stored
+// percent values survive every subsequent boot.
+func TestUpgradeV004_PreservesIntegerValues(t *testing.T) {
+	db := v004TestDB(t, `CREATE TABLE api_key_settings (
+		api_key_id INTEGER PRIMARY KEY,
+		poster_badge_size INTEGER NOT NULL DEFAULT 100,
+		logo_badge_size INTEGER NOT NULL DEFAULT 100,
+		backdrop_badge_size INTEGER NOT NULL DEFAULT 100,
+		episode_badge_size INTEGER NOT NULL DEFAULT 100
+	)`)
+	if _, err := db.Exec(`INSERT INTO api_key_settings (api_key_id, poster_badge_size, logo_badge_size, backdrop_badge_size, episode_badge_size) VALUES (1, 130, 120, 110, 90)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := upgradeV004Ctx(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+
+	var poster, logo, backdrop, episode int
+	if err := db.QueryRow(`SELECT poster_badge_size, logo_badge_size, backdrop_badge_size, episode_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&poster, &logo, &backdrop, &episode); err != nil {
+		t.Fatal(err)
+	}
+	if poster != 130 || logo != 120 || backdrop != 110 || episode != 90 {
+		t.Errorf("values changed: got %d/%d/%d/%d, want 130/120/110/90", poster, logo, backdrop, episode)
 	}
 }

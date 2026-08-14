@@ -237,6 +237,18 @@ var Migrations = []Migration{
 		ExpectedError: "duplicate column",
 	},
 	{
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_alpha INTEGER NOT NULL DEFAULT 80",
+		ExpectedError: "duplicate column",
+	},
+	{
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN backdrop_badge_alpha INTEGER NOT NULL DEFAULT 80",
+		ExpectedError: "duplicate column",
+	},
+	{
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_badge_alpha INTEGER NOT NULL DEFAULT 80",
+		ExpectedError: "duplicate column",
+	},
+	{
 		// Migrate pre-alpha DBs: drop the old enum column (data replaced by the
 		// new alpha default).
 		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badge_background",
@@ -290,6 +302,13 @@ var Migrations = []Migration{
 		SQL:           "ALTER TABLE api_key_settings ADD COLUMN episode_text_size INTEGER NOT NULL DEFAULT 100",
 		ExpectedError: "duplicate column",
 	},
+	// NOTE: the four *_badge_size columns exist on every real database either
+	// as legacy TEXT (added above) or as INTEGER (created/converted by the
+	// one-time v004 upgrade in internal/services/upgrade.go), so these ADDs
+	// always no-op on "duplicate column". Do NOT add DROP entries for them to
+	// this list: it replays in full on every boot, so a DROP positioned after
+	// the ADD deletes the live column on every database (the 2026-08-14
+	// "table api_key_settings has no column named poster_badge_size" bug).
 	{
 		SQL:           "ALTER TABLE api_key_settings ADD COLUMN poster_badge_size INTEGER NOT NULL DEFAULT 100",
 		ExpectedError: "duplicate column",
@@ -361,22 +380,6 @@ var Migrations = []Migration{
 	{
 		SQL:           "ALTER TABLE api_key_settings ADD COLUMN logo_badge_split INTEGER NOT NULL DEFAULT 0",
 		ExpectedError: "duplicate column",
-	},
-	{
-		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badge_size",
-		ExpectedError: "no such column",
-	},
-	{
-		SQL:           "ALTER TABLE api_key_settings DROP COLUMN logo_badge_size",
-		ExpectedError: "no such column",
-	},
-	{
-		SQL:           "ALTER TABLE api_key_settings DROP COLUMN backdrop_badge_size",
-		ExpectedError: "no such column",
-	},
-	{
-		SQL:           "ALTER TABLE api_key_settings DROP COLUMN episode_badge_size",
-		ExpectedError: "no such column",
 	},
 	{
 		SQL:           `ALTER TABLE api_key_settings ADD COLUMN poster_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":3,"rows":1,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,

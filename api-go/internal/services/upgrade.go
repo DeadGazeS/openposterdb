@@ -32,6 +32,12 @@ func RunUpgradesCtx(ctx context.Context, db *sql.DB, cacheDir string, externalCa
 		return err
 	}
 
+	if err := runOnceCtx(ctx, db, "v004_badge_size_int_columns", func() error {
+		return upgradeV004Ctx(ctx, db)
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -324,6 +330,81 @@ func migrateNameV003(name string) *string {
 
 func stringInt(n int) string {
 	return string(rune('0' + n%10))
+}
+
+// v004: ensure the four per-kind *_badge_size columns on api_key_settings
+// exist as INTEGER NOT NULL DEFAULT 100 (percent scale).
+//
+// Historical context: the flat schema migration list
+// (internal/app/schema_data.go) still carries the legacy TEXT enum ADDs for
+// these columns, and once carried DROP entries that ran *after* the INTEGER
+// ADDs — in a list that replays in full on every boot, so every database
+// ended up with no *_badge_size columns at all (the 2026-08-14 "no column
+// named poster_badge_size" bug). The INTEGER ADDs in the flat list can never
+// fire (a TEXT or v004-created column always exists first), so the conversion
+// lives here as a one-shot upgrade:
+//   - missing          → ADD COLUMN ... INTEGER NOT NULL DEFAULT 100
+//   - present as TEXT  → DROP + re-ADD (legacy enum values are replaced by the
+//     100% default — same convention as the badge_background migration)
+//   - present INTEGER  → no-op
+func upgradeV004Ctx(ctx context.Context, db *sql.DB) error {
+	cols, err := tableColumnTypes(ctx, db, "api_key_settings")
+	if err != nil {
+		return err
+	}
+	var created, converted int
+	for _, kind := range []string{"poster", "logo", "backdrop", "episode"} {
+		name := kind + "_badge_size"
+		declType, exists := cols[name]
+		if exists && strings.EqualFold(declType, "INTEGER") {
+			continue
+		}
+		// The DROP/ADD pair tolerates its expected failures ("no such
+		// column" / "duplicate column") instead of erroring: RunUpgrades
+		// admits concurrent callers (runOnceCtx only dedups the
+		// bookkeeping insert), so a racer may drop or create the column
+		// between our pragma read and these statements. The end state —
+		// exactly one INTEGER column — is the same either way.
+		if exists {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE api_key_settings DROP COLUMN "+name); err != nil {
+				if !strings.Contains(strings.ToLower(err.Error()), "no such column") {
+					return err
+				}
+			}
+			converted++
+		} else {
+			created++
+		}
+		if _, err := db.ExecContext(ctx, "ALTER TABLE api_key_settings ADD COLUMN "+name+" INTEGER NOT NULL DEFAULT 100"); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return err
+			}
+		}
+	}
+	slog.Info("api_key_settings badge_size columns ensured INTEGER", "created", created, "converted", converted)
+	return nil
+}
+
+// tableColumnTypes returns the declared column types of the given table as
+// reported by PRAGMA table_info, keyed by column name. Callers pass a fixed
+// table name — the PRAGMA form does not support bound parameters.
+func tableColumnTypes(ctx context.Context, db *sql.DB, table string) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, declType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &declType, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = declType
+	}
+	return out, rows.Err()
 }
 
 func runOnceCtx(ctx context.Context, db *sql.DB, name string, f func() error) error {

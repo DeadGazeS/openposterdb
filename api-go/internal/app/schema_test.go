@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	_ "modernc.org/sqlite"
+
+	"openposterdb/internal/services"
 )
 
 func newSchemaTestDB(t *testing.T) *sql.DB {
@@ -193,6 +195,92 @@ func TestRunMigrations_UnexpectedErrorBubblesUp(t *testing.T) {
 	}
 	if err := RunMigrations(db, bad); err == nil {
 		t.Error("RunMigrations with bad SQL should return error")
+	}
+}
+
+// TestFullBootstrap_KeySettingsRoundTrip exercises the complete startup
+// bootstrap (RunSchema → RunMigrations → services.RunUpgrades) and then runs
+// the real per-key settings SQL against the resulting schema. Handler and
+// service unit tests hand-create their own api_key_settings table, so a
+// migration list that drops — or never creates — a referenced column passes
+// every package test while breaking every real database (the 2026-08-14
+// "no column named poster_badge_size" bug).
+func TestFullBootstrap_KeySettingsRoundTrip(t *testing.T) {
+	db := newSchemaTestDB(t)
+	if err := RunSchema(db, SchemaSQL); err != nil {
+		t.Fatalf("RunSchema: %v", err)
+	}
+	if err := RunMigrations(db, Migrations); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+	if err := services.RunUpgrades(db, t.TempDir(), true); err != nil {
+		t.Fatalf("RunUpgrades: %v", err)
+	}
+
+	// The seven columns the 2026-08-14 bug dropped or never created must all
+	// be present as INTEGER.
+	rows, err := db.Query("PRAGMA table_info(api_key_settings)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	colTypes := map[string]string{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, declType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &declType, &notNull, &dflt, &pk); err != nil {
+			t.Fatal(err)
+		}
+		colTypes[name] = declType
+	}
+	rows.Close()
+	for _, name := range []string{
+		"poster_badge_size", "logo_badge_size", "backdrop_badge_size", "episode_badge_size",
+		"poster_badge_alpha", "logo_badge_alpha", "backdrop_badge_alpha", "episode_badge_alpha",
+	} {
+		if got := colTypes[name]; got != "INTEGER" {
+			t.Errorf("api_key_settings.%s: got type %q, want INTEGER", name, got)
+		}
+	}
+
+	// Full round-trip through the production SQL (every referenced column).
+	in := &services.APIKeySettings{
+		APIKeyID:           1,
+		ImageSource:        "t",
+		Lang:               "de",
+		RatingsOrder:       "mal,imdb",
+		PosterLayout:       `{"top":{"per_row":0,"rows":0,"start":"c"}}`,
+		PosterBadgeSize:    130,
+		LogoBadgeSize:      120,
+		BackdropBadgeSize:  110,
+		EpisodeBadgeSize:   90,
+		PosterBadgeAlpha:   70,
+		LogoBadgeAlpha:     65,
+		BackdropBadgeAlpha: 60,
+		EpisodeBadgeAlpha:  55,
+	}
+	if err := services.UpsertAPIKeySettings(db, in); err != nil {
+		t.Fatalf("UpsertAPIKeySettings: %v", err)
+	}
+	got, err := services.GetAPIKeySettings(db, 1)
+	if err != nil {
+		t.Fatalf("GetAPIKeySettings: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetAPIKeySettings returned nil after upsert")
+	}
+	if got.PosterBadgeSize != 130 || got.LogoBadgeSize != 120 ||
+		got.BackdropBadgeSize != 110 || got.EpisodeBadgeSize != 90 {
+		t.Errorf("badge sizes: got %d/%d/%d/%d, want 130/120/110/90",
+			got.PosterBadgeSize, got.LogoBadgeSize, got.BackdropBadgeSize, got.EpisodeBadgeSize)
+	}
+	if got.PosterBadgeAlpha != 70 || got.LogoBadgeAlpha != 65 ||
+		got.BackdropBadgeAlpha != 60 || got.EpisodeBadgeAlpha != 55 {
+		t.Errorf("badge alphas: got %d/%d/%d/%d, want 70/65/60/55",
+			got.PosterBadgeAlpha, got.LogoBadgeAlpha, got.BackdropBadgeAlpha, got.EpisodeBadgeAlpha)
+	}
+	if got.Lang != "de" || got.ImageSource != "t" {
+		t.Errorf("scalar fields: got lang=%q source=%q, want de/t", got.Lang, got.ImageSource)
 	}
 }
 
