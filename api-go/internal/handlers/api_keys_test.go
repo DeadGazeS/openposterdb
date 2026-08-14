@@ -353,6 +353,150 @@ func TestKeySettingsUpdateMerge(t *testing.T) {
 	}
 }
 
+// TestKeySettingsUpdateMerge_BadgeSizePreservation (#10.1 regression): a partial
+// payload that omits the four `*_badge_size` fields must preserve the stored
+// value (which the web client always sends today, but the #10.1 fire was a
+// first-save on a row with no stored value — base defaults from the effective
+// settings carry the user's intended size through). Explicit sizes still win.
+func TestKeySettingsUpdateMerge_BadgeSizePreservation(t *testing.T) {
+	base := &services.APIKeySettings{
+		PosterBadgeSize:   130,
+		LogoBadgeSize:     120,
+		BackdropBadgeSize: 110,
+		EpisodeBadgeSize:  90,
+	}
+
+	// Payload omitting all four badge_sizes — must keep base values.
+	var body keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"lang":"de"}`), &body); err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeKeySettingsUpdate(base, &body)
+	if merged.PosterBadgeSize != 130 || merged.LogoBadgeSize != 120 ||
+		merged.BackdropBadgeSize != 110 || merged.EpisodeBadgeSize != 90 {
+		t.Errorf("omitted badge_sizes not preserved: got %d/%d/%d/%d, want 130/120/110/90",
+			merged.PosterBadgeSize, merged.LogoBadgeSize, merged.BackdropBadgeSize, merged.EpisodeBadgeSize)
+	}
+
+	// Explicit badge_size override wins over base.
+	var body2 keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"poster_badge_size":75,"episode_badge_size":50}`), &body2); err != nil {
+		t.Fatal(err)
+	}
+	merged2 := mergeKeySettingsUpdate(base, &body2)
+	if merged2.PosterBadgeSize != 75 {
+		t.Errorf("explicit poster_badge_size=%d, want 75", merged2.PosterBadgeSize)
+	}
+	if merged2.LogoBadgeSize != 120 || merged2.BackdropBadgeSize != 110 {
+		t.Errorf("non-overridden sizes not preserved: got %d/%d, want 120/110",
+			merged2.LogoBadgeSize, merged2.BackdropBadgeSize)
+	}
+	if merged2.EpisodeBadgeSize != 50 {
+		t.Errorf("explicit episode_badge_size=%d, want 50", merged2.EpisodeBadgeSize)
+	}
+}
+
+// TestKeySettingsUpdateMerge_PointerFieldsPreserveOnOmit (#10.2 latent bug):
+// every numeric/bool field not declared as a pointer in keySettingsUpdate
+// would zero-out stored values when the web client omitted it. After pointer-
+// ifying all numeric/bool fields, every omitted numeric/bool field must keep
+// the base value. Explicit values still win.
+func TestKeySettingsUpdateMerge_PointerFieldsPreserveOnOmit(t *testing.T) {
+	base := &services.APIKeySettings{
+		Textless:           true,
+		EpisodeBlur:        true,
+		PosterTextSize:     130,
+		LogoTextSize:       120,
+		BackdropTextSize:   110,
+		EpisodeTextSize:    100,
+		PosterLogoSize:     140,
+		LogoLogoSize:       125,
+		BackdropLogoSize:   115,
+		EpisodeLogoSize:    105,
+		PosterBadgeAlpha:   75,
+		LogoBadgeAlpha:     70,
+		BackdropBadgeAlpha: 65,
+		EpisodeBadgeAlpha:  60,
+		PosterBadgeWidth:   120,
+		PosterBadgeHeight:  140,
+		LogoBadgeWidth:     115,
+		LogoBadgeHeight:    135,
+		BackdropBadgeWidth: 110,
+		BackdropBadgeHeight: 130,
+		EpisodeBadgeWidth:  105,
+		EpisodeBadgeHeight: 125,
+		BackdropEdgeInsetX: 25,
+		BackdropEdgeInsetY: 15,
+	}
+
+	// Payload omitting every pointer-preserved field — only lang + colors
+	// supplied. Every preserved field must keep base value.
+	var body keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"lang":"de","colors":"{}"}`), &body); err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeKeySettingsUpdate(base, &body)
+
+	check := func(name string, got, want int32) {
+		t.Helper()
+		if got != want {
+			t.Errorf("%s=%d, want %d (base not preserved on omit)", name, got, want)
+		}
+	}
+	checkBool := func(name string, got, want bool) {
+		t.Helper()
+		if got != want {
+			t.Errorf("%s=%v, want %v (base not preserved on omit)", name, got, want)
+		}
+	}
+
+	checkBool("Textless", merged.Textless, true)
+	checkBool("EpisodeBlur", merged.EpisodeBlur, true)
+	check("PosterTextSize", merged.PosterTextSize, 130)
+	check("LogoTextSize", merged.LogoTextSize, 120)
+	check("BackdropTextSize", merged.BackdropTextSize, 110)
+	check("EpisodeTextSize", merged.EpisodeTextSize, 100)
+	check("PosterLogoSize", merged.PosterLogoSize, 140)
+	check("LogoLogoSize", merged.LogoLogoSize, 125)
+	check("BackdropLogoSize", merged.BackdropLogoSize, 115)
+	check("EpisodeLogoSize", merged.EpisodeLogoSize, 105)
+	check("PosterBadgeAlpha", merged.PosterBadgeAlpha, 75)
+	check("LogoBadgeAlpha", merged.LogoBadgeAlpha, 70)
+	check("BackdropBadgeAlpha", merged.BackdropBadgeAlpha, 65)
+	check("EpisodeBadgeAlpha", merged.EpisodeBadgeAlpha, 60)
+	check("PosterBadgeWidth", merged.PosterBadgeWidth, 120)
+	check("PosterBadgeHeight", merged.PosterBadgeHeight, 140)
+	check("LogoBadgeWidth", merged.LogoBadgeWidth, 115)
+	check("LogoBadgeHeight", merged.LogoBadgeHeight, 135)
+	check("BackdropBadgeWidth", merged.BackdropBadgeWidth, 110)
+	check("BackdropBadgeHeight", merged.BackdropBadgeHeight, 130)
+	check("EpisodeBadgeWidth", merged.EpisodeBadgeWidth, 105)
+	check("EpisodeBadgeHeight", merged.EpisodeBadgeHeight, 125)
+	check("BackdropEdgeInsetX", merged.BackdropEdgeInsetX, 25)
+	check("BackdropEdgeInsetY", merged.BackdropEdgeInsetY, 15)
+
+	if merged.Lang != "de" {
+		t.Errorf("lang=%q, want 'de'", merged.Lang)
+	}
+
+	// Explicit override still wins (e.g. Textless explicitly false).
+	var body2 keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"textless":false,"poster_text_size":50}`), &body2); err != nil {
+		t.Fatal(err)
+	}
+	merged2 := mergeKeySettingsUpdate(base, &body2)
+	if merged2.Textless != false {
+		t.Errorf("explicit Textless=false, got %v", merged2.Textless)
+	}
+	if merged2.PosterTextSize != 50 {
+		t.Errorf("explicit PosterTextSize=50, got %d", merged2.PosterTextSize)
+	}
+	// Non-overridden fields still preserve base.
+	if merged2.LogoTextSize != 120 {
+		t.Errorf("LogoTextSize not preserved when only PosterTextSize was sent: got %d, want 120", merged2.LogoTextSize)
+	}
+}
+
 // TestValidateAndNormalizeKeySettings unit-tests the validation/normalisation
 // pass: valid rows pass, garbage enums are normalised, ranges are clamped, and
 // invalid ratings_order/lang are rejected.
