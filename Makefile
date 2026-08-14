@@ -18,7 +18,7 @@ nuke:
 
 rebuild: nuke build
 
-up:
+up: env
 	$(COMPOSE) $(FILES) build --build-arg APP_VERSION=$(APP_VERSION)
 	$(COMPOSE) $(FILES) up -d
 
