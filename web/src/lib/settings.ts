@@ -14,6 +14,13 @@ export interface SourceColors {
  * Canonical render-settings shape as returned by `GET /api/admin/settings`
  * (layouts serialized as JSON strings, defaults applied). Also the base for
  * the save payload and the free-key defaults.
+ *
+ * Layout fields are typed as `string | ImageLayout` because the per-key GET
+ * response (`/api/key/{id}/settings`, `/api/key/me/settings`) actually
+ * returns parsed `ImageLayout` objects, while the global GET returns
+ * JSON-stringified layouts (the legacy wire format). Runtime callers go
+ * through `parseLayout` (`web/src/lib/layout.ts`) which accepts both shapes
+ * (#10.7). Save payloads (SaveSettingsPayload) always use the object form.
  */
 export interface RenderSettings {
   image_source: string
@@ -24,7 +31,7 @@ export interface RenderSettings {
   ratings_limit: number
   ratings_order: string
   ratings_exclude: string
-  poster_layout: string
+  poster_layout: string | ImageLayout
   logo_ratings_limit: number
   backdrop_ratings_limit: number
   poster_badge_style: string
@@ -52,8 +59,8 @@ export interface RenderSettings {
   poster_logo_size: number
   logo_logo_size: number
   backdrop_logo_size: number
-  logo_layout: string
-  backdrop_layout: string
+  logo_layout: string | ImageLayout
+  backdrop_layout: string | ImageLayout
   backdrop_badge_direction: string
   backdrop_edge_inset_x: number
   backdrop_edge_inset_y: number
@@ -63,7 +70,7 @@ export interface RenderSettings {
   episode_text_size: number
   episode_badge_size: number
   episode_logo_size: number
-  episode_layout: string
+  episode_layout: string | ImageLayout
   episode_badge_direction: string
   episode_blur: boolean
   poster_badge_shape: string
