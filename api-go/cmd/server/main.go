@@ -56,7 +56,12 @@ func main() {
 	}
 
 	if err := services.RunUpgrades(db, cfg.CacheDir, cfg.ExternalCacheOnly); err != nil {
-		slog.Warn("data upgrades failed", "error", err)
+		// Surface at ERROR (#10.5): a failing runOnce upgrade leaves the server
+		// running with a broken feature until someone hits it; the previous
+		// slog.Warn blended into the noise. Schema-coupled upgrades (e.g. v004
+		// badge_size int columns, the 2026-08-14 outage class) are especially
+		// load-bearing — operators should see this in the error stream.
+		slog.Error("data upgrades failed — feature may be broken until manually repaired", "error", err)
 	}
 
 	app.SeedAdminIfNeeded(db, cfg.AdminUsername, cfg.AdminPassword)
