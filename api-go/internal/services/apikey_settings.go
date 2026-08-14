@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"maps"
 	"strings"
 )
@@ -343,6 +344,14 @@ func DeleteAPIKeySettings(db *sql.DB, apiKeyID int64) error {
 func GetEffectiveRenderSettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64, cachedGlobals *RenderSettings) RenderSettings {
 	defaults := DefaultRenderSettings()
 	perKey, err := GetAPIKeySettingsCtx(ctx, db, apiKeyID)
+	if err != nil {
+		// The per-key SELECT failed (transient connection issue, schema drift,
+		// or a corrupt row). The previous version silently fell back to globals
+		// with no log — exactly the masking that hid the 2026-08-14 7-column
+		// bug for multiple revisions (#10.3). Log and continue so the caller
+		// still gets a usable RenderSettings instead of a 500.
+		slog.Warn("GetEffectiveRenderSettingsCtx: per-key row read failed, falling back to globals", "api_key_id", apiKeyID, "err", err)
+	}
 	if err == nil && perKey != nil {
 		// Effective colours: the global effective colours (the stored globals,
 		// or the caller's cached globals) overlaid with the key's own overrides,
@@ -426,8 +435,8 @@ func GetEffectiveRenderSettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int
 		return *cachedGlobals
 	}
 
-	globals, err := GetGlobalSettingsCtx(ctx, db)
-	if err != nil {
+	globals, gerr := GetGlobalSettingsCtx(ctx, db)
+	if gerr != nil {
 		return DefaultRenderSettings()
 	}
 	return ParseGlobalRenderSettings(globals)
