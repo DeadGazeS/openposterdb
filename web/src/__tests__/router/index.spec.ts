@@ -32,8 +32,8 @@ export function makeRouter() {
         ],
       },
       {
-        path: '/key-settings',
-        name: 'key-settings',
+        path: '/individual-image-settings',
+        name: 'individual-image-settings',
         component: { template: '<div>Key Settings</div>' },
         meta: { requiresApiKey: true },
       },
@@ -92,7 +92,7 @@ describe('router', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  it('API key user visiting / gets redirected to key-settings', async () => {
+  it('API key user visiting / gets redirected to individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.apiKeyToken = 'jwt-token'
@@ -100,10 +100,10 @@ describe('router', () => {
     await router.push('/')
     await router.isReady()
 
-    expect(router.currentRoute.value.name).toBe('key-settings')
+    expect(router.currentRoute.value.name).toBe('individual-image-settings')
   })
 
-  it('API key user visiting /login gets redirected to key-settings', async () => {
+  it('API key user visiting /login gets redirected to individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.apiKeyToken = 'jwt-token'
@@ -111,27 +111,27 @@ describe('router', () => {
     await router.push('/login')
     await router.isReady()
 
-    expect(router.currentRoute.value.name).toBe('key-settings')
+    expect(router.currentRoute.value.name).toBe('individual-image-settings')
   })
 
-  it('unauthenticated user visiting /key-settings gets redirected to /login', async () => {
+  it('unauthenticated user visiting /individual-image-settings gets redirected to /login', async () => {
     const router = makeRouter()
 
-    await router.push('/key-settings')
+    await router.push('/individual-image-settings')
     await router.isReady()
 
     expect(router.currentRoute.value.name).toBe('login')
   })
 
-  it('API key user can access /key-settings', async () => {
+  it('API key user can access /individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.apiKeyToken = 'jwt-token'
 
-    await router.push('/key-settings')
+    await router.push('/individual-image-settings')
     await router.isReady()
 
-    expect(router.currentRoute.value.name).toBe('key-settings')
+    expect(router.currentRoute.value.name).toBe('individual-image-settings')
   })
 
   it('admin user can access admin routes', async () => {
@@ -216,7 +216,7 @@ describe('router - API key session', () => {
     setActivePinia(createPinia())
   })
 
-  it('API key session visiting / redirects to /key-settings', async () => {
+  it('API key session visiting / redirects to /individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.apiKeyToken = 'jwt-token'
@@ -224,10 +224,10 @@ describe('router - API key session', () => {
     await router.push('/')
     await router.isReady()
 
-    expect(router.currentRoute.value.name).toBe('key-settings')
+    expect(router.currentRoute.value.name).toBe('individual-image-settings')
   })
 
-  it('API key session visiting /admin redirects to /key-settings', async () => {
+  it('API key session visiting /admin redirects to /individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.apiKeyToken = 'jwt-token'
@@ -235,10 +235,10 @@ describe('router - API key session', () => {
     await router.push('/admin')
     await router.isReady()
 
-    expect(router.currentRoute.value.name).toBe('key-settings')
+    expect(router.currentRoute.value.name).toBe('individual-image-settings')
   })
 
-  it('API key session visiting /login redirects to /key-settings', async () => {
+  it('API key session visiting /login redirects to /individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.apiKeyToken = 'jwt-token'
@@ -246,20 +246,20 @@ describe('router - API key session', () => {
     await router.push('/login')
     await router.isReady()
 
-    expect(router.currentRoute.value.name).toBe('key-settings')
+    expect(router.currentRoute.value.name).toBe('individual-image-settings')
   })
 
-  it('unauthenticated user visiting /key-settings redirects to /login', async () => {
+  it('unauthenticated user visiting /individual-image-settings redirects to /login', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
 
-    await router.push('/key-settings')
+    await router.push('/individual-image-settings')
     await router.isReady()
 
     expect(router.currentRoute.value.name).toBe('login')
   })
 
-  it('admin session can access /admin but not /key-settings', async () => {
+  it('admin session can access /admin but not /individual-image-settings', async () => {
     const router = makeRouter()
     const auth = useAuthStore()
     auth.token = 'jwt-token'
@@ -268,8 +268,8 @@ describe('router - API key session', () => {
     await router.isReady()
     expect(router.currentRoute.value.name).toBe('dashboard')
 
-    // Admin without apiKey gets bounced from /key-settings → login → dashboard
-    await router.push('/key-settings')
+    // Admin without apiKey gets bounced from /individual-image-settings → login → dashboard
+    await router.push('/individual-image-settings')
     await router.isReady()
     expect(router.currentRoute.value.name).toBe('dashboard')
   })

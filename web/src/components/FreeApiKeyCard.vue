@@ -434,8 +434,8 @@ async function handleFetch() {
               <SelectItem value="h">High Res</SelectItem>
             </SelectContent>
           </Select>
-          <div class="flex items-center gap-2">
-            <Label for="free-text-size" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Text size %</Label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <Label for="free-text-size" class="text-xs text-muted-foreground shrink-0">Text size %</Label>
             <Input
               id="free-text-size"
               v-model="textSize"
@@ -444,11 +444,11 @@ async function handleFetch() {
               max="400"
               :placeholder="textSizeDefaultLabel"
               aria-label="Badge text size (percent, 50-400)"
-              class="bg-background min-w-0"
+              class="bg-background flex-1 min-w-[120px]"
             />
           </div>
-          <div class="flex items-center gap-2">
-            <Label for="free-badge-size" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Badge size %</Label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <Label for="free-badge-size" class="text-xs text-muted-foreground shrink-0">Badge size %</Label>
             <Input
               id="free-badge-size"
               v-model="badgeSizePct"
@@ -457,11 +457,11 @@ async function handleFetch() {
               max="400"
               :placeholder="badgeSizeDefaultLabel"
               aria-label="Badge size (percent, 50-400)"
-              class="bg-background min-w-0"
+              class="bg-background flex-1 min-w-[120px]"
             />
           </div>
-          <div class="flex items-center gap-2">
-            <Label for="free-logo-size" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Logo size %</Label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <Label for="free-logo-size" class="text-xs text-muted-foreground shrink-0">Logo size %</Label>
             <Input
               id="free-logo-size"
               v-model="logoSizePct"
@@ -470,7 +470,7 @@ async function handleFetch() {
               max="400"
               :placeholder="logoSizeDefaultLabel"
               aria-label="Rating logo size (percent, 50-400)"
-              class="bg-background min-w-0"
+              class="bg-background flex-1 min-w-[120px]"
             />
           </div>
           <Select v-model="badgeShape">
@@ -483,8 +483,8 @@ async function handleFetch() {
               <SelectItem value="p">Pill</SelectItem>
             </SelectContent>
           </Select>
-          <div class="flex items-center gap-2">
-            <Label for="free-badge-alpha" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Background opacity %</Label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <Label for="free-badge-alpha" class="text-xs text-muted-foreground shrink-0">Background opacity %</Label>
             <Input
               id="free-badge-alpha"
               v-model="badgeAlpha"
@@ -493,7 +493,7 @@ async function handleFetch() {
               max="100"
               :placeholder="badgeAlphaDefaultLabel"
               aria-label="Badge background opacity (percent, 0-100)"
-              class="bg-background min-w-0"
+              class="bg-background flex-1 min-w-[120px]"
             />
           </div>
           <Select v-if="imageType !== 'episode'" v-model="imageSource">
@@ -543,8 +543,8 @@ async function handleFetch() {
             </Select>
           </template>
           <template v-if="imageType === 'backdrop'">
-            <div class="flex items-center gap-2">
-              <Label for="free-edge-inset-x" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Horizontal inset %</Label>
+            <div class="flex items-center gap-2 flex-wrap">
+              <Label for="free-edge-inset-x" class="text-xs text-muted-foreground shrink-0">Horizontal inset %</Label>
               <Input
                 id="free-edge-inset-x"
                 v-model="edgeInsetX"
@@ -553,11 +553,11 @@ async function handleFetch() {
                 max="50"
                 :placeholder="`default (${defaults?.backdrop_edge_inset_x ?? 0})`"
                 aria-label="Backdrop horizontal edge inset (percent of width, left/right positions)"
-                class="bg-background min-w-0"
+                class="bg-background flex-1 min-w-[120px]"
               />
             </div>
-            <div class="flex items-center gap-2">
-              <Label for="free-edge-inset-y" class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">Vertical inset %</Label>
+            <div class="flex items-center gap-2 flex-wrap">
+              <Label for="free-edge-inset-y" class="text-xs text-muted-foreground shrink-0">Vertical inset %</Label>
               <Input
                 id="free-edge-inset-y"
                 v-model="edgeInsetY"
@@ -566,7 +566,7 @@ async function handleFetch() {
                 max="50"
                 :placeholder="`default (${defaults?.backdrop_edge_inset_y ?? 0})`"
                 aria-label="Backdrop vertical edge inset (percent of height, top/bottom positions)"
-                class="bg-background min-w-0"
+                class="bg-background flex-1 min-w-[120px]"
               />
             </div>
           </template>

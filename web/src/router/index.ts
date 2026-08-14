@@ -37,7 +37,7 @@ export async function routeGuard(to: RouteLocationNormalized) {
       return { name: 'dashboard' }
     }
     if (auth.isApiKeySession) {
-      return { name: 'key-settings' }
+      return { name: 'individual-image-settings' }
     }
   }
 
@@ -45,7 +45,7 @@ export async function routeGuard(to: RouteLocationNormalized) {
   if (to.matched.some((r) => r.meta.requiresAuth)) {
     if (!auth.isAdminSession) {
       if (auth.isApiKeySession) {
-        return { name: 'key-settings' }
+        return { name: 'individual-image-settings' }
       }
       return { name: 'login' }
     }
@@ -62,7 +62,7 @@ export async function routeGuard(to: RouteLocationNormalized) {
       return { name: 'dashboard' }
     }
     if (auth.isApiKeySession) {
-      return { name: 'key-settings' }
+      return { name: 'individual-image-settings' }
     }
   }
 }
@@ -142,10 +142,17 @@ const router = createRouter({
       ],
     },
     {
-      path: '/key-settings',
-      name: 'key-settings',
-      component: () => import('@/views/KeySettingsView.vue'),
+      path: '/individual-image-settings',
+      component: () => import('@/layouts/DashboardLayout.vue'),
       meta: { requiresApiKey: true },
+      children: [
+        {
+          path: '',
+          name: 'individual-image-settings',
+          component: () => import('@/views/KeySettingsView.vue'),
+          meta: { title: 'Individual Image Settings' },
+        },
+      ],
     },
     {
       path: '/login',

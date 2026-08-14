@@ -121,7 +121,7 @@ describe('LoginView', () => {
     await flushPromises()
 
     expect(mockAuthStore.loginWithApiKey).toHaveBeenCalledWith('my-secret-key')
-    expect(mockRouter.push).toHaveBeenCalledWith('/key-settings')
+    expect(mockRouter.push).toHaveBeenCalledWith('/individual-image-settings')
   })
 
   it('shows error on failed API key login', async () => {

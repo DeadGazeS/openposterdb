@@ -115,7 +115,7 @@ describe('KeySettingsView', () => {
     expect(mockRouter.replace).toHaveBeenCalledWith('/login')
   })
 
-  it('logout button clears session and navigates to login', async () => {
+  it('shows heading "Individual Image Settings"', async () => {
     mockSelfApi.getInfo.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ name: 'k', key_prefix: 'ab' }),
@@ -128,27 +128,6 @@ describe('KeySettingsView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const logoutBtn = wrapper.findAll('button').find((b) => b.text().includes('Logout'))
-    expect(logoutBtn).toBeDefined()
-    await logoutBtn!.trigger('click')
-
-    expect(mockAuthStore.logoutApiKey).toHaveBeenCalled()
-    expect(mockRouter.push).toHaveBeenCalledWith('/login')
-  })
-
-  it('shows heading "Poster Settings"', async () => {
-    mockSelfApi.getInfo.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ name: 'k', key_prefix: 'ab' }),
-    })
-    mockSelfApi.getSettings.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(sampleSettings),
-    })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.find('h1').text()).toContain('Image Settings')
+    expect(wrapper.find('h3').text()).toContain('Individual Image Settings')
   })
 })

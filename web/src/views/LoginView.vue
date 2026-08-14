@@ -46,7 +46,7 @@ async function handleLogin() {
     } else {
       const ok = await auth.loginWithApiKey(apiKeyInput.value)
       if (ok) {
-        router.push('/key-settings')
+        router.push('/individual-image-settings')
       } else {
         error.value = 'Invalid API key'
       }

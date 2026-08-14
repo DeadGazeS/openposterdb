@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { version } from '../../package.json'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -27,19 +27,33 @@ const router = useRouter()
 const auth = useAuthStore()
 const { state, isMobile, setOpenMobile } = useSidebar()
 
-const items = [
-  { title: 'Dashboard', icon: LayoutDashboard, to: '/admin' },
-  { title: 'Posters', icon: Image, to: '/admin/posters' },
-  { title: 'Logos', icon: Stamp, to: '/admin/logos' },
-  { title: 'Backdrops', icon: Wallpaper, to: '/admin/backdrops' },
-  { title: 'Episodes', icon: Clapperboard, to: '/admin/episodes' },
-]
+const items = computed(() => {
+  if (auth.isApiKeySession) {
+    // API-key sessions only have access to their own image-settings page —
+    // every admin route redirects them back to /individual-image-settings, so
+    // showing the global admin menu would only confuse them.
+    return [
+      { title: 'Individual Image Settings', icon: Settings, to: '/individual-image-settings' },
+    ]
+  }
+  return [
+    { title: 'Dashboard', icon: LayoutDashboard, to: '/admin' },
+    { title: 'Posters', icon: Image, to: '/admin/posters' },
+    { title: 'Logos', icon: Stamp, to: '/admin/logos' },
+    { title: 'Backdrops', icon: Wallpaper, to: '/admin/backdrops' },
+    { title: 'Episodes', icon: Clapperboard, to: '/admin/episodes' },
+  ]
+})
 
-const settingsItems = [
-  { title: 'API', to: '/admin/settings/api' },
-  { title: 'Global Image Settings', to: '/admin/settings/image' },
-  { title: 'Backup', to: '/admin/settings/backup' },
-]
+const settingsItems = computed(() =>
+  auth.isAdminSession
+    ? [
+        { title: 'API', to: '/admin/settings/api' },
+        { title: 'Global Image Settings', to: '/admin/settings/image' },
+        { title: 'Backup', to: '/admin/settings/backup' },
+      ]
+    : [],
+)
 
 // New-version indicator: the highest semver container tag published to the
 // user's fork beats the local package version → show a small link. Fails
@@ -134,7 +148,7 @@ function handleLogout() {
 <template>
   <Sidebar variant="inset" collapsible="icon">
     <SidebarHeader>
-      <router-link to="/admin" class="flex flex-col items-center py-1 group-data-[state=expanded]/sidebar-wrapper:items-start hover:opacity-80 transition-opacity" @click="onNavigate">
+      <router-link :to="auth.isApiKeySession ? '/individual-image-settings' : '/admin'" class="flex flex-col items-center py-1 group-data-[state=expanded]/sidebar-wrapper:items-start hover:opacity-80 transition-opacity" @click="onNavigate">
         <span class="font-bold text-lg whitespace-nowrap">{{ state === 'collapsed' ? 'OPDB' : 'OpenPosterDB' }}</span>
         <span class="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
           v{{ version }}
@@ -169,7 +183,7 @@ function handleLogout() {
             </SidebarMenuButton>
           </SidebarMenuItem>
 
-          <Collapsible v-model:open="settingsOpen" as-child class="group/collapsible">
+          <Collapsible v-if="settingsItems.length > 0" v-model:open="settingsOpen" as-child class="group/collapsible">
             <SidebarMenuItem>
               <CollapsibleTrigger as-child>
                 <SidebarMenuButton :is-active="isSettingsPath()" tooltip="Settings">

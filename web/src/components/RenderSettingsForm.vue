@@ -823,7 +823,7 @@ function toggleExclude(key: string, checked: boolean) {
         </div>
       </TabsContent>
 
-      <TabsContent v-if="uid === 'global'" value="rating-colours" class="mt-3">
+      <TabsContent value="rating-colours" class="mt-3">
         <div class="rounded-md border p-4 space-y-3">
           <p class="text-sm font-semibold">Rating Colours</p>
           <p class="text-xs text-muted-foreground">Customize each rating source's badge colours. The badge background opacity is set by the background-opacity sliders above.</p>
