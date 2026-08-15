@@ -70,7 +70,26 @@ func (m *KitsuIMDbMapper) Load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := m.HTTP.Do(req)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", kitsuUserAgent)
+
+	// Route through SendWithRetry so transient 429 / 5xx / connection
+	// resets retry cleanly with the same backoff the rest of the Kitsu
+	// code paths use. The previous direct-m.HTTP.Do path was vulnerable to
+	// "invalid Read on closed Body" when the transport reset mid-stream.
+	resp, err := SendWithRetry(&MALRetry, func() (*http.Response, error) {
+		// Re-build the request inside the retry closure because the previous
+		// attempt's request may have been mutated by the transport
+		// (http.Client reuses req.Body across retries, which is fine for
+		// GETs but cheap to recreate for safety).
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, theBeastLTKitsuIMDbURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", kitsuUserAgent)
+		return m.HTTP.Do(req)
+	})
 	if err != nil {
 		return err
 	}
