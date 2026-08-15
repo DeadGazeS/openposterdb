@@ -38,14 +38,17 @@ type ImageServeConfig struct {
 
 // ImageDeps bundles the dependencies shared by the image-serving handlers.
 type ImageDeps struct {
-	DB        *sql.DB
-	Config    *ImageServeConfig
-	TMDB      *services.TmdbClient
-	OMDB      *services.OmdbClient
-	MDBList   *services.MdblistClient
-	Trakt     *services.TraktClient
-	Fanart    *services.FanartClient
-	CDNHashes *services.HashRegistry
+	DB              *sql.DB
+	Config          *ImageServeConfig
+	TMDB            *services.TmdbClient
+	OMDB            *services.OmdbClient
+	MDBList         *services.MdblistClient
+	Trakt           *services.TraktClient
+	Fanart          *services.FanartClient
+	Kitsu           *services.KitsuClient
+	AniList         *services.AniListClient
+	KitsuIMDbMapper *services.KitsuIMDbMapper
+	CDNHashes       *services.HashRegistry
 }
 
 // HandleImage serves the public image endpoints. deps is a per-request

@@ -83,15 +83,31 @@ func main() {
 		slog.Warn("TMDB_API_KEY is not set — image endpoints will return 503 until a key is configured in the admin UI")
 	}
 
+	// KitsuIMDbMapper is the TheBeastLT Kitsu→IMDb cross-reference (~775 KB).
+	// Constructed up-front and loaded in a goroutine so the slow HTTPS fetch
+	// doesn't block startup. When Load fails, the mapper is empty and the
+	// "find equivalent" step in resolveWithFallback is silently skipped —
+	// Kitsu/MAL art is still available via the explicit kitsu:N / mal:N
+	// paths, just no automatic translation to IMDb.
+	kitsuIMDbMapper := services.NewKitsuIMDbMapper(httpClient)
+	go func() {
+		if err := kitsuIMDbMapper.Load(context.Background()); err != nil {
+			slog.Warn("kitsu→imdb mapping load failed — translation step disabled", "error", err)
+		}
+	}()
+
 	state := &router.AppState{
-		Config:        cfg,
-		DB:            db,
-		HTTPClient:    httpClient,
-		TMDB:          tmdbClient,
-		ServiceKeys:   mgr,
-		SecureCookies: cfg.SecureCookies,
-		JWTSecret:     cfg.JWTSecret,
-		SecretsKey:    cfg.SecretsKey,
+		Config:          cfg,
+		DB:              db,
+		HTTPClient:      httpClient,
+		TMDB:            tmdbClient,
+		Kitsu:           services.NewKitsuClient(httpClient),
+		AniList:         services.NewAniListClient(httpClient),
+		KitsuIMDbMapper: kitsuIMDbMapper,
+		ServiceKeys:     mgr,
+		SecureCookies:   cfg.SecureCookies,
+		JWTSecret:       cfg.JWTSecret,
+		SecretsKey:      cfg.SecretsKey,
 	}
 
 	// Process-wide in-memory caches (mirroring the Rust moka caches): rendered

@@ -83,6 +83,7 @@ func HandleFetchImage(deps ImageDeps, imageType, idType, idValue string) http.Ha
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
 			Context: r.Context(), DB: deps.DB, TMDB: deps.TMDB, OMDB: deps.OMDB, MDBList: deps.MDBList, Trakt: deps.Trakt, Fanart: deps.Fanart,
+			Kitsu: deps.Kitsu, AniList: deps.AniList, KitsuIMDbMapper: deps.KitsuIMDbMapper,
 			IDType: idType, IDValue: idValue, Kind: kind,
 			Settings: &settings,
 			CacheDir: deps.Config.CacheDir, ExternalCacheOnly: deps.Config.ExternalCacheOnly,

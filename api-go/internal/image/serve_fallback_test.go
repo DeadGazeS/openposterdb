@@ -83,7 +83,7 @@ func newResolveTestTMDB(t *testing.T) *services.TmdbClient {
 // the fallback chain entirely.
 func TestResolveWithFallback_StrictHit(t *testing.T) {
 	tmdb := newResolveTestTMDB(t)
-	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "tt1234567", tmdb)
+	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "tt1234567", services.IDClients{TMDB: tmdb}, true, true)
 	if err != nil {
 		t.Fatalf("strict imdb hit failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestResolveWithFallback_StrictHit(t *testing.T) {
 // fallback tmdb succeeds via the series- prefix → /tv/124364.
 func TestResolveWithFallback_TMDBSourceSeries(t *testing.T) {
 	tmdb := newResolveTestTMDB(t)
-	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "series-124364", tmdb)
+	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "series-124364", services.IDClients{TMDB: tmdb}, true, true)
 	if err != nil {
 		t.Fatalf("fallback to tmdb failed: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestResolveWithFallback_TMDBSourceSeries(t *testing.T) {
 // external_source=imdb_id.
 func TestResolveWithFallback_IMDBSourceFromTMDB(t *testing.T) {
 	tmdb := newResolveTestTMDB(t)
-	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeTMDB, "tt1234567", tmdb)
+	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeTMDB, "tt1234567", services.IDClients{TMDB: tmdb}, true, true)
 	if err != nil {
 		t.Fatalf("fallback to imdb failed: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestResolveWithFallback_IMDBSourceFromTMDB(t *testing.T) {
 // /find/{id}?external_source=tvdb_id.
 func TestResolveWithFallback_TVDBSourceBareNumeric(t *testing.T) {
 	tmdb := newResolveTestTMDB(t)
-	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "81189", tmdb)
+	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "81189", services.IDClients{TMDB: tmdb}, true, true)
 	if err != nil {
 		t.Fatalf("fallback to tvdb failed: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestResolveWithFallback_TVDBSourceBareNumeric(t *testing.T) {
 // for the original request) and never an empty ResolvedID.
 func TestResolveWithFallback_AllMiss(t *testing.T) {
 	tmdb := newResolveTestTMDB(t)
-	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "garbage", tmdb)
+	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "garbage", services.IDClients{TMDB: tmdb}, true, true)
 	if err == nil {
 		t.Fatalf("expected error, got resolved = %+v", resolved)
 	}
@@ -161,7 +161,7 @@ func TestResolveWithFallback_OrderIsIMDBThenTMDBThenTVDB(t *testing.T) {
 	tracker := &orderTrackingStub{hits: &hits}
 	tmdb := services.NewTmdbClient("test-key", &http.Client{Transport: tracker})
 
-	_, _ = resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "movie-99", tmdb)
+	_, _ = resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "movie-99", services.IDClients{TMDB: tmdb}, true, true)
 	want := []string{"imdb_id", "movie/series", "tvdb_id"}
 	if len(hits) != len(want) {
 		t.Fatalf("expected %d hits %v, got %d: %v", len(want), want, len(hits), hits)

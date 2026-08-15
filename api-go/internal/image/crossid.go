@@ -43,6 +43,23 @@ func alternateKeys(resolved *services.ResolvedID, requestedIDType, requestedIDVa
 			out = append(out, altID{idType: "tvdb", idValue: v})
 		}
 	}
+	// Kitsu/MAL alternates: when a kitsu:N request resolves to a title whose
+	// mappings include a MAL id (or vice-versa), surface the MAL value as an
+	// alternate cache form so a later mal:M request hits the cache instead of
+	// re-fetching from Kitsu. MAL is the cross-link Kitsu exposes natively; the
+	// IMDB/TVDB cross-link doesn't exist for anime in practice (verified 2026-08-14).
+	if resolved.KitsuID != nil {
+		v := strconv.FormatUint(*resolved.KitsuID, 10)
+		if !skip("kitsu", v) {
+			out = append(out, altID{idType: "kitsu", idValue: v})
+		}
+	}
+	if resolved.MALID != nil {
+		v := strconv.FormatUint(*resolved.MALID, 10)
+		if !skip("mal", v) {
+			out = append(out, altID{idType: "mal", idValue: v})
+		}
+	}
 	return out
 }
 

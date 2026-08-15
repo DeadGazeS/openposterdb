@@ -22,9 +22,14 @@ import (
 // ExportPayload is the JSON structure used for settings backup/restore. The
 // `settings` map holds every global_settings row except the encrypted service
 // keys, which are exported (decrypted) separately under `service_keys` when the
-// user opts in. API key values are only ever stored as hashes, so exporting an
-// API key records its name + per-key settings; importing recreates it with a
-// fresh key value.
+// user opts in. API keys carry their encrypted_key (the v2 envelope that the
+// admin Reveal flow decrypts), key_prefix, and key_hash so a round-trip onto
+// an instance with the same SECRETS_KEY preserves the exact raw key value
+// (Reveal works) and onto any instance with the same hash preserves auth
+// (SHA-256 is one-way; the hash alone is enough for /api/key/me to validate).
+// If neither encrypted_key nor key_hash is present (legacy export, or a target
+// with a different SECRETS_KEY and no hash carried), the importer regenerates
+// the key with a fresh raw value the way it always has.
 //
 // Version is the export-format version: bump whenever the per-key settings
 // shape changes in a way that would lose data on import. The import path uses
@@ -151,9 +156,19 @@ func DecryptPayload(enc *EncryptedExport, passphrase string) (*ExportPayload, er
 }
 
 // ExportedAPIKey is one API key's importable metadata + per-key settings.
+// EncryptedKey (the v2 envelope form of the raw key, decryptable via
+// DecryptAPIKey when the target's SECRETS_KEY matches the source's), KeyHash
+// (SHA-256 of the raw key — enough for /api/key/me to authenticate even on
+// a target with a different SECRETS_KEY), and KeyPrefix (the 8-char display
+// prefix shown in the admin UI) are all carried so a round-trip onto an
+// instance with the same SECRETS_KEY restores the exact raw value (Reveal
+// works) and onto any instance preserves auth (the hash is one-way).
 type ExportedAPIKey struct {
-	Name     string          `json:"name"`
-	Settings *APIKeySettings `json:"settings"`
+	Name         string          `json:"name"`
+	Settings     *APIKeySettings `json:"settings,omitempty"`
+	EncryptedKey *string         `json:"encrypted_key,omitempty"`
+	KeyHash      *string         `json:"key_hash,omitempty"`
+	KeyPrefix    *string         `json:"key_prefix,omitempty"`
 }
 
 // RegeneratedKey reports a freshly-created API key value so the admin can
@@ -222,6 +237,18 @@ func BuildExportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 			ek := ExportedAPIKey{Name: k.Name}
 			if s, err := GetAPIKeySettingsCtx(ctx, db, k.ID); err == nil && s != nil {
 				ek.Settings = s
+			}
+			if k.EncryptedKey != nil && *k.EncryptedKey != "" {
+				v := *k.EncryptedKey
+				ek.EncryptedKey = &v
+			}
+			if k.KeyHash != "" {
+				v := k.KeyHash
+				ek.KeyHash = &v
+			}
+			if k.KeyPrefix != "" {
+				v := k.KeyPrefix
+				ek.KeyPrefix = &v
 			}
 			p.APIKeys = append(p.APIKeys, ek)
 		}
@@ -293,16 +320,59 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 		if existing != nil {
 			id = existing.ID
 		} else {
-			raw, hash, prefix := GenerateAPIKey()
-			// Encrypt the regenerated raw key so the admin can reveal it from
-			// the API Keys view after restore (same model as fresh creates).
-			encrypted := ""
-			if keys != nil && keys.SecretsKey != nil {
-				enc, encErr := EncryptAPIKey(raw, keys.SecretsKey)
-				if encErr != nil {
-					slog.Error("failed to encrypt regenerated api key", "name", ek.Name, "error", encErr)
+			// New key. Three recovery paths in priority order:
+			//   1. encrypted_key decrypts with the target's SECRETS_KEY →
+			//      full round-trip (raw recovered, hash + prefix recomputed,
+			//      encrypted_key re-sealed under target's key so Reveal works).
+			//   2. encrypted_key present but SECRETS_KEY differs → carry
+			//      hash + prefix verbatim so /api/key/me keeps authenticating,
+			//      and the encrypted ciphertext as-is (Reveal will fail under
+			//      the new SECRETS_KEY, but auth via hash still works since
+			//      SHA-256 is one-way and the hash isn't SECRETS_KEY-bound).
+			//   3. Nothing carries over → regenerate fresh raw + hash + prefix
+			//      and surface the new key in RegeneratedKeys so the admin can
+			//      copy it (today's behaviour for legacy exports).
+			var raw, hash, prefix, encrypted string
+			recovered := false
+			if ek.EncryptedKey != nil && *ek.EncryptedKey != "" && keys != nil && keys.SecretsKey != nil {
+				if decrypted, decErr := DecryptAPIKey(*ek.EncryptedKey, keys.SecretsKey); decErr == nil {
+					raw = decrypted
+					h := sha256.Sum256([]byte(raw))
+					hash = hex.EncodeToString(h[:])
+					prefix = raw[:8]
+					if enc, encErr := EncryptAPIKey(raw, keys.SecretsKey); encErr == nil {
+						encrypted = enc
+					} else {
+						slog.Error("failed to re-encrypt recovered api key under target SECRETS_KEY", "name", ek.Name, "error", encErr)
+					}
+					recovered = true
 				} else {
-					encrypted = enc
+					slog.Warn("import: encrypted_key did not decrypt under target SECRETS_KEY, falling back to hash carry-over",
+						"name", ek.Name)
+				}
+			}
+			if !recovered {
+				if ek.KeyHash != nil && *ek.KeyHash != "" {
+					hash = *ek.KeyHash
+				}
+				if ek.KeyPrefix != nil && *ek.KeyPrefix != "" {
+					prefix = *ek.KeyPrefix
+				}
+				if ek.EncryptedKey != nil && *ek.EncryptedKey != "" {
+					encrypted = *ek.EncryptedKey
+				}
+				if hash == "" || prefix == "" {
+					raw, hash, prefix = GenerateAPIKey()
+					encrypted = ""
+					if keys != nil && keys.SecretsKey != nil {
+						enc, encErr := EncryptAPIKey(raw, keys.SecretsKey)
+						if encErr != nil {
+							slog.Error("failed to encrypt regenerated api key", "name", ek.Name, "error", encErr)
+						} else {
+							encrypted = enc
+						}
+					}
+					result.RegeneratedKeys = append(result.RegeneratedKeys, RegeneratedKey{Name: ek.Name, Key: raw, KeyPrefix: prefix})
 				}
 			}
 			newID, err := CreateAPIKeyCtx(ctx, db, ek.Name, hash, prefix, encrypted, 1)
@@ -310,7 +380,6 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 				return result, err
 			}
 			id = newID
-			result.RegeneratedKeys = append(result.RegeneratedKeys, RegeneratedKey{Name: ek.Name, Key: raw, KeyPrefix: prefix})
 		}
 		if ek.Settings != nil {
 			ek.Settings.APIKeyID = id

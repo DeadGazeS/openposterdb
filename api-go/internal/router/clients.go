@@ -43,6 +43,9 @@ func (s *AppState) previewConfig() *handlers.PreviewConfig {
 		OMDB:              s.OMDB,
 		MDBList:           s.MDBList,
 		Trakt:             s.Trakt,
+		Kitsu:             s.Kitsu,
+		AniList:           s.AniList,
+		KitsuIMDbMapper:   s.KitsuIMDbMapper,
 	}
 }
 
@@ -117,14 +120,17 @@ func (s *AppState) imageDeps() handlers.ImageDeps {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 	return handlers.ImageDeps{
-		DB:        s.DB,
-		Config:    s.imageServeConfig(),
-		TMDB:      s.TMDB,
-		OMDB:      s.OMDB,
-		MDBList:   s.MDBList,
-		Trakt:     s.Trakt,
-		Fanart:    s.Fanart,
-		CDNHashes: s.CDNHashes,
+		DB:              s.DB,
+		Config:          s.imageServeConfig(),
+		TMDB:            s.TMDB,
+		OMDB:            s.OMDB,
+		MDBList:         s.MDBList,
+		Trakt:           s.Trakt,
+		Fanart:          s.Fanart,
+		Kitsu:           s.Kitsu,
+		AniList:         s.AniList,
+		KitsuIMDbMapper: s.KitsuIMDbMapper,
+		CDNHashes:       s.CDNHashes,
 	}
 }
 

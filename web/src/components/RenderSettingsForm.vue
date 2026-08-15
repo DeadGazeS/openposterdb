@@ -77,6 +77,14 @@ const activeTab = computed<FormTab>({
 })
 
 const editFanart = ref(props.settings.image_source === 'f')
+// Kitsu/MAL opt-ins (RenderSettings.use_kitsu + use_mal). Each defaults
+// to true so anime paths work out of the box. The warning beneath the
+// checkboxes explains the always-on fallback semantics — even when
+// unchecked, Kitsu/MAL may still resolve an imdb:{kitsu_id}/{mal_id}
+// request when imdb/tmdb/tvdb don't have the key (see resolveWithFallback
+// gating in image/serve.go).
+const editUseKitsu = ref(props.settings.use_kitsu ?? true)
+const editUseMAL = ref(props.settings.use_mal ?? true)
 const editLang = ref(props.settings.lang || 'en')
 const editTextless = ref(props.settings.textless)
 const editSource = computed(() => editFanart.value ? 'f' : 't')
@@ -134,6 +142,8 @@ const episodeTotal = computed(() => layoutTotal(editEpisodeLayout.value))
 
 function applySettings(s: RenderSettings) {
   editFanart.value = s.image_source === 'f'
+  editUseKitsu.value = s.use_kitsu ?? true
+  editUseMAL.value = s.use_mal ?? true
   editLang.value = s.lang || 'en'
   editTextless.value = s.textless
   editRatingsOrder.value = parseRatingsOrder(s.ratings_order)
@@ -249,9 +259,13 @@ function editsSnapshot() {
     logo_badge_alpha: editLogoBadgeAlpha.value,
     backdrop_badge_alpha: editBackdropBadgeAlpha.value,
     episode_badge_alpha: editEpisodeBadgeAlpha.value,
+    use_kitsu: editUseKitsu.value,
+    use_mal: editUseMAL.value,
     colors: editColors.value,
   }
 }
+
+
 
 function settingsSnapshot(s: RenderSettings) {
   return {
@@ -300,6 +314,8 @@ function settingsSnapshot(s: RenderSettings) {
     logo_badge_alpha: s.logo_badge_alpha ?? 80,
     backdrop_badge_alpha: s.backdrop_badge_alpha ?? 80,
     episode_badge_alpha: s.episode_badge_alpha ?? 80,
+    use_kitsu: s.use_kitsu ?? true,
+    use_mal: s.use_mal ?? true,
     colors: s.colors ?? {},
   }
 }
@@ -400,6 +416,8 @@ async function save() {
       logo_badge_alpha: editLogoBadgeAlpha.value,
       backdrop_badge_alpha: editBackdropBadgeAlpha.value,
       episode_badge_alpha: editEpisodeBadgeAlpha.value,
+      use_kitsu: editUseKitsu.value,
+      use_mal: editUseMAL.value,
       colors: editColors.value,
     })
     if (err) {
@@ -807,6 +825,34 @@ function toggleExclude(key: string, checked: boolean) {
         <Label :for="inputId('fanart')">Prefer Fanart.tv as image source</Label>
       </div>
     </template>
+
+    <!-- Kitsu / MAL image source — see NOTES.md #11 -->
+    <p class="text-xs text-muted-foreground">
+      Kitsu and MAL might use their own artwork if no other id keys (imdb / tmdb / tvdb) resolve the title.
+      This kicks in for anime that TMDB under-serves (most seasonals, many OVAs).
+    </p>
+    <div class="flex items-center gap-2">
+      <Checkbox
+        :id="inputId('use-kitsu')"
+        :model-value="editUseKitsu"
+        data-testid="use-kitsu-checkbox"
+        @update:model-value="(v) => editUseKitsu = !!v"
+      />
+      <Label :for="inputId('use-kitsu')">Use Kitsu for Kitsu IDs</Label>
+    </div>
+    <div class="flex items-center gap-2">
+      <Checkbox
+        :id="inputId('use-mal')"
+        :model-value="editUseMAL"
+        data-testid="use-mal-checkbox"
+        @update:model-value="(v) => editUseMAL = !!v"
+      />
+      <Label :for="inputId('use-mal')">Use MAL for MAL IDs</Label>
+    </div>
+    <p class="text-xs text-muted-foreground">
+      Even if disabled, Kitsu / MAL may still be used when a imdb / tmdb / tvdb key can't be found.
+      Only applies to poster and backdrop kinds — logo / episode kinds don't have Kitsu / MAL artwork.
+    </p>
         </div>
       </TabsContent>
 

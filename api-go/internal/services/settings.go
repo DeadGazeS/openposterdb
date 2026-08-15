@@ -136,6 +136,18 @@ type RenderSettings struct {
 	BackdropBadgeAlpha     BadgeAlpha     `json:"backdrop_badge_alpha"`
 	EpisodeBadgeAlpha      BadgeAlpha     `json:"episode_badge_alpha"`
 
+	// UseKitsu enables the Kitsu resolver in the resolveKitsuMalCtx
+	// chain (image/serve.go). When false, imdb:{kitsu_id} paths skip the
+	// kitsu fallback entirely — but explicit kitsu:N URL forms still resolve
+	// via the KitsuClient directly (the checkbox only governs the
+	// imdb→tmdb→tvdb→kitsu→mal fallback order). Default true so anime titles
+	// under-served by TMDB get a poster without extra configuration.
+	UseKitsu bool `json:"use_kitsu"`
+
+	// UseMAL is the MAL-equivalent of UseKitsu; controls the mal fallback in
+	// resolveKitsuMalCtx the same way.
+	UseMAL bool `json:"use_mal"`
+
 	// Colors holds per-rating-source color overrides. Only non-default colors
 	// are stored; empty means "use the source default".
 	Colors map[string]SourceColorSet `json:"colors"`
@@ -150,6 +162,8 @@ func DefaultRenderSettings() RenderSettings {
 		RatingsOrder:           "mal,imdb,lb,rt,mc,rta,tmdb,trakt,mdblist,ebert",
 		RatingsExclude:         "",
 		IsDefault:              true,
+		UseKitsu:               true,
+		UseMAL:                 true,
 		PosterLayout:           DefaultLayout("poster"),
 		LogoRatingsLimit:       5,
 		BackdropRatingsLimit:   5,

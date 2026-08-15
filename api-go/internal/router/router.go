@@ -15,22 +15,25 @@ import (
 )
 
 type AppState struct {
-	Config          *config.Config
-	DB              *sql.DB
-	HTTPClient      *http.Client
-	TMDB            *services.TmdbClient
-	OMDB            *services.OmdbClient
-	MDBList         *services.MdblistClient
-	Fanart          *services.FanartClient
-	Trakt           *services.TraktClient
-	ServiceKeys     *services.ServiceKeyManager
-	SecureCookies   bool
-	Caches          *services.MemCacheSet
-	CDNHashes       *services.HashRegistry
-	Inflight        *image.InflightSet
-	JWTSecret       []byte
-	SecretsKey      []byte
-	LastUsedFlusher *services.LastUsedFlusher
+	Config           *config.Config
+	DB               *sql.DB
+	HTTPClient       *http.Client
+	TMDB             *services.TmdbClient
+	OMDB             *services.OmdbClient
+	MDBList          *services.MdblistClient
+	Fanart           *services.FanartClient
+	Trakt            *services.TraktClient
+	Kitsu            *services.KitsuClient
+	AniList          *services.AniListClient
+	KitsuIMDbMapper  *services.KitsuIMDbMapper
+	ServiceKeys      *services.ServiceKeyManager
+	SecureCookies    bool
+	Caches           *services.MemCacheSet
+	CDNHashes        *services.HashRegistry
+	Inflight         *image.InflightSet
+	JWTSecret        []byte
+	SecretsKey       []byte
+	LastUsedFlusher  *services.LastUsedFlusher
 
 	// clientsMu protects the rating-provider client fields (TMDB/OMDB/MDBList/
 	// Fanart/Trakt). Setup* and RefreshClientsFromKeys write; imageDeps() and

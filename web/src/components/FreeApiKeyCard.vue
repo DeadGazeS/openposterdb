@@ -16,6 +16,7 @@ import {
   IMAGE_SOURCE_LABELS,
   POSTER_FIT_LABELS,
 } from '@/lib/constants'
+import { idTypeExample, idTypeLabel, availableIdTypesForKind } from '@/lib/idPlaceholders'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -252,11 +253,7 @@ onUnmounted(() => {
   if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
 })
 
-const idPlaceholder = computed(() => {
-  if (idType.value === 'imdb') return 'tt0013442'
-  if (idType.value === 'tmdb') return 'movie-872585 or episode-1396-S1E1'
-  return '253573'
-})
+const idPlaceholder = computed(() => idTypeExample(idType.value).value)
 
 const queryString = computed(() => {
   // Clamp helper: parse a numeric ref, return a clamped int within [min, max]
@@ -621,11 +618,9 @@ async function handleFetch() {
             <SelectTrigger id="free-id-type" aria-label="ID type" class="bg-background w-auto">
               <SelectValue placeholder="ID type" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="imdb">IMDb</SelectItem>
-              <SelectItem value="tmdb">TMDb</SelectItem>
-              <SelectItem value="tvdb">TVDB</SelectItem>
-            </SelectContent>
+              <SelectContent>
+                <SelectItem v-for="t in availableIdTypesForKind(imageType)" :key="t" :value="t">{{ idTypeLabel(t) }}</SelectItem>
+              </SelectContent>
           </Select>
           <Select v-model="imageType">
             <SelectTrigger id="free-image-type" aria-label="Image type" class="bg-background w-auto">

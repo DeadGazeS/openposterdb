@@ -638,8 +638,9 @@ async function onImportFile(e: Event) {
                 <span class="text-sm">
                   API keys
                   <span class="text-muted-foreground text-xs">
-                    (poster-serving keys + their settings — existing key values can't be
-                    recovered, so missing keys are recreated on import)
+                    (poster-serving keys + their settings + encrypted_key — on import the
+                    raw key is recovered when SECRETS_KEY matches; auth via hash works
+                    regardless, missing keys are still recreated)
                   </span>
                 </span>
               </label>

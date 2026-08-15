@@ -81,6 +81,13 @@ export interface RenderSettings {
   logo_badge_alpha: number
   backdrop_badge_alpha: number
   episode_badge_alpha: number
+  // Kitsu/MAL fallback opt-ins (default true on the server). Each flag
+  // independently gates whether its source appears in the standard
+  // imdb→tmdb→tvdb→kitsu→mal fallback chain in image/serve.go's
+  // resolveWithFallback — explicit kitsu:N / mal:N URL forms still resolve
+  // via their own resolvers regardless. See NOTES.md #11.
+  use_kitsu: boolean
+  use_mal: boolean
   colors?: Record<string, SourceColors>
 }
 

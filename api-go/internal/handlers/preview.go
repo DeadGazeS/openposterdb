@@ -119,6 +119,9 @@ type PreviewConfig struct {
 	OMDB              *services.OmdbClient
 	MDBList           *services.MdblistClient
 	Trakt             *services.TraktClient
+	Kitsu             *services.KitsuClient
+	AniList           *services.AniListClient
+	KitsuIMDbMapper   *services.KitsuIMDbMapper
 }
 
 // demoArtworkBytes returns the base artwork for the demo title (IMDb
@@ -182,7 +185,7 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 }
 
 func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge {
-	resolved, err := services.ResolveIDCtx(p.ctx, services.IDTypeIMDB, idValue, p.cfg.TMDB)
+	resolved, err := services.ResolveIDCtx(p.ctx, services.IDTypeIMDB, idValue, services.IDClients{TMDB: p.cfg.TMDB})
 	if err != nil {
 		return nil
 	}

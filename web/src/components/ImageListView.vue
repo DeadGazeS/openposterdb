@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 import { ChevronRight, ChevronUp, ChevronDown, Eye, Info, Loader2, Download, Trash2 } from 'lucide-vue-next'
 import { titleIdFromCacheValue } from '@/lib/utils'
+import { idTypeExample, idTypeLabel, availableIdTypesForKind } from '@/lib/idPlaceholders'
 import RefreshButton from '@/components/RefreshButton.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -172,6 +173,7 @@ onUnmounted(() => {
 const fetchModalOpen = ref(false)
 const fetchIdType = ref('imdb')
 const fetchIdValue = ref('')
+const fetchIdValuePlaceholder = computed(() => idTypeExample(fetchIdType.value).value)
 const fetchLoading = ref(false)
 const fetchError = ref('')
 
@@ -847,15 +849,13 @@ const skeletonClass = computed(() => {
                 <SelectValue placeholder="Select ID type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="imdb">IMDb</SelectItem>
-                <SelectItem value="tmdb">TMDb</SelectItem>
-                <SelectItem value="tvdb">TVDB</SelectItem>
+                <SelectItem v-for="t in availableIdTypesForKind(props.kind)" :key="t" :value="t">{{ idTypeLabel(t) }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div class="space-y-2">
             <Label>ID Value</Label>
-            <Input v-model="fetchIdValue" placeholder="e.g. tt1234567" />
+            <Input v-model="fetchIdValue" :placeholder="fetchIdValuePlaceholder" />
           </div>
           <p v-if="fetchError" class="text-sm text-destructive">{{ fetchError }}</p>
           <div class="flex justify-end">

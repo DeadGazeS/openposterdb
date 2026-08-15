@@ -156,8 +156,8 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if result.RestoredKeys != 1 {
 		t.Errorf("expected 1 service key restored, got %d", result.RestoredKeys)
 	}
-	if len(result.RegeneratedKeys) != 1 || result.RegeneratedKeys[0].Name != "test-key" {
-		t.Errorf("expected 1 regenerated api key, got %+v", result.RegeneratedKeys)
+	if len(result.RegeneratedKeys) != 0 {
+		t.Errorf("expected 0 regenerated api keys (hash carried across SECRETS_KEY), got %+v", result.RegeneratedKeys)
 	}
 
 	globals, _ := GetGlobalSettings(db2)
@@ -170,6 +170,15 @@ func TestExportImportRoundTrip(t *testing.T) {
 	restored, err := FindAPIKeyByName(db2, "test-key")
 	if err != nil || restored == nil {
 		t.Fatalf("api key not recreated: %v", err)
+	}
+	// Cross-SECRETS_KEY: hash + prefix are carried verbatim so /api/key/me
+	// keeps authenticating with the original raw value. The source row had
+	// no encrypted_key (legacy schema), so this is a hash-only carry.
+	if restored.KeyHash != hash {
+		t.Errorf("hash not carried across SECRETS_KEY: got %q, want %q", restored.KeyHash, hash)
+	}
+	if restored.KeyPrefix != prefix {
+		t.Errorf("prefix not carried across SECRETS_KEY: got %q, want %q", restored.KeyPrefix, prefix)
 	}
 	ks, err := GetAPIKeySettings(db2, restored.ID)
 	if err != nil || ks == nil || ks.RatingsLimit != 3 {
@@ -490,5 +499,152 @@ func TestCreateAPIKey_StoresEncryptedKey_ReadableOnList(t *testing.T) {
 	}
 	if dec != raw {
 		t.Errorf("list-then-decrypt: got %q, want %q", dec, raw)
+	}
+}
+
+// TestExportImportAPIKey_RoundTripEncryptedKey_OnSameSecretsKey covers the
+// 2026-08-14 export/import improvement: an API key's encrypted_key, hash,
+// and prefix all round-trip when source and target share SECRETS_KEY, so
+// the admin Reveal flow returns the original raw value after restore (not a
+// freshly-regenerated one).
+func TestExportImportAPIKey_RoundTripEncryptedKey_OnSameSecretsKey(t *testing.T) {
+	db := newExportTestDB(t)
+	defer db.Close()
+
+	secretsKey := []byte("roundtrip-same-secrets-key-32-byte")
+	keys := NewServiceKeyManager(db, secretsKey, nil, &http.Client{}, "", nil, "", "", "")
+	keys.Init()
+
+	// Source: create an API key with encrypted_key populated.
+	raw, hash, prefix := GenerateAPIKey()
+	encrypted, err := EncryptAPIKey(raw, secretsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateAPIKey(db, "transfer-me", hash, prefix, encrypted, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Export and verify the payload carries the key credentials.
+	payload, err := BuildExportPayload(db, keys, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.APIKeys) != 1 {
+		t.Fatalf("export: want 1 api key, got %d", len(payload.APIKeys))
+	}
+	ek := payload.APIKeys[0]
+	if ek.EncryptedKey == nil || *ek.EncryptedKey != encrypted {
+		t.Errorf("export: encrypted_key not carried (got %v, want %q)", ek.EncryptedKey, encrypted)
+	}
+	if ek.KeyHash == nil || *ek.KeyHash != hash {
+		t.Errorf("export: key_hash not carried (got %v, want %q)", ek.KeyHash, hash)
+	}
+	if ek.KeyPrefix == nil || *ek.KeyPrefix != prefix {
+		t.Errorf("export: key_prefix not carried (got %v, want %q)", ek.KeyPrefix, prefix)
+	}
+
+	// Delete the source row to prove the import recreated the key from the
+	// payload (not by reading existing state).
+	if err := DeleteAPIKey(db, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Import and verify the new row carries the same credentials.
+	if _, err := ApplyImportPayload(db, keys, payload); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := ListAPIKeys(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("import: want 1 api key, got %d", len(listed))
+	}
+	restored := listed[0]
+	if restored.KeyHash != hash {
+		t.Errorf("import: hash=%q, want %q", restored.KeyHash, hash)
+	}
+	if restored.KeyPrefix != prefix {
+		t.Errorf("import: prefix=%q, want %q", restored.KeyPrefix, prefix)
+	}
+	if restored.EncryptedKey == nil || *restored.EncryptedKey == "" {
+		t.Fatal("import: encrypted_key not populated")
+	}
+	// Reveal: DecryptAPIKey with the same SECRETS_KEY must return the original raw.
+	dec, err := DecryptAPIKey(*restored.EncryptedKey, secretsKey)
+	if err != nil {
+		t.Fatalf("reveal after round-trip: %v", err)
+	}
+	if dec != raw {
+		t.Errorf("reveal: got %q, want %q (original raw)", dec, raw)
+	}
+	// The import is a true round-trip — no regenerated key surfaces in the
+	// response, since the original raw was recovered, not regenerated.
+	if _, err := ApplyImportPayload(db, keys, payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestExportImportAPIKey_CarriesHashAcrossSecretsKey covers the cross-instance
+// case: a backup from instance A (SECRETS_KEY=foo) imported into instance B
+// (SECRETS_KEY=bar) preserves auth (the SHA-256 hash is not SECRETS_KEY-bound)
+// so /api/key/me keeps validating with the original raw key. Reveal will fail
+// on B because the encrypted_key is sealed under foo; that's expected and is
+// why the slog.Warn fires in ApplyImportPayloadCtx's fallback branch.
+func TestExportImportAPIKey_CarriesHashAcrossSecretsKey(t *testing.T) {
+	db := newExportTestDB(t)
+	defer db.Close()
+
+	sourceKey := []byte("source-secrets-key-32-bytes-aaaa")
+	targetKey := []byte("target-secrets-key-32-bytes-bbbb")
+	src := NewServiceKeyManager(db, sourceKey, nil, &http.Client{}, "", nil, "", "", "")
+	src.Init()
+
+	raw, hash, prefix := GenerateAPIKey()
+	encrypted, err := EncryptAPIKey(raw, sourceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateAPIKey(db, "carry-over", hash, prefix, encrypted, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := BuildExportPayload(db, src, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wipe source and import with target SECRETS_KEY.
+	if err := DeleteAPIKey(db, 1); err != nil {
+		t.Fatal(err)
+	}
+	tgt := NewServiceKeyManager(db, targetKey, nil, &http.Client{}, "", nil, "", "", "")
+	tgt.Init()
+	if _, err := ApplyImportPayload(db, tgt, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := ListAPIKeys(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("import: want 1 api key, got %d", len(listed))
+	}
+	restored := listed[0]
+	if restored.KeyHash != hash {
+		t.Errorf("cross-SECRETS_KEY: hash=%q, want %q (carried)", restored.KeyHash, hash)
+	}
+	if restored.KeyPrefix != prefix {
+		t.Errorf("cross-SECRETS_KEY: prefix=%q, want %q (carried)", restored.KeyPrefix, prefix)
+	}
+	// encrypted_key is carried verbatim — it'll fail to decrypt under the
+	// target key, which is the documented cross-SECRETS_KEY constraint.
+	if restored.EncryptedKey == nil || *restored.EncryptedKey == "" {
+		t.Fatal("cross-SECRETS_KEY: encrypted_key should still be carried verbatim")
+	}
+	if _, err := DecryptAPIKey(*restored.EncryptedKey, targetKey); err == nil {
+		t.Error("cross-SECRETS_KEY: DecryptAPIKey under target key should fail (expected)")
 	}
 }

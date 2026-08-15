@@ -15,6 +15,8 @@ const (
 	IDTypeIMDB IDType = iota
 	IDTypeTMDB
 	IDTypeTVDB
+	IDTypeKitsu
+	IDTypeMAL
 )
 
 func (t IDType) String() string {
@@ -25,6 +27,10 @@ func (t IDType) String() string {
 		return "tmdb"
 	case IDTypeTVDB:
 		return "tvdb"
+	case IDTypeKitsu:
+		return "kitsu"
+	case IDTypeMAL:
+		return "mal"
 	}
 	return ""
 }
@@ -37,6 +43,10 @@ func ParseIDType(s string) (IDType, error) {
 		return IDTypeTMDB, nil
 	case "tvdb":
 		return IDTypeTVDB, nil
+	case "kitsu":
+		return IDTypeKitsu, nil
+	case "mal":
+		return IDTypeMAL, nil
 	default:
 		return 0, apperr.NewInvalidIDType(s)
 	}
@@ -62,6 +72,19 @@ func (m MediaType) String() string {
 	return ""
 }
 
+// KitsuSubtypeTV / KitsuSubtypeMovie / KitsuSubtypeOVA etc. cover the Kitsu
+// anime.subtype enum ("TV" / "Movie" / "OVA" / "ONA" / "Special" / "Music").
+// Defined here so id.go can translate without importing kitsu.go's private
+// types — keeping kitsu.go the sole owner of KitsuAnime's full shape.
+const (
+	KitsuSubtypeTV      = "TV"
+	KitsuSubtypeMovie   = "Movie"
+	KitsuSubtypeOVA     = "OVA"
+	KitsuSubtypeONA     = "ONA"
+	KitsuSubtypeSpecial = "Special"
+	KitsuSubtypeMusic   = "Music"
+)
+
 type EpisodeInfo struct {
 	ShowTMDbID    uint64
 	SeasonNumber  uint32
@@ -69,14 +92,40 @@ type EpisodeInfo struct {
 	StillPath     *string
 }
 
+// ResolvedID carries everything the image-rendering pipeline needs after
+// a single ID resolve. KitsuID / MALID are populated when the resolver
+// pulled from a non-TMDB source, so the cross-id cache write in
+// image/crossid.go can write alternate forms. DirectPosterURL and
+// DirectCoverURL carry Kitsu's posterImage.original / coverImage.original
+// or AniList's coverImage.extraLarge / bannerImage — when populated, the
+// art fetch path skips TMDB entirely for that request.
 type ResolvedID struct {
-	IMDbID      *string
-	TMDbID      uint64
-	TVDBID      *uint64
-	MediaType   MediaType
-	PosterPath  *string
-	ReleaseDate *string
-	Episode     *EpisodeInfo
+	IMDbID          *string
+	TMDbID          uint64
+	TVDBID          *uint64
+	KitsuID         *uint64
+	MALID           *uint64
+	MediaType       MediaType
+	PosterPath      *string
+	ReleaseDate     *string
+	DirectPosterURL *string
+	DirectCoverURL  *string
+	SourceProvider  string // "" for TMDB/IMDB/TVDB, "kitsu" or "mal" for the new sources
+	Episode         *EpisodeInfo
+}
+
+// IDClients bundles the per-source resolver clients. TMDB is required (the
+// existing pipeline needs it for IMDb / TMDB / TVDB resolution and for
+// poster_path / backdrop_path fetches); Kitsu and AniList are optional —
+// when nil, the resolver returns NewOther for that source, and the
+// fallback chain in image/serve.go simply moves on to the next source.
+// KitsuIMDbMapper is optional too — when nil, the "find IMDB equivalent
+// via TheBeastLT cross-ref" step is silently skipped.
+type IDClients struct {
+	TMDB             *TmdbClient
+	Kitsu            *KitsuClient
+	AniList          *AniListClient
+	KitsuIMDbMapper  *KitsuIMDbMapper
 }
 
 func FormatTMDbIDValue(tmdbID uint64, mediaType MediaType, episode *EpisodeInfo) string {
@@ -115,47 +164,57 @@ type findResult struct {
 	TVEpisodeResults []episodeFindEntry `json:"tv_episode_results"`
 }
 
-func ResolveIDCtx(ctx context.Context, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+func ResolveIDCtx(ctx context.Context, idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
 	switch idType {
 	case IDTypeIMDB:
-		return resolveIMDBCtx(ctx, idValue, tmdb)
+		return resolveIMDBCtx(ctx, idValue, clients.TMDB)
 	case IDTypeTMDB:
-		return resolveTMDBCtx(ctx, idValue, tmdb)
+		return resolveTMDBCtx(ctx, idValue, clients.TMDB)
 	case IDTypeTVDB:
-		return resolveTVDBCtx(ctx, idValue, tmdb)
+		return resolveTVDBCtx(ctx, idValue, clients.TMDB)
+	case IDTypeKitsu:
+		if clients.Kitsu == nil {
+			return nil, apperr.NewOther("Kitsu client not configured")
+		}
+		return resolveKitsuCtx(ctx, idValue, clients.Kitsu)
+	case IDTypeMAL:
+		if clients.AniList == nil {
+			return nil, apperr.NewOther("AniList client not configured")
+		}
+		return resolveMALCtx(ctx, idValue, clients.AniList)
 	}
 	return nil, apperr.NewInvalidIDType(idType.String())
 }
 
-func ResolveID(idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
-	return ResolveIDCtx(context.Background(), idType, idValue, tmdb)
+func ResolveID(idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
+	return ResolveIDCtx(context.Background(), idType, idValue, clients)
 }
 
 // ResolveIDCached resolves an ID, caching successful results in the given
 // in-memory cache (key "idtype/idvalue", matching the Rust id_cache). A nil
 // cache bypasses caching. Errors are never cached, so a transient TMDB failure
 // doesn't poison the cache.
-func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
+func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
 	if cache != nil {
 		key := idType.String() + "/" + idValue
 		if v, ok := cache.Get(key); ok {
 			return v.(*ResolvedID), nil
 		}
-		resolved, err := ResolveIDCtx(ctx, idType, idValue, tmdb)
+		resolved, err := ResolveIDCtx(ctx, idType, idValue, clients)
 		if err == nil {
 			cache.Set(key, resolved, 1)
 		}
 		return resolved, err
 	}
-	return ResolveIDCtx(ctx, idType, idValue, tmdb)
+	return ResolveIDCtx(ctx, idType, idValue, clients)
 }
 
 // ResolveIDCached resolves an ID, caching successful results in the given
 // in-memory cache (key "idtype/idvalue", matching the Rust id_cache). A nil
 // cache bypasses caching. Errors are never cached, so a transient TMDB failure
 // doesn't poison the cache.
-func ResolveIDCached(cache *MemCache, idType IDType, idValue string, tmdb *TmdbClient) (*ResolvedID, error) {
-	return ResolveIDCachedCtx(context.Background(), cache, idType, idValue, tmdb)
+func ResolveIDCached(cache *MemCache, idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
+	return ResolveIDCachedCtx(context.Background(), cache, idType, idValue, clients)
 }
 
 func resolveIMDBCtx(ctx context.Context, imdbID string, tmdb *TmdbClient) (*ResolvedID, error) {
@@ -504,4 +563,73 @@ func findBestEntry(entries []findEntry) *findEntry {
 		}
 	}
 	return best
+}
+
+// resolveKitsuCtx fetches the Kitsu anime resource for the given idValue
+// (numeric Kitsu anime id) and projects it onto ResolvedID with the direct
+// poster/cover URLs populated. Subtype is mapped to MediaType (TV/Movie/OVA
+// → MediaTypeTV; the existing art pipeline treats everything non-movie the
+// same way for poster/logo/backdrop fetches, and Kitsu's per-episode still
+// pipeline is out of scope for this resolver). Episode kind on a kitsu: url
+// is rejected at the handler level — Kitsu doesn't expose a clean season/episode
+// path through the public JSON:API that maps onto our /episode-default/{id}.
+// MAL id from the mappings response is preserved on ResolvedID.MALID so the
+// cross-id cache write in image/crossid.go can write the alternate form.
+func resolveKitsuCtx(ctx context.Context, idValue string, kitsu *KitsuClient) (*ResolvedID, error) {
+	if idValue == "" {
+		return nil, apperr.NewInvalidIDType("kitsu id must not be empty")
+	}
+
+	anime, mappings, err := kitsu.GetAnimeCtx(ctx, idValue)
+	if err != nil {
+		return nil, err
+	}
+
+	mediaType := MediaTypeTV
+	if anime.Subtype == KitsuSubtypeMovie {
+		mediaType = MediaTypeMovie
+	}
+
+	kitsuID := anime.ID
+	resolved := &ResolvedID{
+		MediaType:      mediaType,
+		KitsuID:        &kitsuID,
+		SourceProvider: "kitsu",
+	}
+	resolved.DirectPosterURL = anime.PosterImageOriginal
+	resolved.DirectCoverURL = anime.CoverImageOriginal
+	if malID := MALIDForMapping(mappings); malID != nil {
+		resolved.MALID = malID
+	}
+
+	return resolved, nil
+}
+
+// resolveMALCtx looks up an anime by MAL id through AniList (AniList is the
+// only no-auth, no-OAuth source that reliably indexes every MAL anime; Jikan
+// sunsets 2026-10-01 and MAL's official v2 API is OAuth-gated). The result
+// carries AniList's coverImage.extraLarge as the poster and bannerImage as
+// the cover — no TMDB involvement. KitsuID is left nil (the AniList query
+// doesn't expose it; adding a second hop to look it up is out of scope).
+func resolveMALCtx(ctx context.Context, idValue string, anilist *AniListClient) (*ResolvedID, error) {
+	id, err := ParseMALID(idValue)
+	if err != nil {
+		return nil, err
+	}
+
+	media, err := anilist.MediaByMALCtx(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	malID := media.MALID
+	resolved := &ResolvedID{
+		MediaType:      MediaTypeTV,
+		MALID:          &malID,
+		SourceProvider: "mal",
+	}
+	resolved.DirectPosterURL = media.CoverImageExtra
+	resolved.DirectCoverURL = media.BannerImage
+
+	return resolved, nil
 }

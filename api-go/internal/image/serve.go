@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/image/font"
@@ -298,6 +301,9 @@ type ServeParams struct {
 	MDBList             *services.MdblistClient
 	Trakt               *services.TraktClient
 	Fanart              *services.FanartClient
+	Kitsu               *services.KitsuClient
+	AniList             *services.AniListClient
+	KitsuIMDbMapper     *services.KitsuIMDbMapper
 	IDType              string
 	IDValue             string
 	Kind                string
@@ -314,21 +320,93 @@ type ServeParams struct {
 	Inflight            *InflightSet
 }
 
-// resolveWithFallback tries the requested idType first; on failure, falls
-// back through the other ID sources in order imdb → tmdb → tvdb (skipping
-// the requested source) so a URL whose path-source doesn't match the
-// idValue's format still resolves. Example: /imdb/poster-default/
-// series-124364.jpg — the idValue is a tmdb series format, so the strict
-// imdb call (TMDB /find/series-124364?external_source=imdb_id) returns no
-// match; the fallback tmdb call recognises the series- prefix and returns
-// the show via /tv/124364. The cache key used downstream by ServeImage is
-// the originally-requested (idType, idValue), so the rendered bytes land
-// in cache under the URL the user actually hit and the next request is a
-// direct cache hit with no fallback fired. Hits on the strict path skip
-// the fallback chain entirely (the feature only fires on miss).
-func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, tmdb *services.TmdbClient) (*services.ResolvedID, error) {
+// resolveKitsuMalCtx resolves a kitsu:N or mal:N URL. The UseKitsu and
+// UseMAL settings independently control each source:
+//   - UseKitsu=true, UseMAL=true (defaults): direct Kitsu/MAL call →
+//     Kitsu/MAL artwork (posterImage.original / coverImage.extraLarge /
+//     bannerImage).
+//   - Either false: try to find an IMDB equivalent first (via the
+//     appropriate mapping source — KitsuIMDbMapper for kitsu, AniListClient
+//     for mal). If a mapping exists, re-resolve via the standard IMDb
+//     pipeline (TMDB /find). If the mapping is missing OR the IMDb pipeline
+//     rejects it, fall back to the direct Kitsu/MAL call. "No third
+//     option" — if both equivalent-finding and direct-call fail, the
+//     request errors out; we don't retry via TMDB/TVDB on a kitsu:/
+//     mal: id_type path.
+//
+// Only applies to poster and backdrop kinds — kitsu/mal don't carry logo
+// or per-episode still artwork (the admin UI Fetch modal dropdown also
+// hides kitsu/mal options for logo/episode kinds as a UI guard).
+func resolveKitsuMalCtx(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, clients services.IDClients, useKitsu, useMAL bool) (*services.ResolvedID, error) {
+	switch idType {
+	case services.IDTypeKitsu:
+		if useKitsu {
+			return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
+		}
+		// UseKitsu=false: try to find an IMDB equivalent via the TheBeastLT
+		// cross-ref (~775 KB, good coverage).
+		if clients.KitsuIMDbMapper != nil {
+			if imdbID := lookupKitsuIMDb(idValue, clients.KitsuIMDbMapper); imdbID != nil {
+				slog.Debug("kitsu→imdb equivalent translation hit",
+					"kitsu_id_or_slug", idValue,
+					"imdb_id", *imdbID)
+				if r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeIMDB, *imdbID, clients); err == nil {
+					return r, nil
+				}
+				slog.Debug("kitsu→imdb translation resolve failed, falling back to direct", "imdb_id", *imdbID)
+			}
+		}
+	case services.IDTypeMAL:
+		if useMAL {
+			return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
+		}
+		// UseMAL=false: try AniList's externalLinks for an IMDB cross-ref.
+		// Coverage is limited (verified 2026-08-15 that 0/6 popular anime
+		// had IMDB in AniList's externalLinks), so this is best-effort.
+		if clients.AniList != nil {
+			if malID, parseErr := strconv.ParseUint(idValue, 10, 64); parseErr == nil && malID > 0 {
+				if imdbID := clients.AniList.LookupIMDBByMAL(ctx, malID); imdbID != nil {
+					slog.Debug("mal→imdb equivalent translation hit",
+						"mal_id", malID,
+						"imdb_id", *imdbID)
+					if r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeIMDB, *imdbID, clients); err == nil {
+						return r, nil
+					}
+					slog.Debug("mal→imdb translation resolve failed, falling back to direct", "imdb_id", *imdbID)
+				}
+			}
+		}
+	}
+	// Fallback: direct Kitsu/MAL. Per the user's spec: "Even if disabled,
+	// Kitsu / MAL may still be used when a imdb / tmdb / tvdb key can't be
+	// found" — same call, semantically the user's last-resort path.
+	return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
+}
+
+// lookupKitsuIMDb accepts either a numeric Kitsu id or a slug. Numeric
+// values are looked up directly; slug values are first resolved to a
+// numeric id via the Kitsu slug-filter endpoint.
+func lookupKitsuIMDb(idOrSlug string, mapper *services.KitsuIMDbMapper) *string {
+	if mapper == nil || idOrSlug == "" {
+		return nil
+	}
+	if kitsuID, parseErr := strconv.ParseUint(idOrSlug, 10, 64); parseErr == nil && kitsuID > 0 {
+		return mapper.LookupIMDB(kitsuID)
+	}
+	// Slug path: would need a separate KitsuClient.GetAnimeBySlug call to
+	// resolve the slug first; for the IMDB translation we accept the
+	// limitation that slug IDs only translate when the user has supplied
+	// a numeric id previously cached (the slug→numeric bridge is a TODO).
+	return nil
+}
+
+// resolveStandardCtx is the standard TMDB/IMDb/TVDB pipeline — strict call
+// then the imdb → tmdb → tvdb fallback chain. The use_kitsu_mal checkbox
+// does not affect this path; it only governs how explicit kitsu:N /
+// mal:N URLs are handled (see resolveKitsuMalCtx).
+func resolveStandardCtx(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, clients services.IDClients) (*services.ResolvedID, error) {
 	resolve := func(t services.IDType) (*services.ResolvedID, error) {
-		return services.ResolveIDCachedCtx(ctx, cache, t, idValue, tmdb)
+		return services.ResolveIDCachedCtx(ctx, cache, t, idValue, clients)
 	}
 	resolved, strictErr := resolve(idType)
 	if strictErr == nil {
@@ -339,11 +417,30 @@ func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType s
 			continue
 		}
 		if r, err := resolve(alt); err == nil {
-			slog.Debug("image request: source fallback hit", "requested", idType.String(), "resolved_via", alt.String(), "id", idValue)
+			slog.Debug("image request: standard-chain fallback hit",
+				"requested", idType.String(),
+				"resolved_via", alt.String(),
+				"id", idValue)
 			return r, nil
 		}
 	}
 	return nil, strictErr
+}
+
+// resolveWithFallback dispatches to the two resolution paths above. The
+// use_kitsu_mal checkbox only changes how explicit kitsu:N / mal:N URLs
+// are handled — every other id_type (imdb / tmdb / tvdb) uses the standard
+// imdb → tmdb → tvdb chain regardless of the checkbox.
+//
+// Per the user's 2026-08-14 spec ("no third option"):
+//   - ON:  kitsu:N / mal:N → direct Kitsu/MAL → Kitsu/MAL artwork.
+//   - OFF: kitsu:N / mal:N → IMDB-equivalent lookup → fallback to direct.
+//   - Both: imdb:N / tmdb:N / tvdb:N → strict + standard chain.
+func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, clients services.IDClients, useKitsu, useMAL bool) (*services.ResolvedID, error) {
+	if idType == services.IDTypeKitsu || idType == services.IDTypeMAL {
+		return resolveKitsuMalCtx(ctx, cache, idType, idValue, clients, useKitsu, useMAL)
+	}
+	return resolveStandardCtx(ctx, cache, idType, idValue, clients)
 }
 
 func ServeImage(p ServeParams) ([]byte, string, error) {
@@ -407,7 +504,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	// series- prefix and returns the show. The cache key downstream stays
 	// the originally-requested (idType, idValue) so the next request hits
 	// cache directly with no fallback fired.
-	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, p.TMDB)
+	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, AniList: p.AniList, KitsuIMDbMapper: p.KitsuIMDbMapper}, p.Settings.UseKitsu, p.Settings.UseMAL)
 	if err != nil {
 		return nil, "", err
 	}
@@ -415,7 +512,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	if p.Kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
 		if resolved.Episode != nil {
 			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, p.TMDB)
+			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, AniList: p.AniList, KitsuIMDbMapper: p.KitsuIMDbMapper})
 			if err != nil {
 				return nil, "", err
 			}
@@ -512,7 +609,13 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 
 	var rawBadges []services.RatingBadge
-	if limit > 0 {
+	// Skip ratings when the resolver returned a direct image source (kitsu/mal
+	// path). FetchRatingsCtx hits TMDB /movie/{id} or /tv/{id} which 404s on
+	// TMDbID=0, and the new resolvers don't carry an IMDb cross-ref in practice
+	// (verified 2026-08-14 against AniList externalLinks + Kitsu /mappings —
+	// neither surfaces IMDb for anime). Better to skip than to log a flood of
+	// 404s on every kitsu:N / mal:N request.
+	if limit > 0 && resolved.SourceProvider == "" {
 		mediaType := "movie"
 		switch resolved.MediaType {
 		case services.MediaTypeTV:
@@ -581,10 +684,48 @@ func (p ServeParams) cacheKeyFor(idType, idValue, suffix string) (cacheKey, cach
 // the coalescable unit: concurrent requests for the same cache key share one
 // run via the inflight set.
 func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, imageSize services.ImageSize) ([]byte, error) {
-	// Fetch the base artwork (TMDB primary, fanart optional).
+	// Fetch the base artwork. Three paths, tried in order:
+	//   1. Direct URL (kitsu/mal resolved) — Kitsu/AniList returned their own
+	//      posterImage.original / coverImage.original URLs; fetch them as-is.
+	//   2. Fanart.tv (when ImageSource=="f") — TMDB id may be 0 on the kitsu/mal
+	//      path, so fanart is skipped automatically via the resolved.MediaType
+	//      guard inside fetchFanartArtworkCtx.
+	//   3. TMDB poster_path/backdrop_path (the existing default).
 	var imageBytes []byte
-	if p.Settings.ImageSource.IsFanart() && p.Fanart != nil {
+	if resolved.SourceProvider != "" {
+		var directURL *string
+		switch p.Kind {
+		case "poster":
+			directURL = resolved.DirectPosterURL
+		case "backdrop":
+			directURL = resolved.DirectCoverURL
+		}
+		if directURL != nil && *directURL != "" {
+			httpClient := http.DefaultClient
+			if p.TMDB != nil && p.TMDB.HTTP != nil {
+				httpClient = p.TMDB.HTTP
+			}
+			bytes, err := fetchDirectImageBytesCtx(p.Context, httpClient, *directURL)
+			if err != nil {
+				slog.Warn("direct image fetch failed", "kind", p.Kind, "url", *directURL, "error", err)
+			} else {
+				imageBytes = bytes
+			}
+		}
+	}
+	if imageBytes == nil && p.Settings.ImageSource.IsFanart() && p.Fanart != nil {
 		imageBytes = fetchFanartArtworkCtx(p.Context, p.Fanart, p.TMDB, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
+	}
+	// Kitsu/MAL resolvers don't carry a TMDb id (AniList's externalLinks
+	// don't reliably expose IMDB either, and even when they do the
+	// translation produces an IMDB id without a corresponding TMDb id until
+	// TMDB /find runs). When we got here via Kitsu/MAL and the direct URL
+	// path produced nothing — e.g. logo/episode kinds, where Kitsu/MAL
+	// don't carry logo/episode artwork — calling TMDB /tv/0 or /movie/0
+	// is just going to surface a cryptic 404. Surface a clean error instead.
+	if imageBytes == nil && resolved.SourceProvider != "" && resolved.TMDbID == 0 {
+		slog.Warn("no artwork for kitsu/mal-resolved title", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "kitsu/mal don't carry this kind of art and no TMDB id was resolved")
+		return nil, apperr.NewIDNotFound(fmt.Sprintf("no %s artwork available for %s/%s: Kitsu / MAL don't carry %s artwork — use an imdb / tmdb / tvdb key instead", p.Kind, p.IDType, p.IDValue, p.Kind))
 	}
 	if imageBytes == nil {
 		var err error
@@ -624,6 +765,28 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
 
 	return rendered, nil
+}
+
+// fetchDirectImageBytesCtx downloads a base artwork from a fully-qualified URL.
+// Used for Kitsu/MAL resolved entries whose ResolvedID carries DirectPosterURL
+// or DirectCoverURL — those providers don't go through TMDB's CDN, so we fetch
+// the bytes straight from the URL the resolver returned. The function does no
+// retry: Kitsu's posterImage and AniList's coverImage are static CDN URLs and
+// the caller (renderArtwork) logs and falls through to TMDB/Fanart on a miss.
+func fetchDirectImageBytesCtx(ctx context.Context, httpClient *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("direct image fetch returned %d for %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // refreshStale regenerates a stale cache entry in the background with fresh
@@ -860,7 +1023,7 @@ func DemoArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir str
 	if kind == "episode" {
 		idValue = DemoEpisodeID
 	}
-	resolved, err := services.ResolveIDCtx(ctx, services.IDTypeIMDB, idValue, tmdb)
+	resolved, err := services.ResolveIDCtx(ctx, services.IDTypeIMDB, idValue, services.IDClients{TMDB: tmdb})
 	if err != nil {
 		return nil, err
 	}

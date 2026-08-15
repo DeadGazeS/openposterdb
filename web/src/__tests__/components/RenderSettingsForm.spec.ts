@@ -73,6 +73,8 @@ const defaultSettings: RenderSettings = {
   logo_badge_alpha: 80,
   backdrop_badge_alpha: 80,
   episode_badge_alpha: 80,
+  use_kitsu: true,
+  use_mal: true,
 }
 
 function makeFetchPreview() {

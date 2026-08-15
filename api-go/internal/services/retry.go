@@ -61,6 +61,20 @@ var TraktRetry = RetryConfig{
 	ServiceName: "trakt",
 }
 
+var KitsuRetry = RetryConfig{
+	MaxRetries:  1,
+	BaseDelay:   2 * time.Second,
+	MaxDelay:    4 * time.Second,
+	ServiceName: "kitsu",
+}
+
+var MALRetry = RetryConfig{
+	MaxRetries:  1,
+	BaseDelay:   2 * time.Second,
+	MaxDelay:    4 * time.Second,
+	ServiceName: "anilist",
+}
+
 func retryAfterDelay(resp *http.Response, config *RetryConfig, attempt uint32) time.Duration {
 	if val := resp.Header.Get("Retry-After"); val != "" {
 		if secs, err := strconv.ParseUint(val, 10, 64); err == nil {
