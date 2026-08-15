@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"openposterdb/internal/httpx"
@@ -61,16 +62,29 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 		// (a) { "kind": "openposterdb/settings",            ... }                (plain)
 		// (b) { "passphrase": "...", "payload": { ... } }                        (encrypted)
 		// (c) { "kind": "openposterdb/settings-encrypted", ... }                (encrypted, passphrase in query)
+		//
+		// Read the body bytes once. httpx.DecodeJSON closes r.Body (its
+		// invariant), but resolveImportPayload needs to re-read r.Body when
+		// the envelope has no payload field — reading a closed body
+		// returns "http: invalid Read on closed Body" (bug observed 2026-08-15
+		// docker logs). Pass the bytes through instead.
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			httpx.WriteError(w, 400, "could not read request body")
+			return
+		}
+		r.Body.Close()
+
 		var envelope struct {
 			Passphrase string          `json:"passphrase"`
 			Payload    json.RawMessage `json:"payload"`
 		}
-		if err := httpx.DecodeJSON(r, &envelope); err != nil {
+		if err := json.Unmarshal(bodyBytes, &envelope); err != nil {
 			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
 
-		payload, err := resolveImportPayload(envelope, r)
+		payload, err := resolveImportPayload(envelope, bodyBytes, r)
 		if err != nil {
 			httpx.WriteError(w, 400, err.Error())
 			return
@@ -95,15 +109,20 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 // Plain (kind=openposterdb/settings) goes straight through; encrypted
 // (kind=openposterdb/settings-encrypted) requires a passphrase either in the
 // envelope body or in the `passphrase` query string.
+//
+// bodyBytes is the raw HTTP body, captured once in HandleImportSettings
+// before r.Body was closed. We never read r.Body here — doing so would
+// trigger "http: invalid Read on closed Body" since httpx.DecodeJSON has
+// already closed it by the time we get here.
 func resolveImportPayload(envelope struct {
 	Passphrase string          `json:"passphrase"`
 	Payload    json.RawMessage `json:"payload"`
-}, r *http.Request) (*services.ExportPayload, error) {
+}, bodyBytes []byte, r *http.Request) (*services.ExportPayload, error) {
 	raw := envelope.Payload
 	if len(raw) == 0 {
-		// No payload field — the body itself is the export. Re-decode whole body.
+		// No payload field — the body itself is the export. Decode whole body.
 		var direct services.ExportPayload
-		if err := json.NewDecoder(r.Body).Decode(&direct); err != nil {
+		if err := json.Unmarshal(bodyBytes, &direct); err != nil {
 			return nil, err
 		}
 		if direct.Kind == "openposterdb/settings-encrypted" {
