@@ -312,6 +312,56 @@ func (m *ServiceKeyManager) Init() {
 	}
 }
 
+// Reload re-reads every service key from the DB into the in-memory cache
+// under mu.Lock. Use after any path that writes keys directly to the DB
+// (import, admin Delete, manual SQL fix) and want the runtime to pick them
+// up without restarting the container.
+//
+// Init() is the same operation but assumes single-threaded startup; Reload
+// is the thread-safe variant for hot-path callers.
+//
+// Bug observed 2026-08-16: ApplyImportPayloadCtx called UpdateKeys which
+// only refreshes the cache for keys present in the payload's ServiceKeys
+// map. When the payload included keys but the cache was already populated
+// for a different service (or the import handler's per-key branches skipped
+// a service), the in-memory cache drifted from the DB and ratings fetches
+// silently used the stale empty set until container restart.
+func (m *ServiceKeyManager) Reload() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.EnvTMDB {
+		m.Keys.tmdb = nil
+		if v := m.loadFromDB("tmdb"); v != nil {
+			m.Keys.tmdb = *v
+		}
+	}
+	if !m.EnvMDBList {
+		m.Keys.mdblist = nil
+		if v := m.loadFromDB("mdblist"); v != nil {
+			m.Keys.mdblist = *v
+		}
+	}
+	if !m.EnvOMDB {
+		m.Keys.omdb = nil
+		if v := m.loadFromDB("omdb"); v != nil {
+			m.Keys.omdb = *v
+		}
+	}
+	if !m.EnvFanart {
+		m.Keys.fanart = nil
+		if v := m.loadFromDB("fanart"); v != nil {
+			m.Keys.fanart = *v
+		}
+	}
+	if !m.EnvTrakt {
+		m.Keys.trakt = nil
+		if v := m.loadFromDB("trakt"); v != nil {
+			m.Keys.trakt = *v
+		}
+	}
+}
+
 // decryptStored picks the right path for a stored ciphertext. v2 envelopes
 // are decrypted directly; pre-v2 rows are decrypted with the legacy KEK
 // derived from JWT_SECRET, then re-encrypted as v2 and persisted so the

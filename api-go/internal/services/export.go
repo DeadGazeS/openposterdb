@@ -308,6 +308,12 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 		if err := keys.UpdateKeys(update); err != nil {
 			return result, err
 		}
+		// Reload from DB so the in-memory cache mirrors everything that's
+		// persisted, not just the keys in this payload. Without this,
+		// newly-imported keys were visible in the admin UI (which reads
+		// the DB directly) but the rating-fetch hot path kept serving
+		// the stale empty set from the cache until container restart.
+		keys.Reload()
 		result.RestoredKeys = len(p.ServiceKeys)
 	}
 
