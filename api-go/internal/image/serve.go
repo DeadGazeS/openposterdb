@@ -346,7 +346,7 @@ func resolveKitsuMalCtx(ctx context.Context, cache *services.MemCache, idType se
 		// UseKitsu=false: try to find an IMDB equivalent via the TheBeastLT
 		// cross-ref (~775 KB, good coverage).
 		if clients.KitsuIMDbMapper != nil {
-			if imdbID := lookupKitsuIMDb(idValue, clients.KitsuIMDbMapper); imdbID != nil {
+			if imdbID := lookupKitsuIMDb(ctx, cache, idValue, clients); imdbID != nil {
 				slog.Debug("kitsu→imdb equivalent translation hit",
 					"kitsu_id_or_slug", idValue,
 					"imdb_id", *imdbID)
@@ -386,18 +386,25 @@ func resolveKitsuMalCtx(ctx context.Context, cache *services.MemCache, idType se
 // lookupKitsuIMDb accepts either a numeric Kitsu id or a slug. Numeric
 // values are looked up directly; slug values are first resolved to a
 // numeric id via the Kitsu slug-filter endpoint.
-func lookupKitsuIMDb(idOrSlug string, mapper *services.KitsuIMDbMapper) *string {
+func lookupKitsuIMDb(ctx context.Context, cache *services.MemCache, idOrSlug string, clients services.IDClients) *string {
+	mapper := clients.KitsuIMDbMapper
 	if mapper == nil || idOrSlug == "" {
 		return nil
 	}
 	if kitsuID, parseErr := strconv.ParseUint(idOrSlug, 10, 64); parseErr == nil && kitsuID > 0 {
 		return mapper.LookupIMDB(kitsuID)
 	}
-	// Slug path: would need a separate KitsuClient.GetAnimeBySlug call to
-	// resolve the slug first; for the IMDB translation we accept the
-	// limitation that slug IDs only translate when the user has supplied
-	// a numeric id previously cached (the slug→numeric bridge is a TODO).
-	return nil
+	// Slug (e.g. "fairy-tail-2018"): the TheBeastLT table is keyed by the
+	// numeric id, so resolve the slug through the cached Kitsu lookup first.
+	// The direct-artwork fallback after a miss reuses the same cache entry.
+	if clients.Kitsu == nil {
+		return nil
+	}
+	r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeKitsu, idOrSlug, clients)
+	if err != nil || r == nil || r.KitsuID == nil {
+		return nil
+	}
+	return mapper.LookupIMDB(*r.KitsuID)
 }
 
 // resolveStandardCtx is the standard TMDB/IMDb/TVDB pipeline — strict call

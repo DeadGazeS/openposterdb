@@ -225,6 +225,8 @@ func (crossRefStub) RoundTrip(req *http.Request) (*http.Response, error) {
 			return jsonResp(`{"data":[{"id":"412","type":"mappings","relationships":{"item":{"data":{"type":"anime","id":"3936"}}}}]}`), nil
 		}
 		return jsonResp(`{"data":[{"id":"412","type":"mappings","relationships":{"item":{"links":{"related":"https://kitsu.io/api/edge/mappings/412/item"}}}}]}`), nil
+	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/anime") && req.URL.Query().Get("filter[slug]") == "fmab":
+		return jsonResp(`{"data":[{"id":"3936","type":"anime","attributes":{"slug":"fmab","canonicalTitle":"FMA:B","subtype":"TV","posterImage":{"original":"https://kitsu.test/poster.jpg"},"coverImage":{"original":"https://kitsu.test/cover.jpg"}}}],"included":[]}`), nil
 	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/anime/3936"):
 		return jsonResp(`{"data":{"id":"3936","type":"anime","attributes":{"slug":"fmab","canonicalTitle":"FMA:B","subtype":"TV","startDate":"2009-04-05","posterImage":{"original":"https://kitsu.test/poster.jpg"},"coverImage":{"original":"https://kitsu.test/cover.jpg"}}},"included":[{"id":"1","type":"mappings","attributes":{"externalSite":"myanimelist/anime","externalId":"5114"}}]}`), nil
 	case req.URL.Host == "graphql.anilist.co":
@@ -489,5 +491,22 @@ func TestResolverTitles(t *testing.T) {
 	in := kitsuResolved() // no Title set
 	if out := p.withTitleIdentity(in); out.Title == nil || *out.Title != "The Shawshank Redemption" {
 		t.Errorf("cross-ref title fallback: got %v, want the TMDB title", out.Title)
+	}
+}
+
+// TestKitsuSlugTranslatesWithToggleOff: with "Use Kitsu artwork" off, a
+// Kitsu slug is translated to its IMDb/TMDB title like a numeric id
+// (previously only numeric ids translated; slugs fell back to Kitsu art).
+func TestKitsuSlugTranslatesWithToggleOff(t *testing.T) {
+	p := newCrossRefParams(t)
+	clients := services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, KitsuIMDbMapper: p.KitsuIMDbMapper}
+	for _, id := range []string{"3936", "fmab"} {
+		r, err := resolveKitsuMalCtx(context.Background(), nil, services.IDTypeKitsu, id, clients, false, true)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if r.SourceProvider != "" || r.TMDbID != 278 {
+			t.Errorf("%s: got provider=%q tmdb=%d, want the TMDB title 278", id, r.SourceProvider, r.TMDbID)
+		}
 	}
 }
