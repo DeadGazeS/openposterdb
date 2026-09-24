@@ -148,8 +148,11 @@ func TestHighResIconLoad(t *testing.T) {
 	loadTestFont(t)
 	// LoadIcons is a no-op after the first call, so build the cache directly.
 	// Assets live relative to the repo root; tests run from the package dir.
+	// t.Chdir restores the working directory when the test ends — a plain
+	// os.Chdir leaked into every later test and made the font-relative ones
+	// (e.g. TestTextInkBBoxMatchesPixels) silently skip.
 	if _, err := os.Stat("../../assets/icons/highRes"); err == nil {
-		os.Chdir("../..")
+		t.Chdir("../..")
 	}
 	iconCacheMu.Lock()
 	loadHighResIcons()
