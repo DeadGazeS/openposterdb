@@ -24,8 +24,8 @@ const theBeastLTKitsuIMDbURL = "https://raw.githubusercontent.com/TheBeastLT/str
 // O(1) on the in-memory map; the underlying array is parsed once on Load
 // and never touched again. The mapper is safe for concurrent reads.
 type KitsuIMDbMapper struct {
-	HTTP   *http.Client
-	mu     sync.RWMutex
+	HTTP    *http.Client
+	mu      sync.RWMutex
 	byKitsu map[uint64]string // kitsu anime id → imdb id ("tt..." prefix)
 	loaded  bool
 }

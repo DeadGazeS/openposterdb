@@ -39,12 +39,12 @@ func NewKitsuClient(httpClient *http.Client) *KitsuClient {
 // posterImage.original + coverImage.original) so the resolved result can
 // drive poster/backdrop rendering without going back through TMDB.
 type KitsuAnime struct {
-	ID                   uint64
-	Slug                 string
-	CanonicalTitle       string
-	Subtype              string
-	PosterImageOriginal  *string
-	CoverImageOriginal   *string
+	ID                  uint64
+	Slug                string
+	CanonicalTitle      string
+	Subtype             string
+	PosterImageOriginal *string
+	CoverImageOriginal  *string
 }
 
 // KitsuMapping is one entry in the `included` array when include=mappings
@@ -133,9 +133,9 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 
 	var idNum uint64
 	var attrs struct {
-		ID                  uint64 `json:"id"`
-		Type                string `json:"type"`
-		Attributes          struct {
+		ID         uint64 `json:"id"`
+		Type       string `json:"type"`
+		Attributes struct {
 			Slug           string `json:"slug"`
 			CanonicalTitle string `json:"canonicalTitle"`
 			Subtype        string `json:"subtype"`

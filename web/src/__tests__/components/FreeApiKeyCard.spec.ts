@@ -5,6 +5,7 @@ import FreeApiKeyCard from '@/components/FreeApiKeyCard.vue'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { DEFAULT_RATINGS_ORDER } from '@/lib/constants'
+import { idTypeExample } from '@/lib/idPlaceholders'
 import type { FreeKeyDefaults } from '@/lib/settings'
 
 vi.mock('@/stores/auth', async (importOriginal) => {
@@ -291,13 +292,13 @@ describe('FreeApiKeyCard', () => {
     const wrapper = mountCard(true)
 
     const getPlaceholder = () => wrapper.find('input#free-id-value').attributes('placeholder')
-    expect(getPlaceholder()).toBe('tt0013442')
+    expect(getPlaceholder()).toBe(idTypeExample('imdb').value)
 
     await setSelectById(wrapper, 'free-id-type', 'tmdb')
-    expect(getPlaceholder()).toBe('movie-872585 or episode-1396-S1E1')
+    expect(getPlaceholder()).toBe(idTypeExample('tmdb').value)
 
     await setSelectById(wrapper, 'free-id-type', 'tvdb')
-    expect(getPlaceholder()).toBe('253573')
+    expect(getPlaceholder()).toBe(idTypeExample('tvdb').value)
   })
 
   it('resets poster-only controls when switching away from poster', async () => {

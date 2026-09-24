@@ -122,10 +122,10 @@ type ResolvedID struct {
 // KitsuIMDbMapper is optional too — when nil, the "find IMDB equivalent
 // via TheBeastLT cross-ref" step is silently skipped.
 type IDClients struct {
-	TMDB             *TmdbClient
-	Kitsu            *KitsuClient
-	AniList          *AniListClient
-	KitsuIMDbMapper  *KitsuIMDbMapper
+	TMDB            *TmdbClient
+	Kitsu           *KitsuClient
+	AniList         *AniListClient
+	KitsuIMDbMapper *KitsuIMDbMapper
 }
 
 func FormatTMDbIDValue(tmdbID uint64, mediaType MediaType, episode *EpisodeInfo) string {

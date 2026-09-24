@@ -27,9 +27,9 @@ func HandleListKeys(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 		}
 
 		type keyResp struct {
-			ID         int64   `json:"id"`
-			Name       string  `json:"name"`
-			KeyPrefix  string  `json:"key_prefix"`
+			ID        int64  `json:"id"`
+			Name      string `json:"name"`
+			KeyPrefix string `json:"key_prefix"`
 			// Key holds the raw key, decrypted from the api_keys.encrypted_key
 			// column. Empty when the row pre-dates the encrypted_key column
 			// (raw is gone with the dismissed create banner) — the frontend
@@ -217,22 +217,22 @@ type keySettingsUpdate struct {
 	UseMAL   *bool `json:"use_mal"`
 
 	// Text/badge/logo/badge-alpha sizes (#10.1 badge_size + #10.2 the rest).
-	PosterTextSize    *int32 `json:"poster_text_size"`
-	LogoTextSize      *int32 `json:"logo_text_size"`
-	BackdropTextSize  *int32 `json:"backdrop_text_size"`
-	EpisodeTextSize   *int32 `json:"episode_text_size"`
-	PosterBadgeSize   *int32 `json:"poster_badge_size"`
-	LogoBadgeSize     *int32 `json:"logo_badge_size"`
-	BackdropBadgeSize *int32 `json:"backdrop_badge_size"`
-	EpisodeBadgeSize  *int32 `json:"episode_badge_size"`
-	PosterLogoSize    *int32 `json:"poster_logo_size"`
-	LogoLogoSize      *int32 `json:"logo_logo_size"`
-	BackdropLogoSize  *int32 `json:"backdrop_logo_size"`
-	EpisodeLogoSize   *int32 `json:"episode_logo_size"`
-	PosterBadgeAlpha  *int32 `json:"poster_badge_alpha"`
-	LogoBadgeAlpha    *int32 `json:"logo_badge_alpha"`
+	PosterTextSize     *int32 `json:"poster_text_size"`
+	LogoTextSize       *int32 `json:"logo_text_size"`
+	BackdropTextSize   *int32 `json:"backdrop_text_size"`
+	EpisodeTextSize    *int32 `json:"episode_text_size"`
+	PosterBadgeSize    *int32 `json:"poster_badge_size"`
+	LogoBadgeSize      *int32 `json:"logo_badge_size"`
+	BackdropBadgeSize  *int32 `json:"backdrop_badge_size"`
+	EpisodeBadgeSize   *int32 `json:"episode_badge_size"`
+	PosterLogoSize     *int32 `json:"poster_logo_size"`
+	LogoLogoSize       *int32 `json:"logo_logo_size"`
+	BackdropLogoSize   *int32 `json:"backdrop_logo_size"`
+	EpisodeLogoSize    *int32 `json:"episode_logo_size"`
+	PosterBadgeAlpha   *int32 `json:"poster_badge_alpha"`
+	LogoBadgeAlpha     *int32 `json:"logo_badge_alpha"`
 	BackdropBadgeAlpha *int32 `json:"backdrop_badge_alpha"`
-	EpisodeBadgeAlpha *int32 `json:"episode_badge_alpha"`
+	EpisodeBadgeAlpha  *int32 `json:"episode_badge_alpha"`
 
 	// Badge per-axis dimensions (#10.2).
 	PosterBadgeWidth    *int32 `json:"poster_badge_width"`
@@ -346,48 +346,48 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 // APIKeySettings' UnmarshalJSON normalises the layout objects to their stored
 // JSON-string form.
 func apiKeySettingsFromEffective(ctx context.Context, db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
-  eff := services.GetEffectiveRenderSettingsCtx(ctx, db, apiKeyID, nil)
-  data, err := json.Marshal(&eff)
-  if err != nil {
-    // Marshal+Unmarshal converts RenderSettings → APIKeySettings so the merge
-    // step has zero-valued defaults for fields the client omitted. If either
-    // step fails (e.g. an unmarshallable shape slipped into the effective
-    // settings, or a regression in the custom UnmarshalJSON) we'd rather
-    // persist only the client's payload than 500 the whole PUT and leave the
-    // user locked out of saving. Log and return a zero-valued row so
-    // mergeKeySettingsUpdate starts from empty defaults; the frontend's
-    // Body still carries every field it sent and lands in merged.
-    slog.Warn("apiKeySettingsFromEffective: marshal failed, falling back to empty defaults", "api_key_id", apiKeyID, "err", err)
-    return &services.APIKeySettings{}, nil
-  }
-  var s services.APIKeySettings
-  if err := json.Unmarshal(data, &s); err != nil {
-    slog.Warn("apiKeySettingsFromEffective: convert failed, falling back to empty defaults", "api_key_id", apiKeyID, "err", err)
-    return &services.APIKeySettings{}, nil
-  }
-  return &s, nil
+	eff := services.GetEffectiveRenderSettingsCtx(ctx, db, apiKeyID, nil)
+	data, err := json.Marshal(&eff)
+	if err != nil {
+		// Marshal+Unmarshal converts RenderSettings → APIKeySettings so the merge
+		// step has zero-valued defaults for fields the client omitted. If either
+		// step fails (e.g. an unmarshallable shape slipped into the effective
+		// settings, or a regression in the custom UnmarshalJSON) we'd rather
+		// persist only the client's payload than 500 the whole PUT and leave the
+		// user locked out of saving. Log and return a zero-valued row so
+		// mergeKeySettingsUpdate starts from empty defaults; the frontend's
+		// Body still carries every field it sent and lands in merged.
+		slog.Warn("apiKeySettingsFromEffective: marshal failed, falling back to empty defaults", "api_key_id", apiKeyID, "err", err)
+		return &services.APIKeySettings{}, nil
+	}
+	var s services.APIKeySettings
+	if err := json.Unmarshal(data, &s); err != nil {
+		slog.Warn("apiKeySettingsFromEffective: convert failed, falling back to empty defaults", "api_key_id", apiKeyID, "err", err)
+		return &services.APIKeySettings{}, nil
+	}
+	return &s, nil
 }
 
 // loadKeySettingsBase returns the stored settings row for a key, or the
 // effective (globals-derived) defaults when no row exists yet, so omitted
 // optional fields on a first save get meaningful values instead of zeroes.
 func loadKeySettingsBase(ctx context.Context, db *sql.DB, apiKeyID int64) (*services.APIKeySettings, error) {
-  base, err := services.GetAPIKeySettingsCtx(ctx, db, apiKeyID)
-  if err != nil {
-    // The DB row read failed (transient connection issue, schema drift, or a
-    // row with corrupt stored values that failed to scan). Rather than 500
-    // the PUT and lock the user out of saving, log and fall through to
-    // apiKeySettingsFromEffective, which will also fall back to empty defaults
-    // if its own conversion trips. The merge then layers the client's full
-    // payload over whatever base comes back, so the user's intended values
-    // still land in the row.
-    slog.Warn("loadKeySettingsBase: row read failed, treating as no row", "api_key_id", apiKeyID, "err", err)
-    return apiKeySettingsFromEffective(ctx, db, apiKeyID)
-  }
-  if base == nil {
-    return apiKeySettingsFromEffective(ctx, db, apiKeyID)
-  }
-  return base, nil
+	base, err := services.GetAPIKeySettingsCtx(ctx, db, apiKeyID)
+	if err != nil {
+		// The DB row read failed (transient connection issue, schema drift, or a
+		// row with corrupt stored values that failed to scan). Rather than 500
+		// the PUT and lock the user out of saving, log and fall through to
+		// apiKeySettingsFromEffective, which will also fall back to empty defaults
+		// if its own conversion trips. The merge then layers the client's full
+		// payload over whatever base comes back, so the user's intended values
+		// still land in the row.
+		slog.Warn("loadKeySettingsBase: row read failed, treating as no row", "api_key_id", apiKeyID, "err", err)
+		return apiKeySettingsFromEffective(ctx, db, apiKeyID)
+	}
+	if base == nil {
+		return apiKeySettingsFromEffective(ctx, db, apiKeyID)
+	}
+	return base, nil
 }
 
 // mergeKeySettingsUpdate overlays the client payload onto the stored (or

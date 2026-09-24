@@ -19,7 +19,7 @@ type RatingSource struct {
 }
 
 var (
-SourceMal        = &RatingSource{Key: "mal", Label: "MyAnimeList", CacheChar: 'e', ColorR: 34, ColorG: 60, ColorB: 120}
+	SourceMal        = &RatingSource{Key: "mal", Label: "MyAnimeList", CacheChar: 'e', ColorR: 34, ColorG: 60, ColorB: 120}
 	SourceImdb       = &RatingSource{Key: "imdb", Label: "IMDb", CacheChar: 'i', ColorR: 180, ColorG: 145, ColorB: 15}
 	SourceLetterboxd = &RatingSource{Key: "lb", Label: "Letterboxd", CacheChar: 'l', ColorR: 0, ColorG: 155, ColorB: 88}
 	SourceRt         = &RatingSource{Key: "rt", Label: "Rotten Tomatoes Critics", CacheChar: 'c', ColorR: 185, ColorG: 35, ColorB: 8}

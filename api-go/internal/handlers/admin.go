@@ -192,7 +192,7 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 			return
 		}
 
-page := httpx.ParseIntParam(r, "page", 1)
+		page := httpx.ParseIntParam(r, "page", 1)
 		pageSize := httpx.ParseIntParam(r, "page_size", 50)
 		sortBy := r.URL.Query().Get("sort_by")
 		sortDir := r.URL.Query().Get("sort_dir")

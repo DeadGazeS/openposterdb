@@ -206,17 +206,17 @@ type keyCache struct {
 // LegacyJWTSecret is held for one release so existing v1 ciphertexts can be
 // decrypted and re-encrypted as v2 on first read; drop it in the next release.
 type ServiceKeyManager struct {
-	DB             *sql.DB
-	SecretsKey     []byte
+	DB              *sql.DB
+	SecretsKey      []byte
 	LegacyJWTSecret []byte
-	HTTP           *http.Client
-	Keys           keyCache
-	mu             sync.RWMutex
-	EnvTMDB        bool
-	EnvMDBList     bool
-	EnvOMDB        bool
-	EnvFanart      bool
-	EnvTrakt       bool
+	HTTP            *http.Client
+	Keys            keyCache
+	mu              sync.RWMutex
+	EnvTMDB         bool
+	EnvMDBList      bool
+	EnvOMDB         bool
+	EnvFanart       bool
+	EnvTrakt        bool
 }
 
 type ServiceKeyStatus struct {

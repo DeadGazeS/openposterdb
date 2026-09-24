@@ -110,19 +110,19 @@ describe('ApiKeysView', () => {
     const revealButtons = wrapper.findAll('button[title="Reveal key"]')
     expect(revealButtons.length).toBe(sampleKeys.length)
     // Default (masked) state shows the masked form, not the raw key.
-    expect(wrapper.text()).not.toContain(sampleKeys[0].key)
-    expect(wrapper.text()).not.toContain(sampleKeys[1].key)
+    expect(wrapper.text()).not.toContain(sampleKeys[0]!.key)
+    expect(wrapper.text()).not.toContain(sampleKeys[1]!.key)
     // Each row's masked form is exactly first 4 + "..." + last 4 of the raw.
-    const expectedMask0 = sampleKeys[0].key.slice(0, 4) + '...' + sampleKeys[0].key.slice(-4)
-    const expectedMask1 = sampleKeys[1].key.slice(0, 4) + '...' + sampleKeys[1].key.slice(-4)
+    const expectedMask0 = sampleKeys[0]!.key.slice(0, 4) + '...' + sampleKeys[0]!.key.slice(-4)
+    const expectedMask1 = sampleKeys[1]!.key.slice(0, 4) + '...' + sampleKeys[1]!.key.slice(-4)
     expect(wrapper.text()).toContain(expectedMask0)
     expect(wrapper.text()).toContain(expectedMask1)
 
     for (const btn of revealButtons) await btn.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain(sampleKeys[0].key)
-    expect(wrapper.text()).toContain(sampleKeys[1].key)
+    expect(wrapper.text()).toContain(sampleKeys[0]!.key)
+    expect(wrapper.text()).toContain(sampleKeys[1]!.key)
   })
 
   it('shows "No API keys yet." when empty', async () => {
@@ -467,7 +467,7 @@ describe('ApiKeysView', () => {
     await copyButton!.trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenCalledWith(sampleKeys[0].key)
+    expect(writeText).toHaveBeenCalledWith(sampleKeys[0]!.key)
     // After click, the button label briefly flips to 'Copied'.
     expect(wrapper.text()).toContain('Copied')
   })

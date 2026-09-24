@@ -44,9 +44,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
-          awk -v c="$coverage" 'BEGIN { exit (c < 35) ? 1 : 0 }' \
-            && echo "Coverage $coverage% >= 35%" \
-            || (echo "Coverage $coverage% < 35% (regression: tune COVERAGE_MIN in scripts/test.sh)" && exit 1)
+          awk -v c="$coverage" 'BEGIN { exit (c < 44) ? 1 : 0 }' \
+            && echo "Coverage $coverage% >= 44%" \
+            || (echo "Coverage $coverage% < 44% (regression: threshold must match scripts/test.sh)" && exit 1)
 
       - name: Upload coverage artifact
         if: ${{ !cancelled() }}

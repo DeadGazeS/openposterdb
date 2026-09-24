@@ -56,12 +56,12 @@ const MinExportVersion = 2
 // "openposterdb/settings-encrypted"` so the import endpoint can route it
 // through DecryptPayload instead of treating it as plain JSON.
 type EncryptedExport struct {
-	Kind        string `json:"kind"`
-	Version     int    `json:"version"`
-	KDF         string `json:"kdf"`
-	KDFIterations int  `json:"kdf_iterations"`
-	Salt        string `json:"salt"`
-	Ciphertext  string `json:"ciphertext"`
+	Kind          string `json:"kind"`
+	Version       int    `json:"version"`
+	KDF           string `json:"kdf"`
+	KDFIterations int    `json:"kdf_iterations"`
+	Salt          string `json:"salt"`
+	Ciphertext    string `json:"ciphertext"`
 }
 
 // pbkdf2Iterations is the iteration count for the passphrase-derived KEK.

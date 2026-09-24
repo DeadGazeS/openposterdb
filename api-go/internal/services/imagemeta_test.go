@@ -101,8 +101,8 @@ func TestTouchImageAccess_NoRow(t *testing.T) {
 
 func TestListImageMetaByKind_Sort(t *testing.T) {
 	type columnCase struct {
-		name      string
-		sortBy    string
+		name   string
+		sortBy string
 		// build inserts three rows with ascending keys ["a", "b", "c"] whose
 		// sort-column values are ascending low→high. The test asserts that
 		// ListImageMetaByKind returns them in either the same or the reverse

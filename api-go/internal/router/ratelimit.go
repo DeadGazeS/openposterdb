@@ -22,9 +22,9 @@ type rlEntry struct {
 // rateLimiter holds per-IP token-bucket limiters. Created lazily on first
 // sight of an IP and reaped by SweepIdle after idleTimeout without traffic.
 type rateLimiter struct {
-	perMinute    uint64
-	limiters     sync.Map // map[string]*rlEntry
-	idleTimeout  time.Duration
+	perMinute   uint64
+	limiters    sync.Map // map[string]*rlEntry
+	idleTimeout time.Duration
 }
 
 func newRateLimiter(perMinute uint64) *rateLimiter {

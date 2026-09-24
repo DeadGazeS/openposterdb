@@ -26,9 +26,9 @@ import (
 // poster/cover URLs (AniList coverImage.extraLarge + bannerImage) so the
 // image pipeline doesn't need a TMDB id for anime not covered there.
 type AniListClient struct {
-	HTTP       *http.Client
-	cacheMu    sync.RWMutex
-	imdbByMAL  map[uint64]string // MAL→IMDb lookup cache. "" = negative cache (known missing), missing key = not yet looked up.
+	HTTP      *http.Client
+	cacheMu   sync.RWMutex
+	imdbByMAL map[uint64]string // MAL→IMDb lookup cache. "" = negative cache (known missing), missing key = not yet looked up.
 }
 
 func NewAniListClient(httpClient *http.Client) *AniListClient {
@@ -60,13 +60,13 @@ func extractIMDBFromURL(rawURL string) string {
 // is included so the MAL→IMDb translation source in resolveKitsuMalCtx
 // can pull the IMDb equivalent from AniList when one is listed.
 type AniListMedia struct {
-	AniListID         uint64
-	MALID             uint64
-	TitleRomaji       string
-	TitleEnglish      string
-	CoverImageExtra   *string
-	BannerImage       *string
-	ExternalLinks     []AniListExternalLink
+	AniListID       uint64
+	MALID           uint64
+	TitleRomaji     string
+	TitleEnglish    string
+	CoverImageExtra *string
+	BannerImage     *string
+	ExternalLinks   []AniListExternalLink
 }
 
 // AniListExternalLink is one row of Media.externalLinks. Site is the
@@ -79,9 +79,9 @@ type AniListExternalLink struct {
 type anilistMediaResponse struct {
 	Data struct {
 		Media struct {
-			ID     uint64 `json:"id"`
-			IDMal  uint64 `json:"idMal"`
-			Title  struct {
+			ID    uint64 `json:"id"`
+			IDMal uint64 `json:"idMal"`
+			Title struct {
 				Romaji  string `json:"romaji"`
 				English string `json:"english"`
 			} `json:"title"`

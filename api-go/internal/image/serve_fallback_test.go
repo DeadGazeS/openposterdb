@@ -20,6 +20,7 @@ import (
 //     empty otherwise.
 //   - /tv/{N} → success for any N (series format).
 //   - /movie/{N} → success for any N (movie format).
+//
 // Anything else → empty results, so unspecified cases look like a miss.
 type fallbackStub struct{}
 

@@ -9,6 +9,6 @@ import (
 // files aren't importable from tests). The unexported aliases below keep the
 // main.go call sites unchanged.
 var (
-	schemaSQL   = app.SchemaSQL
-	migrations  = app.Migrations
+	schemaSQL  = app.SchemaSQL
+	migrations = app.Migrations
 )

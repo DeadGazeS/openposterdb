@@ -348,9 +348,9 @@ func TestPreFixImportMergesOntoExisting(t *testing.T) {
 				Settings: &APIKeySettings{
 					// Intentionally zero on badge_size / badge_alpha / edge_inset
 					// to mimic a pre-fix export's missing columns.
-					APIKeyID:  id,
-					Lang:      "en", // explicit override from the export
-					ImageSource: "f",
+					APIKeyID:     id,
+					Lang:         "en", // explicit override from the export
+					ImageSource:  "f",
 					RatingsLimit: 9,
 				},
 			},
@@ -438,12 +438,12 @@ func TestCurrentVersionImportUpsertsNormally(t *testing.T) {
 			{
 				Name: "test-key",
 				Settings: &APIKeySettings{
-					APIKeyID:         id,
-					Lang:             "de",
-					PosterBadgeSize:  130,
-					LogoBadgeSize:    120,
+					APIKeyID:          id,
+					Lang:              "de",
+					PosterBadgeSize:   130,
+					LogoBadgeSize:     120,
 					BackdropBadgeSize: 110,
-					EpisodeBadgeSize: 100,
+					EpisodeBadgeSize:  100,
 				},
 			},
 		},
