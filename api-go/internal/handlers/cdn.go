@@ -33,7 +33,9 @@ type CDNLookup interface {
 // requests without restarting the server.
 func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		// HEAD is accepted because HandleImage's CDN redirect keeps the
+		// method, so a HEAD probe on the authed URL lands here.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			httpx.WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
 			return
 		}

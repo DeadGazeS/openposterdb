@@ -181,6 +181,22 @@ func TestCDNHandler_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestCDNHandler_HeadAllowed proves HEAD reaches the handler (not 405): a
+// HEAD probe on the authed URL follows HandleImage's CDN redirect here.
+func TestCDNHandler_HeadAllowed(t *testing.T) {
+	reg := services.NewHashRegistry(0)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
+		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
+	})
+	req := httptest.NewRequest("HEAD", "/c/unknown/imdb/poster-default/x.jpg", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("HEAD unknown hash: got %d want 404 (same as GET)", rec.Code)
+	}
+}
+
 // TestCDNHandler_InvalidID proves the path validator rejects ".." and
 // similar traversal attempts (ValidateIDValue).
 func TestCDNHandler_InvalidID(t *testing.T) {

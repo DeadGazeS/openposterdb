@@ -654,3 +654,25 @@ func TestRenderSettingFieldsSpecIsComplete(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleImage_HeadAllowed proves HEAD gets the same status as GET (not
+// 405) so clients that probe poster URLs (AIOStreams' poster redirect API)
+// don't fall back to unrated artwork. POST is still rejected.
+func TestHandleImage_HeadAllowed(t *testing.T) {
+	h := HandleImage(func() ImageDeps { return ImageDeps{} }, func() bool { return false })
+	for _, tc := range []struct {
+		method string
+		want   int
+	}{
+		{"GET", http.StatusServiceUnavailable},
+		{"HEAD", http.StatusServiceUnavailable},
+		{"POST", http.StatusMethodNotAllowed},
+	} {
+		req := httptest.NewRequest(tc.method, "/key/imdb/poster-default/tt0000001.jpg", nil)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s: got %d want %d", tc.method, rec.Code, tc.want)
+		}
+	}
+}

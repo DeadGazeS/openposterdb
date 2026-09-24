@@ -59,7 +59,10 @@ type ImageDeps struct {
 // sees the new clients — bug fixed 2026-08-06).
 func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		// HEAD is accepted so clients that probe a poster URL before using it
+		// (e.g. AIOStreams' poster redirect API) get the same status as GET;
+		// net/http drops the body on HEAD.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
