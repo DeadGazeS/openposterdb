@@ -70,7 +70,9 @@ func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType, sortBy, 
 	}
 	defer rows.Close()
 
-	var items []ImageMetaItem
+	// Non-nil so an empty page encodes as [] (not null) — the admin list
+	// view iterates items directly.
+	items := make([]ImageMetaItem, 0)
 	for rows.Next() {
 		var item ImageMetaItem
 		if err := rows.Scan(&item.CacheKey, &item.ReleaseDate, &item.ImageType, &item.CreatedAt, &item.UpdatedAt, &item.LastAccessed); err != nil {

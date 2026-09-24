@@ -368,7 +368,9 @@ interface Group {
 const groups = computed<Group[]>(() => {
   if (!data.value) return []
   const map = new Map<string, ImageMeta[]>()
-  for (const item of data.value.items) {
+  // `?? []` guards an `"items": null` response (older backends encoded an
+  // empty page as null, which threw here and left stale rows on screen).
+  for (const item of data.value.items ?? []) {
     const k = groupKeyFor(item)
     const list = map.get(k)
     if (list) list.push(item)

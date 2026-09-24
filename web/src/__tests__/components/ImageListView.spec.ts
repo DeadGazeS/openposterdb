@@ -167,6 +167,31 @@ describe('ImageListView', () => {
     expect(refreshButton).toBeDefined()
   })
 
+  it('clears stale rows when a refresh returns an empty page (items: null)', async () => {
+    const mocks = makeMocks()
+    mocks.listFn.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(sampleResponse),
+    })
+    const wrapper = mountView(mocks)
+    await flushPromises()
+    expect(wrapper.text()).toContain('tt0111161')
+
+    // After "Clear posters", older backends answered the refetch with
+    // items: null — that used to throw in the groups computed and leave the
+    // previous rows on screen.
+    mocks.listFn.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ items: null, total: 0, page: 1, page_size: 50 }),
+    })
+    const refreshButton = wrapper.findAll('button').find((b) => b.text().includes('Refresh'))
+    await refreshButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('tt0111161')
+    expect(wrapper.text()).toContain('No posters cached yet.')
+  })
+
   it('has a fetch button', async () => {
     const mocks = makeMocks()
     mocks.listFn.mockResolvedValue({

@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -344,4 +345,23 @@ func keys(items []ImageMetaItem) []string {
 		out[i] = it.CacheKey
 	}
 	return out
+}
+
+// TestListImageMetaByKind_EmptyIsNonNil guards the admin list contract: an
+// empty kind (e.g. right after "Clear posters") must return a non-nil empty
+// slice so the handler encodes "items": [] rather than null — the web list
+// view iterates items directly and kept showing stale rows on null.
+func TestListImageMetaByKind_EmptyIsNonNil(t *testing.T) {
+	db := newImageMetaTestDB(t)
+	items, total, err := ListImageMetaByKind(db, "poster", "", "", 1, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items == nil || len(items) != 0 || total != 0 {
+		t.Fatalf("got items=%#v total=%d, want non-nil empty slice and 0", items, total)
+	}
+	b, _ := json.Marshal(map[string]any{"items": items})
+	if string(b) != `{"items":[]}` {
+		t.Errorf("encoded %s, want {\"items\":[]}", b)
+	}
 }
