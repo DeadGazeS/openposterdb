@@ -530,7 +530,7 @@ let backdropPreviewTimer: ReturnType<typeof setTimeout> | null = null
 let episodePreviewTimer: ReturnType<typeof setTimeout> | null = null
 
 function updatePosterPreview() {
-  fetchPreviewImage(posterPreview.value, () => props.fetchPreview('poster', {
+  void fetchPreviewImage(posterPreview.value, () => props.fetchPreview('poster', {
     ratingsLimit: posterTotal.value,
     ratingsOrder: editRatingsOrder.value.join(','),
     ratingsExclude: editRatingsExclude.value.join(','),
@@ -550,7 +550,7 @@ function updatePosterPreview() {
 }
 
 function updateLogoPreview() {
-  fetchPreviewImage(logoPreview.value, () => props.fetchPreview('logo', {
+  void fetchPreviewImage(logoPreview.value, () => props.fetchPreview('logo', {
     ratingsLimit: logoTotal.value,
     ratingsOrder: editRatingsOrder.value.join(','),
     ratingsExclude: editRatingsExclude.value.join(','),
@@ -568,7 +568,7 @@ function updateLogoPreview() {
 }
 
 function updateBackdropPreview() {
-  fetchPreviewImage(backdropPreview.value, () => props.fetchPreview('backdrop', {
+  void fetchPreviewImage(backdropPreview.value, () => props.fetchPreview('backdrop', {
     ratingsLimit: backdropTotal.value,
     ratingsOrder: editRatingsOrder.value.join(','),
     ratingsExclude: editRatingsExclude.value.join(','),
@@ -589,7 +589,7 @@ function updateBackdropPreview() {
 }
 
 function updateEpisodePreview() {
-  fetchPreviewImage(episodePreview.value, () => props.fetchPreview('episode', {
+  void fetchPreviewImage(episodePreview.value, () => props.fetchPreview('episode', {
     ratingsLimit: episodeTotal.value,
     ratingsOrder: editRatingsOrder.value.join(','),
     ratingsExclude: editRatingsExclude.value.join(','),
@@ -810,7 +810,7 @@ function toggleExclude(key: string, checked: boolean) {
           :model-value="editLang"
           @update:model-value="editLang = $event as string"
         >
-          <SelectTrigger :id="inputId('lang')" class="max-w-[200px]" data-testid="lang-select">
+          <SelectTrigger :id="inputId('lang')" class="max-w-50" data-testid="lang-select">
             <SelectValue placeholder="Select language" />
           </SelectTrigger>
           <SelectContent>
@@ -877,7 +877,7 @@ function toggleExclude(key: string, checked: boolean) {
           :disabled="!animeArtworkActive"
           @update:model-value="editAnimeArtwork = $event as AnimeArtwork"
         >
-          <SelectTrigger :id="inputId('anime-artwork')" class="max-w-[220px]" data-testid="anime-artwork-select">
+          <SelectTrigger :id="inputId('anime-artwork')" class="max-w-55" data-testid="anime-artwork-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
