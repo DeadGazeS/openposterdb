@@ -388,6 +388,63 @@ describe('ApiKeysView', () => {
     expect(mockKeysApi.delete).not.toHaveBeenCalled()
   })
 
+  it('shows a Connect button for each key that opens the MediaServerConnect panel', async () => {
+    mockKeysApi.list.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(sampleKeys),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const connectButton = wrapper.find(`button[data-testid="key-connect-${sampleKeys[0]!.id}"]`)
+    expect(connectButton.exists()).toBe(true)
+
+    expect(wrapper.findComponent({ name: 'MediaServerConnect' }).exists()).toBe(false)
+    await connectButton.trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.findComponent({ name: 'MediaServerConnect' })
+    expect(panel.exists()).toBe(true)
+    expect(panel.props('apiKey')).toBe(sampleKeys[0]!.key)
+    expect(panel.props('keyPrefix')).toBe(sampleKeys[0]!.key_prefix)
+  })
+
+  it('Connect and Settings panels are mutually exclusive per row', async () => {
+    mockKeysApi.list.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(sampleKeys),
+    })
+    mockKeysApi.getSettings.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(null),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      toggleSettings?: (id: number) => Promise<void>
+      toggleConnect?: (id: number) => void
+    }
+
+    // Open Settings first, then Connect on the same row — Settings must close.
+    await vm.toggleSettings!(sampleKeys[0]!.id)
+    await flushPromises()
+    vm.toggleConnect!(sampleKeys[0]!.id)
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'MediaServerConnect' }).exists()).toBe(true)
+    expect(wrapper.find(`[data-testid="key-settings-${sampleKeys[0]!.id}"]`).exists()).toBe(true)
+    // RenderSettingsForm panel is gone; only the Connect panel is showing.
+    expect(wrapper.findComponent({ name: 'RenderSettingsForm' }).exists()).toBe(false)
+
+    // Re-opening Settings on the same row must close Connect.
+    await vm.toggleSettings!(sampleKeys[0]!.id)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'MediaServerConnect' }).exists()).toBe(false)
+  })
+
   it('copies the revealed key to the clipboard and shows feedback', async () => {
     mockKeysApi.list.mockResolvedValue({
       ok: true,

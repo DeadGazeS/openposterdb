@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useSavedFlash } from '@/composables/useSavedFlash'
+import { useCopyToClipboard } from '@/composables/useCopyToClipboard'
 import { parseApiError, okOrThrow } from '@/lib/api-error'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { keysApi, adminApi } from '@/lib/api'
 import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
+import MediaServerConnect from '@/components/MediaServerConnect.vue'
 import type { RenderSettings } from '@/lib/settings'
 import { maskKey } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Settings, Plus, Loader2, Check } from 'lucide-vue-next'
+import { Settings, Plus, Loader2, Check, Plug } from 'lucide-vue-next'
 
 interface ApiKey {
   id: number
@@ -54,33 +56,9 @@ function toggleKeyReveal(id: number) {
 
 // Per-row "Copy" feedback ('idle' | 'copied'). Briefly flips to 'copied' after
 // a successful clipboard write so the user gets visual confirmation.
-const copyState = ref<Record<number, 'idle' | 'copied'>>({})
-async function copyKey(raw: string, id: number) {
-  try {
-    await navigator.clipboard.writeText(raw)
-    copyState.value[id] = 'copied'
-    setTimeout(() => {
-      copyState.value = { ...copyState.value, [id]: 'idle' }
-    }, 1500)
-  } catch {
-    // Older browsers / non-secure contexts — fall back to the legacy
-    // document.execCommand path so the copy still works.
-    const el = document.createElement('textarea')
-    el.value = raw
-    el.style.position = 'fixed'
-    el.style.opacity = '0'
-    document.body.appendChild(el)
-    el.select()
-    try {
-      document.execCommand('copy')
-      copyState.value[id] = 'copied'
-      setTimeout(() => {
-        copyState.value = { ...copyState.value, [id]: 'idle' }
-      }, 1500)
-    } finally {
-      document.body.removeChild(el)
-    }
-  }
+const { copyState, copy: copyToClipboard } = useCopyToClipboard()
+function copyKey(raw: string, id: number) {
+  return copyToClipboard(raw, String(id))
 }
 
 // Per-key settings state
@@ -88,7 +66,16 @@ const expandedKey = ref<number | null>(null)
 const keySettings = reactive<Record<number, RenderSettings>>({})
 const settingsLoading = reactive<Record<number, boolean>>({})
 
+// Per-key "Connect a media server" panel — mutually exclusive with the
+// settings panel above (only one panel open per row at a time).
+const connectKeyId = ref<number | null>(null)
+function toggleConnect(id: number) {
+  expandedKey.value = null
+  connectKeyId.value = connectKeyId.value === id ? null : id
+}
+
 async function toggleSettings(id: number) {
+  connectKeyId.value = null
   if (expandedKey.value === id) {
     expandedKey.value = null
     return
@@ -276,6 +263,9 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
             </p>
           </div>
           <div class="flex items-center gap-2">
+            <Button variant="outline" size="sm" :data-testid="`key-connect-${key.id}`" title="Connect a media server" @click="toggleConnect(key.id)">
+              <Plug class="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="sm" :data-testid="`key-settings-${key.id}`" @click="toggleSettings(key.id)">
               <Settings class="h-4 w-4" />
             </Button>
@@ -298,6 +288,11 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
             :fetch-preview="adminApi.preview"
             :tab-key="`key-${key.id}-tab`"
                                               />
+        </div>
+
+        <!-- Inline "Connect a media server" panel -->
+        <div v-else-if="connectKeyId === key.id" class="border-t px-3 py-4 bg-muted/30">
+          <MediaServerConnect :api-key="key.key" :key-prefix="key.key_prefix" />
         </div>
       </div>
     </div>
