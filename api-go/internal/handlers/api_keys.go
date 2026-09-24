@@ -779,7 +779,11 @@ func HandleResetKeySettings(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func HandleSelfKeyInfo(db *sql.DB) http.HandlerFunc {
+// HandleSelfKeyInfo returns the logged-in API key's name, prefix and — when
+// the row has an encrypted_key — the raw key itself, so the self-service
+// "Connect a media server" panel can fill in real URLs. The caller already
+// proved possession of this exact key at /api/auth/key-login.
+func HandleSelfKeyInfo(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpx.WriteError(w, 405, "Method not allowed")
@@ -798,10 +802,19 @@ func HandleSelfKeyInfo(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		httpx.WriteJSON(w, 200, map[string]any{
+		resp := map[string]any{
 			"name":       k.Name,
 			"key_prefix": k.KeyPrefix,
-		})
+		}
+		if k.EncryptedKey != nil && *k.EncryptedKey != "" {
+			raw, decErr := services.DecryptAPIKey(*k.EncryptedKey, secretsKey)
+			if decErr != nil {
+				slog.Error("failed to decrypt api key for self info response", "id", k.ID, "error", decErr)
+			} else {
+				resp["key"] = raw
+			}
+		}
+		httpx.WriteJSON(w, 200, resp)
 	}
 }
 

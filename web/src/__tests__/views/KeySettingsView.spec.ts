@@ -41,6 +41,9 @@ function mountView() {
         Button: {
           template: '<button @click="$emit(\'click\')"><slot /></button>',
           props: ['disabled', 'variant', 'size'],
+          // Declared so the parent's @click isn't also bound as a native
+          // listener on the root <button> (which would fire it twice).
+          emits: ['click'],
         },
         Input: {
           template:
@@ -50,6 +53,10 @@ function mountView() {
         RenderSettingsForm: {
           template: '<div data-testid="settings-form">RenderSettingsForm</div>',
           props: ['settings', 'uid', 'loadSettings', 'saveSettings', 'resetSettings'],
+        },
+        MediaServerConnect: {
+          template: '<div data-testid="media-server-connect">{{ apiKey }}|{{ keyPrefix }}</div>',
+          props: ['apiKey', 'keyPrefix'],
         },
       },
     },
@@ -129,5 +136,42 @@ describe('KeySettingsView', () => {
     await flushPromises()
 
     expect(wrapper.find('h3').text()).toContain('Individual Image Settings')
+  })
+
+  it('Connect toggle opens the media-server panel with the raw key from /api/key/me', async () => {
+    mockSelfApi.getInfo.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ name: 'k', key_prefix: 'abcd1234', key: 'abcd1234-raw-key' }),
+    })
+    mockSelfApi.getSettings.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(sampleSettings),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="media-server-connect"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="self-connect-button"]').trigger('click')
+    expect(wrapper.find('[data-testid="media-server-connect"]').text()).toBe('abcd1234-raw-key|abcd1234')
+    await wrapper.find('[data-testid="self-connect-button"]').trigger('click')
+    expect(wrapper.find('[data-testid="media-server-connect"]').exists()).toBe(false)
+  })
+
+  it('passes an empty key for legacy rows so the panel keeps the {api_key} placeholder', async () => {
+    mockSelfApi.getInfo.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ name: 'k', key_prefix: 'abcd1234' }),
+    })
+    mockSelfApi.getSettings.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(sampleSettings),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('[data-testid="self-connect-button"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="media-server-connect"]').text()).toBe('|abcd1234')
   })
 })

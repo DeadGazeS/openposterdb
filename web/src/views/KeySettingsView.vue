@@ -5,9 +5,10 @@ import { useAuthStore } from '@/stores/auth'
 import { selfApi } from '@/lib/api'
 import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
+import MediaServerConnect from '@/components/MediaServerConnect.vue'
 import type { RenderSettings } from '@/lib/settings'
 import { Button } from '@/components/ui/button'
-import { BookOpen, Check, Loader2 } from 'lucide-vue-next'
+import { BookOpen, Check, Loader2, Plug } from 'lucide-vue-next'
 import RefreshButton from '@/components/RefreshButton.vue'
 import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
 
@@ -16,6 +17,10 @@ const router = useRouter()
 
 const keyName = ref('')
 const keyPrefix = ref('')
+// Raw key from GET /api/key/me; '' for legacy rows without encrypted_key
+// (MediaServerConnect then keeps {api_key} as a placeholder).
+const apiKey = ref('')
+const showConnect = ref(false)
 const settings = ref<RenderSettings | null>(null)
 const settingsLoading = ref(true)
 const initError = ref('')
@@ -42,6 +47,7 @@ async function loadInitial() {
     const info = await infoRes.json()
     keyName.value = info.name
     keyPrefix.value = info.key_prefix
+    apiKey.value = info.key ?? ''
     auth.apiKeyInfo = { name: info.name, key_prefix: info.key_prefix }
 
     settings.value = await settingsRes.json()
@@ -147,6 +153,16 @@ async function handleReset() {
           <Loader2 v-if="formRef?.saving" class="size-4 animate-spin mr-1" />
           Save
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="self-connect-button"
+          :aria-expanded="showConnect"
+          @click="showConnect = !showConnect"
+        >
+          <Plug class="h-4 w-4" />
+          Connect a media server
+        </Button>
         <RefreshButton :fetching="userRefreshing" @refresh="handleRefresh" />
         <Button v-if="auth.disablePublicPages" as-child variant="outline" size="sm">
           <router-link to="/docs">
@@ -167,6 +183,10 @@ async function handleReset() {
       >
         Using Global Settings
       </span>
+    </div>
+
+    <div v-if="showConnect && keyPrefix" class="rounded-md border px-3 py-4 bg-muted/30" data-testid="self-connect-panel">
+      <MediaServerConnect :api-key="apiKey" :key-prefix="keyPrefix" />
     </div>
 
     <div v-if="settingsLoading" class="text-sm text-muted-foreground">Loading settings...</div>

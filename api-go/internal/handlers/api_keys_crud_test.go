@@ -364,7 +364,7 @@ func TestKeyMe_ValidKey_200(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/key/me", nil)
 	req = WithAPIKeyUser(req, id)
 	rec := httptest.NewRecorder()
-	HandleSelfKeyInfo(db)(rec, req)
+	HandleSelfKeyInfo(db, testSecretsKey)(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("status: got %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -378,6 +378,40 @@ func TestKeyMe_ValidKey_200(t *testing.T) {
 	if resp["key_prefix"] != prefix {
 		t.Errorf("key_prefix: got %v, want %s", resp["key_prefix"], prefix)
 	}
+	// crudSeedKey writes no encrypted_key (legacy row), so no raw key.
+	if _, ok := resp["key"]; ok {
+		t.Errorf("legacy row: key should be omitted, got %v", resp["key"])
+	}
+}
+
+// TestKeyMe_ReturnsRawKey guards the self-service Connect panel: a row with
+// an encrypted_key returns the decrypted raw key.
+func TestKeyMe_ReturnsRawKey(t *testing.T) {
+	db := crudTestDB(t)
+	crudSeedAdmin(t, db)
+	id, raw, _ := crudSeedKey(t, db, "self-key", 1)
+	enc, err := services.EncryptAPIKey(raw, testSecretsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE api_keys SET encrypted_key = ? WHERE id = ?", enc, id); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/key/me", nil)
+	req = WithAPIKeyUser(req, id)
+	rec := httptest.NewRecorder()
+	HandleSelfKeyInfo(db, testSecretsKey)(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status: got %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["key"] != raw {
+		t.Errorf("key: got %v, want the raw key", resp["key"])
+	}
 }
 
 // TestKeyMe_InvalidKey_401 guards the no-auth branch.
@@ -386,7 +420,7 @@ func TestKeyMe_InvalidKey_401(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/key/me", nil)
 	rec := httptest.NewRecorder()
-	HandleSelfKeyInfo(db)(rec, req)
+	HandleSelfKeyInfo(db, testSecretsKey)(rec, req)
 	if rec.Code != 401 {
 		t.Errorf("status: got %d, want 401", rec.Code)
 	}

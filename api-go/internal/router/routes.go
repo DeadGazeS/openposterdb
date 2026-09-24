@@ -176,7 +176,7 @@ func (r *Router) registerKeyRoutes() {
 	})))
 
 	r.mux.Handle("/api/key/me", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		handlers.HandleSelfKeyInfo(s.DB)(w, req)
+		handlers.HandleSelfKeyInfo(s.DB, s.SecretsKey)(w, req)
 	})))
 
 	r.mux.Handle("/api/key/me/settings", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
