@@ -83,7 +83,7 @@ func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistRespo
 	start := time.Now()
 	resp, err := SendWithRetry(&MDBListRetry, func() (*http.Response, error) {
 		req, _ := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
-		req.Header.Set("User-Agent", "openposterdb/1.2.1")
+		req.Header.Set("User-Agent", UserAgent())
 		return c.HTTP.Do(req)
 	})
 	logSlow("MDBList", time.Since(start).Milliseconds())

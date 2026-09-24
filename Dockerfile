@@ -7,7 +7,7 @@ COPY api-go/go.mod api-go/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY api-go/ ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o openposterdb ./cmd/server/
+    CGO_ENABLED=0 go build -ldflags="-s -w -X openposterdb/internal/services.Version=${APP_VERSION:-dev}" -o openposterdb ./cmd/server/
 
 FROM node:22-bookworm AS web-builder
 WORKDIR /app

@@ -3,7 +3,7 @@
 COMPOSE := docker compose
 FILES  := -f docker-compose.yml -f docker-compose.local.yml
 VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-APP_VERSION := 1.2.1-dev-$(VERSION)
+APP_VERSION := 1.3.0-dev-$(VERSION)
 export APP_VERSION
 
 pull:

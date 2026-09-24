@@ -37,7 +37,7 @@ func (c *TraktClient) requestCtx(ctx context.Context, url string) (*http.Request
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("trakt-api-version", "2")
 	req.Header.Set("trakt-api-key", clientID)
-	req.Header.Set("User-Agent", "openposterdb/1.2.1")
+	req.Header.Set("User-Agent", UserAgent())
 	return req, nil
 }
 

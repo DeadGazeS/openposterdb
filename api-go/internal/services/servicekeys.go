@@ -660,7 +660,7 @@ func checkProviderURLCtx(ctx context.Context, httpClient *http.Client, url, serv
 	if err != nil {
 		return nil
 	}
-	req.Header.Set("User-Agent", "openposterdb/1.2.1")
+	req.Header.Set("User-Agent", UserAgent())
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Warn("service key validation request failed", "service", service, "error", apperr.RedactURLSecrets(err))
@@ -686,7 +686,7 @@ func checkTraktClientIDCtx(ctx context.Context, httpClient *http.Client, clientI
 	}
 	req.Header.Set("trakt-api-version", "2")
 	req.Header.Set("trakt-api-key", clientID)
-	req.Header.Set("User-Agent", "openposterdb/1.2.1")
+	req.Header.Set("User-Agent", UserAgent())
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Warn("service key validation request failed", "service", "trakt", "error", err)

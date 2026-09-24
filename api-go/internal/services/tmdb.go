@@ -249,7 +249,7 @@ func httpGetCtx(ctx context.Context, client *http.Client, config *RetryConfig, u
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "openposterdb/1.2.1")
+		req.Header.Set("User-Agent", UserAgent())
 		resp, err := client.Do(req)
 		if err != nil {
 			// The url.Error carries the full URL, including the api_key query
