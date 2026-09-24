@@ -459,4 +459,15 @@ var Migrations = []Migration{
 		SQL:           "ALTER TABLE api_keys ADD COLUMN encrypted_key TEXT",
 		ExpectedError: "duplicate column",
 	},
+	{
+		// Per-key override for RenderSettings.UseKitsu (see NOTES.md #13/#14):
+		// previously not modeled per-key at all, so the checkbox on a per-key
+		// settings form silently no-opped regardless of what was saved.
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN use_kitsu INTEGER NOT NULL DEFAULT 1",
+		ExpectedError: "duplicate column",
+	},
+	{
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN use_mal INTEGER NOT NULL DEFAULT 1",
+		ExpectedError: "duplicate column",
+	},
 }

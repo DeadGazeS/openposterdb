@@ -392,6 +392,7 @@ var requiredTableColumns = []struct {
 		"poster_badge_shape", "logo_badge_shape", "backdrop_badge_shape", "episode_badge_shape",
 		"poster_badge_alpha", "logo_badge_alpha", "backdrop_badge_alpha", "episode_badge_alpha",
 		"backdrop_edge_inset_x", "backdrop_edge_inset_y",
+		"use_kitsu", "use_mal",
 		"colors",
 	}},
 }

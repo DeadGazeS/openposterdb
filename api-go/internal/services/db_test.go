@@ -345,3 +345,43 @@ func TestParseGlobalRenderSettingsEmptyReturnsDefaults(t *testing.T) {
 		t.Error("empty globals should return defaults")
 	}
 }
+
+// TestParseGlobalRenderSettings_UseKitsuMALRoundTrip guards NOTES.md #13/#14:
+// ParseGlobalRenderSettings previously omitted UseKitsu/UseMAL from its
+// returned struct literal entirely, so a saved `false` never survived the
+// read path (every request silently got the zero value regardless of what
+// was stored). A non-empty globals map — the case that fires on every real
+// request once any setting has been saved — must round-trip both fields.
+func TestParseGlobalRenderSettings_UseKitsuMALRoundTrip(t *testing.T) {
+	globals := map[string]string{
+		"image_source": "f",
+		"use_kitsu":    "false",
+		"use_mal":      "false",
+	}
+	s := ParseGlobalRenderSettings(globals)
+	if s.UseKitsu {
+		t.Error("use_kitsu=false in globals should not survive as UseKitsu=true")
+	}
+	if s.UseMAL {
+		t.Error("use_mal=false in globals should not survive as UseMAL=true")
+	}
+
+	m := SettingsResponseMap(&s)
+	if v, ok := m["use_kitsu"].(bool); !ok || v {
+		t.Errorf("SettingsResponseMap use_kitsu: got %#v, want false", m["use_kitsu"])
+	}
+	if v, ok := m["use_mal"].(bool); !ok || v {
+		t.Errorf("SettingsResponseMap use_mal: got %#v, want false", m["use_mal"])
+	}
+}
+
+// TestParseGlobalRenderSettings_UseKitsuMALDefaultsToTrue guards the other
+// direction: omitting the keys (never saved yet) must still default to true,
+// matching DefaultRenderSettings.
+func TestParseGlobalRenderSettings_UseKitsuMALDefaultsToTrue(t *testing.T) {
+	globals := map[string]string{"image_source": "t"}
+	s := ParseGlobalRenderSettings(globals)
+	if !s.UseKitsu || !s.UseMAL {
+		t.Errorf("UseKitsu/UseMAL should default to true when absent from globals, got %v/%v", s.UseKitsu, s.UseMAL)
+	}
+}

@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	episode_layout TEXT NOT NULL DEFAULT '{"right":{"per_row":1,"rows":1,"start":"t"}}',
 	episode_badge_direction TEXT NOT NULL DEFAULT 'v',
 	episode_blur INTEGER NOT NULL DEFAULT 0,
+	use_kitsu INTEGER NOT NULL DEFAULT 1,
+	use_mal INTEGER NOT NULL DEFAULT 1,
 	poster_badge_shape TEXT NOT NULL DEFAULT 'r',
 	logo_badge_shape TEXT NOT NULL DEFAULT 'r',
 	backdrop_badge_shape TEXT NOT NULL DEFAULT 'r',
@@ -393,6 +395,38 @@ func TestKeySettingsUpdateMerge_BadgeSizePreservation(t *testing.T) {
 	}
 	if merged2.EpisodeBadgeSize != 50 {
 		t.Errorf("explicit episode_badge_size=%d, want 50", merged2.EpisodeBadgeSize)
+	}
+}
+
+// TestKeySettingsUpdateMerge_UseKitsuMALPreserveOnOmit guards NOTES.md #13/#14:
+// UseKitsu/UseMAL previously didn't exist on APIKeySettings at all, so a
+// per-key save could never persist an override. Now that they're pointer
+// fields on keySettingsUpdate, an omitted field must preserve the stored
+// value and an explicit false must override it.
+func TestKeySettingsUpdateMerge_UseKitsuMALPreserveOnOmit(t *testing.T) {
+	base := &services.APIKeySettings{UseKitsu: false, UseMAL: false}
+
+	// Payload omitting both — must keep the stored false, not reset to true.
+	var body keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"lang":"de"}`), &body); err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeKeySettingsUpdate(base, &body)
+	if merged.UseKitsu {
+		t.Error("omitted use_kitsu reset stored false to true")
+	}
+	if merged.UseMAL {
+		t.Error("omitted use_mal reset stored false to true")
+	}
+
+	// Explicit true overrides the stored false.
+	var body2 keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"use_kitsu":true,"use_mal":true}`), &body2); err != nil {
+		t.Fatal(err)
+	}
+	merged2 := mergeKeySettingsUpdate(base, &body2)
+	if !merged2.UseKitsu || !merged2.UseMAL {
+		t.Errorf("explicit use_kitsu/use_mal=true not applied: got %v/%v", merged2.UseKitsu, merged2.UseMAL)
 	}
 }
 

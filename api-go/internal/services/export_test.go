@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	episode_layout TEXT NOT NULL DEFAULT '{"right":{"per_row":1,"rows":1,"start":"t"}}',
 	episode_badge_direction TEXT NOT NULL DEFAULT 'v',
 	episode_blur INTEGER NOT NULL DEFAULT 0,
+	use_kitsu INTEGER NOT NULL DEFAULT 1,
+	use_mal INTEGER NOT NULL DEFAULT 1,
 	poster_badge_shape TEXT NOT NULL DEFAULT 'r',
 	logo_badge_shape TEXT NOT NULL DEFAULT 'r',
 	backdrop_badge_shape TEXT NOT NULL DEFAULT 'r',

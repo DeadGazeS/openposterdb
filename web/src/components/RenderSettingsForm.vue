@@ -827,10 +827,6 @@ function toggleExclude(key: string, checked: boolean) {
     </template>
 
     <!-- Kitsu / MAL image source — see NOTES.md #11 -->
-    <p class="text-xs text-muted-foreground">
-      Kitsu and MAL might use their own artwork if no other id keys (imdb / tmdb / tvdb) resolve the title.
-      This kicks in for anime that TMDB under-serves (most seasonals, many OVAs).
-    </p>
     <div class="flex items-center gap-2">
       <Checkbox
         :id="inputId('use-kitsu')"
@@ -850,8 +846,10 @@ function toggleExclude(key: string, checked: boolean) {
       <Label :for="inputId('use-mal')">Use MAL for MAL IDs</Label>
     </div>
     <p class="text-xs text-muted-foreground">
+      Kitsu and MAL might use their own artwork if no other ID keys (imdb / tmdb / tvdb) resolve the title.
+      This kicks in for anime that TMDB under-serves (most seasonals, many OVAs).
       Even if disabled, Kitsu / MAL may still be used when a imdb / tmdb / tvdb key can't be found.
-      Only applies to poster and backdrop kinds — logo / episode kinds don't have Kitsu / MAL artwork.
+      Only applies to posters and backdrops. Logos and episodes don't have Kitsu / MAL artwork.
     </p>
         </div>
       </TabsContent>

@@ -211,6 +211,11 @@ type keySettingsUpdate struct {
 	Textless    *bool `json:"textless"`
 	EpisodeBlur *bool `json:"episode_blur"`
 
+	// Kitsu/MAL fallback opt-ins (see NOTES.md #13/#14 — previously not
+	// modeled per-key at all).
+	UseKitsu *bool `json:"use_kitsu"`
+	UseMAL   *bool `json:"use_mal"`
+
 	// Text/badge/logo/badge-alpha sizes (#10.1 badge_size + #10.2 the rest).
 	PosterTextSize    *int32 `json:"poster_text_size"`
 	LogoTextSize      *int32 `json:"logo_text_size"`
@@ -261,6 +266,8 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 		EpisodeBadgeDirection  *services.BadgeDirection `json:"episode_badge_direction"`
 		Textless               *bool                    `json:"textless"`
 		EpisodeBlur            *bool                    `json:"episode_blur"`
+		UseKitsu               *bool                    `json:"use_kitsu"`
+		UseMAL                 *bool                    `json:"use_mal"`
 		PosterTextSize         *int32                   `json:"poster_text_size"`
 		LogoTextSize           *int32                   `json:"logo_text_size"`
 		BackdropTextSize       *int32                   `json:"backdrop_text_size"`
@@ -301,6 +308,8 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 		EpisodeBadgeDirection:  p.EpisodeBadgeDirection,
 		Textless:               p.Textless,
 		EpisodeBlur:            p.EpisodeBlur,
+		UseKitsu:               p.UseKitsu,
+		UseMAL:                 p.UseMAL,
 		PosterTextSize:         p.PosterTextSize,
 		LogoTextSize:           p.LogoTextSize,
 		BackdropTextSize:       p.BackdropTextSize,
@@ -440,6 +449,18 @@ func mergeKeySettingsUpdate(base *services.APIKeySettings, body *keySettingsUpda
 		merged.EpisodeBlur = *body.EpisodeBlur
 	} else {
 		merged.EpisodeBlur = base.EpisodeBlur
+	}
+
+	// Kitsu/MAL fallback opt-ins (#13/#14 — previously not modeled per-key).
+	if body.UseKitsu != nil {
+		merged.UseKitsu = *body.UseKitsu
+	} else {
+		merged.UseKitsu = base.UseKitsu
+	}
+	if body.UseMAL != nil {
+		merged.UseMAL = *body.UseMAL
+	} else {
+		merged.UseMAL = base.UseMAL
 	}
 
 	// Text sizes (#10.2).
