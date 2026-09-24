@@ -101,7 +101,7 @@ GET /{api_key}/mal/poster-default/35972.jpg
 - Posters and backdrops come straight from Kitsu or MAL, so anime that TMDB covers poorly still gets artwork. MAL artwork is served via AniList and is often lower resolution than Kitsu's.
 - Rating badges come from the matching IMDb / TMDB title, found through Kitsu's mappings and a Kitsu→IMDb table. No match means no badges.
 - Logos and episode stills need a TMDB match (Kitsu and MAL don't have them).
-- If an `imdb` / `tmdb` / `tvdb` ID can't be found, the lookup also tries Kitsu, then MAL.
+- An `imdb` ID that TMDB doesn't know (this happens for some anime movies) is looked up in the Kitsu↔IMDb anime table; if it's there, the Kitsu entry's artwork is used and ratings come from the IMDb ID.
 - Settings (Image Settings, global or per key):
   - **Use Kitsu artwork for kitsu: IDs** / **Use MAL artwork for mal: IDs**: when off, the title is matched to TMDB first and TMDB / Fanart.tv artwork is used; Kitsu / MAL artwork only when there's no match.
   - **Anime artwork**: *Match the ID* (default: kitsu IDs get Kitsu art, mal IDs get MAL art), *Prefer Kitsu* or *Prefer MAL* (both ID types use that site, so a title looks the same whichever ID your media server sends). Needs both boxes above on.

@@ -27,12 +27,13 @@ type KitsuIMDbMapper struct {
 	HTTP    *http.Client
 	mu      sync.RWMutex
 	byKitsu map[uint64]string // kitsu anime id → imdb id ("tt..." prefix)
+	byIMDb  map[string]uint64 // imdb id → kitsu anime id (first entry wins)
 	loaded  bool
 }
 
 // NewKitsuIMDbMapper returns an empty mapper; call Load to populate it.
 func NewKitsuIMDbMapper(httpClient *http.Client) *KitsuIMDbMapper {
-	return &KitsuIMDbMapper{HTTP: httpClient, byKitsu: map[uint64]string{}}
+	return &KitsuIMDbMapper{HTTP: httpClient, byKitsu: map[uint64]string{}, byIMDb: map[string]uint64{}}
 }
 
 // KitsuIMDbEntry is one row of the TheBeastLT JSON. Some entries carry
@@ -106,9 +107,15 @@ func (m *KitsuIMDbMapper) Load(ctx context.Context) error {
 	}
 
 	cache := make(map[uint64]string, len(entries))
+	reverse := make(map[string]uint64, len(entries))
 	for _, e := range entries {
 		if e.IMDBID == "" || e.KitsuID == 0 {
 			continue
+		}
+		// Reverse: several Kitsu entries (seasons) can share one IMDb title;
+		// the first row is the franchise's first entry in TheBeastLT's order.
+		if _, exists := reverse[e.IMDBID]; !exists {
+			reverse[e.IMDBID] = e.KitsuID
 		}
 		// First-hit-wins when TheBeastLT carries multiple rows per kitsu id
 		// (per-season/per-episode). Future per-episode mapping would key by
@@ -120,6 +127,7 @@ func (m *KitsuIMDbMapper) Load(ctx context.Context) error {
 
 	m.mu.Lock()
 	m.byKitsu = cache
+	m.byIMDb = reverse
 	m.loaded = true
 	m.mu.Unlock()
 
@@ -137,6 +145,22 @@ func (m *KitsuIMDbMapper) LookupIMDB(kitsuID uint64) *string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if v, ok := m.byKitsu[kitsuID]; ok && v != "" {
+		return &v
+	}
+	return nil
+}
+
+// LookupKitsuByIMDB returns the Kitsu anime id for an IMDb id ("tt..."), or
+// nil when the table has no entry (or Load hasn't run). Used for IMDb ids
+// TMDB doesn't know (e.g. some anime movies), so the title can still be
+// served from Kitsu.
+func (m *KitsuIMDbMapper) LookupKitsuByIMDB(imdbID string) *uint64 {
+	if m == nil || imdbID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if v, ok := m.byIMDb[imdbID]; ok && v != 0 {
 		return &v
 	}
 	return nil

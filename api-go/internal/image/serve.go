@@ -447,7 +447,41 @@ func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType s
 	if idType == services.IDTypeKitsu || idType == services.IDTypeMAL {
 		return resolveKitsuMalCtx(ctx, cache, idType, idValue, clients, useKitsu, useMAL)
 	}
-	return resolveStandardCtx(ctx, cache, idType, idValue, clients)
+	resolved, err := resolveStandardCtx(ctx, cache, idType, idValue, clients)
+	if err == nil {
+		return resolved, nil
+	}
+	if r := resolveIMDbViaAnimeTable(ctx, cache, idValue, clients); r != nil {
+		return r, nil
+	}
+	return nil, err
+}
+
+// resolveIMDbViaAnimeTable is the last resort for an IMDb id ("tt…") that
+// TMDB doesn't know — common for some anime movies (e.g. tt19861160, Sailor
+// Moon Cosmos): the TheBeastLT table maps it back to a Kitsu entry, whose
+// artwork is used (it's the only artwork there is, whatever the "Use Kitsu
+// artwork" setting says). The returned copy carries the IMDb id so
+// ratingsTargetFor can still fetch ratings by IMDb id. nil when the id isn't
+// in the table or Kitsu can't resolve it.
+func resolveIMDbViaAnimeTable(ctx context.Context, cache *services.MemCache, idValue string, clients services.IDClients) *services.ResolvedID {
+	if !strings.HasPrefix(idValue, "tt") || clients.KitsuIMDbMapper == nil || clients.Kitsu == nil {
+		return nil
+	}
+	kitsuID := clients.KitsuIMDbMapper.LookupKitsuByIMDB(idValue)
+	if kitsuID == nil {
+		return nil
+	}
+	r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeKitsu, strconv.FormatUint(*kitsuID, 10), clients)
+	if err != nil || r == nil {
+		slog.Info("imdb id not on TMDB; anime-table kitsu entry failed to resolve", "imdb_id", idValue, "kitsu_id", *kitsuID, "error", err)
+		return nil
+	}
+	slog.Info("imdb id not on TMDB; serving its anime entry from Kitsu", "imdb_id", idValue, "kitsu_id", *kitsuID)
+	out := *r // r may be the memcached resolver result — never mutate it
+	imdb := idValue
+	out.IMDbID = &imdb
+	return &out
 }
 
 func ServeImage(p ServeParams) ([]byte, string, error) {
@@ -513,6 +547,9 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	// cache directly with no fallback fired.
 	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, AniList: p.AniList, KitsuIMDbMapper: p.KitsuIMDbMapper}, p.Settings.UseKitsu, p.Settings.UseMAL)
 	if err != nil {
+		// Logged so a request that "returns nothing" (the media server then
+		// shows its own artwork) is visible and explained.
+		slog.Info("image not resolved", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "error", err)
 		return nil, "", err
 	}
 
@@ -627,8 +664,10 @@ func (p ServeParams) ratingsTargetFor(resolved *services.ResolvedID) (*services.
 	if kitsuID == nil && resolved.MALID != nil && p.Kitsu != nil {
 		kitsuID = p.Kitsu.AnimeIDByMALCtx(p.Context, *resolved.MALID)
 	}
-	var imdbID *string
-	if kitsuID != nil && p.KitsuIMDbMapper != nil {
+	// An IMDb id may already be known (the IMDb→Kitsu anime fallback in
+	// resolveWithFallback carries the requested one).
+	imdbID := resolved.IMDbID
+	if imdbID == nil && kitsuID != nil && p.KitsuIMDbMapper != nil {
 		imdbID = p.KitsuIMDbMapper.LookupIMDB(*kitsuID)
 	}
 	if imdbID == nil && resolved.MALID != nil && p.AniList != nil {
@@ -644,8 +683,11 @@ func (p ServeParams) ratingsTargetFor(resolved *services.ResolvedID) (*services.
 	}
 	target, err := services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeIMDB, *imdbID, services.IDClients{TMDB: p.TMDB})
 	if err != nil || target == nil || target.TMDbID == 0 {
-		slog.Info("kitsu/mal ratings cross-ref resolve failed — rendering without ratings", "id", p.IDType+"/"+p.IDValue, "imdb_id", *imdbID, "error", err)
-		return nil, kitsuID
+		// TMDB doesn't know this IMDb id (common for some anime movies). The
+		// IMDb id alone still gets ratings from OMDb / MDBList / Trakt; only
+		// the TMDB rating is skipped (fetchTmdbRatingCtx guards TMDbID 0).
+		slog.Info("kitsu/mal title has no TMDB match — ratings via its IMDb id only", "id", p.IDType+"/"+p.IDValue, "imdb_id", *imdbID, "error", err)
+		return &services.ResolvedID{IMDbID: imdbID, MediaType: resolved.MediaType}, kitsuID
 	}
 	slog.Debug("kitsu/mal ratings cross-ref", "id", p.IDType+"/"+p.IDValue, "imdb_id", *imdbID, "tmdb_id", target.TMDbID)
 	return target, kitsuID
@@ -675,6 +717,8 @@ func (p ServeParams) withTitleIdentity(resolved *services.ResolvedID) *services.
 	target, kitsuID := p.ratingsTargetFor(resolved)
 	out.RatingsTarget = target
 	switch {
+	case target != nil && target.TMDbID == 0 && target.IMDbID != nil:
+		out.TitleKey = "imdb:" + *target.IMDbID // IMDb-only (no TMDB entry)
 	case target != nil:
 		out.TitleKey = "tmdb:" + services.FormatTMDbIDValue(target.TMDbID, target.MediaType, nil)
 		if out.ReleaseDate == nil {

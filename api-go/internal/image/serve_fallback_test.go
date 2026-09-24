@@ -213,7 +213,7 @@ type crossRefStub struct{}
 func (crossRefStub) RoundTrip(req *http.Request) (*http.Response, error) {
 	switch {
 	case req.URL.Host == "raw.githubusercontent.com":
-		return jsonResp(`[{"kitsu_id":3936,"imdb_id":"tt0000278","title":"FMA:B"}]`), nil
+		return jsonResp(`[{"kitsu_id":3936,"imdb_id":"tt0000278","title":"FMA:B"},{"kitsu_id":5000,"imdb_id":"tt7777777","title":"Anime Movie"}]`), nil
 	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/mappings"):
 		q := req.URL.Query()
 		if q.Get("filter[externalId]") != "5114" {
@@ -227,6 +227,12 @@ func (crossRefStub) RoundTrip(req *http.Request) (*http.Response, error) {
 		return jsonResp(`{"data":[{"id":"412","type":"mappings","relationships":{"item":{"links":{"related":"https://kitsu.io/api/edge/mappings/412/item"}}}}]}`), nil
 	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/anime") && req.URL.Query().Get("filter[slug]") == "fmab":
 		return jsonResp(`{"data":[{"id":"3936","type":"anime","attributes":{"slug":"fmab","canonicalTitle":"FMA:B","subtype":"TV","posterImage":{"original":"https://kitsu.test/poster.jpg"},"coverImage":{"original":"https://kitsu.test/cover.jpg"}}}],"included":[]}`), nil
+	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/anime/5000"):
+		// An anime movie TMDB doesn't know by its IMDb id (tt7777777). Kitsu
+		// sends the subtype lowercase ("movie").
+		return jsonResp(`{"data":{"id":"5000","type":"anime","attributes":{"slug":"anime-movie","canonicalTitle":"Anime Movie","subtype":"movie","startDate":"2023-06-09","posterImage":{"original":"https://kitsu.test/movie.jpg"},"coverImage":{"original":null}}},"included":[]}`), nil
+	case strings.Contains(req.URL.Path, "/find/tt7777777"):
+		return jsonResp(`{"movie_results":[],"tv_results":[],"tv_episode_results":[]}`), nil
 	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/anime/3936"):
 		return jsonResp(`{"data":{"id":"3936","type":"anime","attributes":{"slug":"fmab","canonicalTitle":"FMA:B","subtype":"TV","startDate":"2009-04-05","posterImage":{"original":"https://kitsu.test/poster.jpg"},"coverImage":{"original":"https://kitsu.test/cover.jpg"}}},"included":[{"id":"1","type":"mappings","attributes":{"externalSite":"myanimelist/anime","externalId":"5114"}}]}`), nil
 	case req.URL.Host == "graphql.anilist.co":
@@ -508,5 +514,46 @@ func TestKitsuSlugTranslatesWithToggleOff(t *testing.T) {
 		if r.SourceProvider != "" || r.TMDbID != 278 {
 			t.Errorf("%s: got provider=%q tmdb=%d, want the TMDB title 278", id, r.SourceProvider, r.TMDbID)
 		}
+	}
+}
+
+// TestIMDbNotOnTMDB_FallsBackToAnimeTable: an IMDb id TMDB doesn't know (some
+// anime movies, e.g. tt19861160 Sailor Moon Cosmos) used to 404 silently, so
+// the media server showed its own poster. Now the anime table maps it to its
+// Kitsu entry (artwork) and the IMDb id is kept for ratings.
+func TestIMDbNotOnTMDB_FallsBackToAnimeTable(t *testing.T) {
+	p := newCrossRefParams(t)
+	clients := services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, KitsuIMDbMapper: p.KitsuIMDbMapper}
+	r, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "tt7777777", clients, true, true)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if r.SourceProvider != "kitsu" || r.KitsuID == nil || *r.KitsuID != 5000 {
+		t.Fatalf("got provider=%q kitsu=%v, want the Kitsu entry 5000", r.SourceProvider, r.KitsuID)
+	}
+	if r.MediaType != services.MediaTypeMovie {
+		t.Errorf("MediaType = %v, want movie (Kitsu subtype \"movie\" is lowercase)", r.MediaType)
+	}
+	if r.IMDbID == nil || *r.IMDbID != "tt7777777" {
+		t.Errorf("IMDbID = %v, want the requested tt7777777", r.IMDbID)
+	}
+
+	// Ratings: TMDB has no match, so the target is IMDb-only (OMDb /
+	// MDBList / Trakt work from the IMDb id; the TMDB rating is skipped).
+	p.IDType, p.IDValue = "imdb", "tt7777777"
+	s := services.DefaultRenderSettings()
+	p.Settings = &s
+	out := p.withTitleIdentity(r)
+	tg := out.RatingsTarget
+	if tg == nil || tg.TMDbID != 0 || tg.IMDbID == nil || *tg.IMDbID != "tt7777777" || tg.MediaType != services.MediaTypeMovie {
+		t.Fatalf("ratings target = %+v, want IMDb-only tt7777777 movie", tg)
+	}
+	if out.TitleKey != "imdb:tt7777777" {
+		t.Errorf("TitleKey = %q, want imdb:tt7777777", out.TitleKey)
+	}
+
+	// Not in the anime table → still an error (no change for other titles).
+	if _, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "notanid", clients, true, true); err == nil {
+		t.Error("an id in neither TMDB nor the anime table should still fail")
 	}
 }

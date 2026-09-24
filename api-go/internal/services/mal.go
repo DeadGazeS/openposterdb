@@ -67,6 +67,7 @@ type AniListMedia struct {
 	CoverImageExtra *string
 	BannerImage     *string
 	StartDate       *string // "YYYY-MM-DD" (or "YYYY-MM" / "YYYY" when partial), nil if unknown
+	Format          string  // AniList MediaFormat: "TV", "MOVIE", "OVA", "ONA", "SPECIAL", …
 	ExternalLinks   []AniListExternalLink
 }
 
@@ -91,6 +92,7 @@ type anilistMediaResponse struct {
 			} `json:"coverImage"`
 			BannerImage   *string                  `json:"bannerImage"`
 			StartDate     anilistFuzzyDate         `json:"startDate"`
+			Format        string                   `json:"format"`
 			ExternalLinks []anilistExternalLinkRaw `json:"externalLinks"`
 		} `json:"Media"`
 	} `json:"data"`
@@ -115,7 +117,7 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 		return nil, apperr.NewOther("AniList client not configured")
 	}
 
-	query := fmt.Sprintf(`{ Media(idMal: %d, type: ANIME) { id idMal title { romaji english } coverImage { extraLarge } bannerImage startDate { year month day } externalLinks { url site } } }`, malID)
+	query := fmt.Sprintf(`{ Media(idMal: %d, type: ANIME) { id idMal title { romaji english } coverImage { extraLarge } bannerImage format startDate { year month day } externalLinks { url site } } }`, malID)
 	payload, err := json.Marshal(map[string]string{"query": query})
 	if err != nil {
 		return nil, apperr.NewAPIError(err)
@@ -170,6 +172,7 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 		CoverImageExtra: m.CoverImage.ExtraLarge,
 		BannerImage:     m.BannerImage,
 		StartDate:       m.StartDate.ISO(),
+		Format:          m.Format,
 	}
 	if len(m.ExternalLinks) > 0 {
 		media.ExternalLinks = make([]AniListExternalLink, len(m.ExternalLinks))

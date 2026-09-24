@@ -1,6 +1,9 @@
 package services
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -453,5 +456,45 @@ func TestAniListFuzzyDateISO(t *testing.T) {
 	}
 	if got := (anilistFuzzyDate{}).ISO(); got != nil {
 		t.Errorf("unknown year: got %v, want nil", *got)
+	}
+}
+
+// countingTransport counts requests and answers every one with body.
+type countingTransport struct {
+	n    int
+	body string
+}
+
+func (c *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	c.n++
+	rec := httptest.NewRecorder()
+	rec.WriteString(c.body)
+	return rec.Result(), nil
+}
+
+// TestTmdbRatingSkippedWithoutTMDbID: an IMDb-only title (no TMDB entry)
+// must not issue a pointless /movie/0 request.
+func TestTmdbRatingSkippedWithoutTMDbID(t *testing.T) {
+	tr := &countingTransport{body: `{"vote_average":7.5}`}
+	tmdb := NewTmdbClient("k", &http.Client{Transport: tr})
+	if b := fetchTmdbRatingCtx(context.Background(), tmdb, 0, "movie", 0, 0, 0); b != nil || tr.n != 0 {
+		t.Errorf("tmdbID 0: badge=%v requests=%d, want nil and 0", b, tr.n)
+	}
+	if b := fetchTmdbRatingCtx(context.Background(), tmdb, 278, "movie", 0, 0, 0); b == nil || tr.n != 1 {
+		t.Errorf("tmdbID 278: badge=%v requests=%d, want a badge and 1", b, tr.n)
+	}
+}
+
+// TestResolveMAL_MovieFormat: an AniList format of MOVIE marks a mal: title
+// as a movie (it was always typed TV), so IMDb-only rating lookups ask for
+// the right media type.
+func TestResolveMAL_MovieFormat(t *testing.T) {
+	tr := &countingTransport{body: `{"data":{"Media":{"id":1,"idMal":199,"format":"MOVIE","title":{"romaji":"Sen to Chihiro"},"coverImage":{"extraLarge":"https://x/c.jpg"},"bannerImage":null,"startDate":{"year":2001,"month":7,"day":20},"externalLinks":[]}}}`}
+	r, err := resolveMALCtx(context.Background(), "199", NewAniListClient(&http.Client{Transport: tr}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.MediaType != MediaTypeMovie {
+		t.Errorf("MediaType = %v, want movie", r.MediaType)
 	}
 }

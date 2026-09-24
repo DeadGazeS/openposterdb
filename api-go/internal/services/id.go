@@ -607,8 +607,10 @@ func resolveKitsuCtx(ctx context.Context, idValue string, kitsu *KitsuClient) (*
 		return nil, err
 	}
 
+	// Kitsu sends subtypes lowercase except "TV"/"OVA"/"ONA" ("movie",
+	// "special", "music" — verified 2026-09-24), so compare case-insensitively.
 	mediaType := MediaTypeTV
-	if anime.Subtype == KitsuSubtypeMovie {
+	if strings.EqualFold(anime.Subtype, KitsuSubtypeMovie) {
 		mediaType = MediaTypeMovie
 	}
 
@@ -647,8 +649,12 @@ func resolveMALCtx(ctx context.Context, idValue string, anilist *AniListClient) 
 	}
 
 	malID := media.MALID
+	mediaType := MediaTypeTV
+	if strings.EqualFold(media.Format, "MOVIE") {
+		mediaType = MediaTypeMovie
+	}
 	resolved := &ResolvedID{
-		MediaType:      MediaTypeTV,
+		MediaType:      mediaType,
 		MALID:          &malID,
 		SourceProvider: "mal",
 	}

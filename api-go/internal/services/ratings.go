@@ -562,6 +562,11 @@ func fetchTmdbRating(tmdb *TmdbClient, tmdbID uint64, mediaType string, showID u
 }
 
 func fetchTmdbRatingCtx(ctx context.Context, tmdb *TmdbClient, tmdbID uint64, mediaType string, showID uint64, season, episode uint32) *RatingBadge {
+	// No TMDB id (an IMDb-only title TMDB doesn't know, e.g. some anime
+	// movies): /movie/0 would just 404 — the other providers use the IMDb id.
+	if tmdbID == 0 && mediaType != "episode" {
+		return nil
+	}
 	path := fmt.Sprintf("/%s/%d", mediaType, tmdbID)
 	if mediaType == "episode" {
 		path = fmt.Sprintf("/tv/%d/season/%d/episode/%d", showID, season, episode)

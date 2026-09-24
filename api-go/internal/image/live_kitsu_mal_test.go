@@ -79,4 +79,26 @@ func TestLive_KitsuMAL(t *testing.T) {
 		}
 		t.Logf("mapper entries: %d", mapper.Size())
 	})
+
+	// tt19861160 (Sailor Moon Cosmos, 2023) is one of the anime movies whose
+	// IMDb id TMDB didn't resolve (user report 2026-09-24); the reverse table
+	// lookup finds its Kitsu entry, which Kitsu types as a (lowercase) movie.
+	t.Run("imdb to kitsu for an anime movie", func(t *testing.T) {
+		mapper := services.NewKitsuIMDbMapper(httpClient)
+		if err := mapper.Load(ctx); err != nil {
+			t.Fatal(err)
+		}
+		id := mapper.LookupKitsuByIMDB("tt19861160")
+		if id == nil || *id != 46085 {
+			t.Fatalf("LookupKitsuByIMDB(tt19861160) = %v, want 46085", id)
+		}
+		r, err := services.ResolveIDCtx(ctx, services.IDTypeKitsu, "46085", services.IDClients{Kitsu: kitsu})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.MediaType != services.MediaTypeMovie || r.DirectPosterURL == nil {
+			t.Errorf("kitsu 46085: MediaType=%v poster=%v, want a movie with a poster", r.MediaType, r.DirectPosterURL)
+		}
+		t.Logf("kitsu 46085: %v, movie=%v, poster=%s", derefStr(r.Title), r.MediaType == services.MediaTypeMovie, *r.DirectPosterURL)
+	})
 }
