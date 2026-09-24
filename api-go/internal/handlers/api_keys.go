@@ -216,6 +216,9 @@ type keySettingsUpdate struct {
 	UseKitsu *bool `json:"use_kitsu"`
 	UseMAL   *bool `json:"use_mal"`
 
+	// Anime artwork preference (NOTES.md #7): "id" / "kitsu" / "mal".
+	AnimeArtwork *string `json:"anime_artwork"`
+
 	// Text/badge/logo/badge-alpha sizes (#10.1 badge_size + #10.2 the rest).
 	PosterTextSize     *int32 `json:"poster_text_size"`
 	LogoTextSize       *int32 `json:"logo_text_size"`
@@ -268,6 +271,7 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 		EpisodeBlur            *bool                    `json:"episode_blur"`
 		UseKitsu               *bool                    `json:"use_kitsu"`
 		UseMAL                 *bool                    `json:"use_mal"`
+		AnimeArtwork           *string                  `json:"anime_artwork"`
 		PosterTextSize         *int32                   `json:"poster_text_size"`
 		LogoTextSize           *int32                   `json:"logo_text_size"`
 		BackdropTextSize       *int32                   `json:"backdrop_text_size"`
@@ -310,6 +314,7 @@ func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
 		EpisodeBlur:            p.EpisodeBlur,
 		UseKitsu:               p.UseKitsu,
 		UseMAL:                 p.UseMAL,
+		AnimeArtwork:           p.AnimeArtwork,
 		PosterTextSize:         p.PosterTextSize,
 		LogoTextSize:           p.LogoTextSize,
 		BackdropTextSize:       p.BackdropTextSize,
@@ -461,6 +466,11 @@ func mergeKeySettingsUpdate(base *services.APIKeySettings, body *keySettingsUpda
 		merged.UseMAL = *body.UseMAL
 	} else {
 		merged.UseMAL = base.UseMAL
+	}
+	if body.AnimeArtwork != nil {
+		merged.AnimeArtwork = *body.AnimeArtwork
+	} else {
+		merged.AnimeArtwork = base.AnimeArtwork
 	}
 
 	// Text sizes (#10.2).
@@ -628,6 +638,9 @@ func validateAndNormalizeKeySettings(s *services.APIKeySettings) error {
 	if err := services.ValidateRatingsExclude(s.RatingsExclude); err != nil {
 		return err
 	}
+	// Unknown / empty values normalise to "id" (match the ID) so the stored
+	// column always holds one of the three known values.
+	s.AnimeArtwork = string(services.ParseAnimeArtwork(s.AnimeArtwork))
 	for _, v := range []struct {
 		name string
 		val  int32

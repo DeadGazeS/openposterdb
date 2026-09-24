@@ -37,7 +37,7 @@ func (fallbackStub) RoundTrip(req *http.Request) (*http.Response, error) {
 		switch ext {
 		case "imdb_id":
 			if strings.HasPrefix(id, "tt") {
-				return jsonResp(`{"movie_results":[{"id":278,"poster_path":"/abc.jpg","release_date":null,"popularity":100.0}],"tv_results":[],"tv_episode_results":[]}`), nil
+				return jsonResp(`{"movie_results":[{"id":278,"title":"The Shawshank Redemption","poster_path":"/abc.jpg","release_date":null,"popularity":100.0}],"tv_results":[],"tv_episode_results":[]}`), nil
 			}
 		case "tvdb_id":
 			if isAllDigits(id) {
@@ -46,7 +46,7 @@ func (fallbackStub) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return jsonResp(`{"movie_results":[],"tv_results":[],"tv_episode_results":[]}`), nil
 	case strings.Contains(path, "/tv/") || strings.Contains(path, "/movie/"):
-		return jsonResp(`{"imdb_id":"tt9999999","poster_path":"/abc.jpg","release_date":null,"first_air_date":null,"external_ids":{"imdb_id":"tt9999999"}}`), nil
+		return jsonResp(`{"imdb_id":"tt9999999","title":"Stub Title","name":"Stub Title","poster_path":"/abc.jpg","release_date":null,"first_air_date":null,"external_ids":{"imdb_id":"tt9999999"}}`), nil
 	}
 	return jsonResp(`{}`), nil
 }
@@ -202,4 +202,292 @@ func (o *orderTrackingStub) RoundTrip(req *http.Request) (*http.Response, error)
 		}, nil
 	}
 	return jsonResp(`{}`), nil
+}
+
+// crossRefStub serves the three hosts ratingsTargetFor touches: the
+// TheBeastLT Kitsu→IMDb table (one row, kitsu 3936 → tt0000278), Kitsu's
+// /mappings endpoint (MAL 5114 → kitsu 3936, anything else → no rows), and
+// TMDB (delegated to fallbackStub: /find tt… → movie 278).
+type crossRefStub struct{}
+
+func (crossRefStub) RoundTrip(req *http.Request) (*http.Response, error) {
+	switch {
+	case req.URL.Host == "raw.githubusercontent.com":
+		return jsonResp(`[{"kitsu_id":3936,"imdb_id":"tt0000278","title":"FMA:B"}]`), nil
+	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/mappings"):
+		q := req.URL.Query()
+		if q.Get("filter[externalId]") != "5114" {
+			return jsonResp(`{"data":[]}`), nil
+		}
+		// Like the real API (verified 2026-09-24): relationship linkage
+		// data is only present with include=item; otherwise links only.
+		if q.Get("include") == "item" {
+			return jsonResp(`{"data":[{"id":"412","type":"mappings","relationships":{"item":{"data":{"type":"anime","id":"3936"}}}}]}`), nil
+		}
+		return jsonResp(`{"data":[{"id":"412","type":"mappings","relationships":{"item":{"links":{"related":"https://kitsu.io/api/edge/mappings/412/item"}}}}]}`), nil
+	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/anime/3936"):
+		return jsonResp(`{"data":{"id":"3936","type":"anime","attributes":{"slug":"fmab","canonicalTitle":"FMA:B","subtype":"TV","startDate":"2009-04-05","posterImage":{"original":"https://kitsu.test/poster.jpg"},"coverImage":{"original":"https://kitsu.test/cover.jpg"}}},"included":[{"id":"1","type":"mappings","attributes":{"externalSite":"myanimelist/anime","externalId":"5114"}}]}`), nil
+	case req.URL.Host == "graphql.anilist.co":
+		return jsonResp(`{"data":{"Media":{"id":5114,"idMal":5114,"title":{"romaji":"FMA:B"},"coverImage":{"extraLarge":"https://anilist.test/cover.jpg"},"bannerImage":"https://anilist.test/banner.jpg","startDate":{"year":2009,"month":4,"day":5},"externalLinks":[]}}}`), nil
+	}
+	return fallbackStub{}.RoundTrip(req)
+}
+
+func newCrossRefParams(t *testing.T) ServeParams {
+	t.Helper()
+	httpClient := &http.Client{Transport: crossRefStub{}}
+	mapper := services.NewKitsuIMDbMapper(httpClient)
+	if err := mapper.Load(context.Background()); err != nil {
+		t.Fatalf("mapper load: %v", err)
+	}
+	return ServeParams{
+		Context:         context.Background(),
+		TMDB:            services.NewTmdbClient("test-key", httpClient),
+		Kitsu:           services.NewKitsuClient(httpClient),
+		KitsuIMDbMapper: mapper,
+		Caches:          &services.MemCacheSet{},
+		IDType:          "kitsu",
+		IDValue:         "3936",
+	}
+}
+
+// TestRatingsTargetFor_KitsuMapped: a kitsu-resolved title in the TheBeastLT
+// table cross-references to its TMDB title so rating badges can be fetched.
+func TestRatingsTargetFor_KitsuMapped(t *testing.T) {
+	p := newCrossRefParams(t)
+	kitsuID := uint64(3936)
+	target, _ := p.ratingsTargetFor(&services.ResolvedID{KitsuID: &kitsuID, SourceProvider: "kitsu"})
+	if target == nil || target.TMDbID != 278 {
+		t.Fatalf("target = %+v, want TMDbID=278", target)
+	}
+}
+
+// TestRatingsTargetFor_MALViaKitsuMapping: a mal-resolved title (no Kitsu id)
+// goes MAL → Kitsu (/mappings) → IMDb → TMDB.
+func TestRatingsTargetFor_MALViaKitsuMapping(t *testing.T) {
+	p := newCrossRefParams(t)
+	malID := uint64(5114)
+	target, _ := p.ratingsTargetFor(&services.ResolvedID{MALID: &malID, SourceProvider: "mal"})
+	if target == nil || target.TMDbID != 278 {
+		t.Fatalf("target = %+v, want TMDbID=278", target)
+	}
+}
+
+// TestRatingsTargetFor_NoMatch: no mapping anywhere → nil, so prepareRender
+// skips ratings exactly as before.
+func TestRatingsTargetFor_NoMatch(t *testing.T) {
+	p := newCrossRefParams(t)
+	kitsuID := uint64(1)
+	malID := uint64(1)
+	if target, _ := p.ratingsTargetFor(&services.ResolvedID{KitsuID: &kitsuID, SourceProvider: "kitsu"}); target != nil {
+		t.Errorf("unmapped kitsu: target = %+v, want nil", target)
+	}
+	if target, _ := p.ratingsTargetFor(&services.ResolvedID{MALID: &malID, SourceProvider: "mal"}); target != nil {
+		t.Errorf("unmapped mal: target = %+v, want nil", target)
+	}
+}
+
+func strp(s string) *string { return &s }
+
+func animeParams(t *testing.T, pref services.AnimeArtwork) ServeParams {
+	t.Helper()
+	p := newCrossRefParams(t)
+	p.AniList = services.NewAniListClient(&http.Client{Transport: crossRefStub{}})
+	s := services.DefaultRenderSettings()
+	s.AnimeArtwork = pref
+	p.Settings = &s
+	return p
+}
+
+// malResolved / kitsuResolved mimic resolveMALCtx / resolveKitsuCtx output.
+func malResolved() *services.ResolvedID {
+	malID := uint64(5114)
+	return &services.ResolvedID{MALID: &malID, SourceProvider: "mal",
+		DirectPosterURL: strp("https://anilist.test/cover.jpg"), DirectCoverURL: strp("https://anilist.test/banner.jpg")}
+}
+
+func kitsuResolved() *services.ResolvedID {
+	kitsuID, malID := uint64(3936), uint64(5114)
+	return &services.ResolvedID{KitsuID: &kitsuID, MALID: &malID, SourceProvider: "kitsu",
+		DirectPosterURL: strp("https://kitsu.test/poster.jpg"), DirectCoverURL: strp("https://kitsu.test/cover.jpg")}
+}
+
+// TestAnimeArtwork_PreferKitsuOnMAL: a mal: title switches to Kitsu's art
+// (MAL → Kitsu via /mappings, then /anime/{id}); the input is not mutated.
+func TestAnimeArtwork_PreferKitsuOnMAL(t *testing.T) {
+	p := animeParams(t, services.AnimeArtworkKitsu)
+	in := malResolved()
+	out := p.applyAnimeArtworkPreference(in)
+	if out.SourceProvider != "kitsu" || *out.DirectPosterURL != "https://kitsu.test/poster.jpg" || *out.DirectCoverURL != "https://kitsu.test/cover.jpg" {
+		t.Fatalf("got provider=%s poster=%v cover=%v, want Kitsu art", out.SourceProvider, *out.DirectPosterURL, *out.DirectCoverURL)
+	}
+	if out.KitsuID == nil || *out.KitsuID != 3936 {
+		t.Errorf("KitsuID = %v, want 3936", out.KitsuID)
+	}
+	if in.SourceProvider != "mal" || *in.DirectPosterURL != "https://anilist.test/cover.jpg" {
+		t.Error("input ResolvedID was mutated (it may be the memcached resolver result)")
+	}
+}
+
+// TestAnimeArtwork_PreferMALOnKitsu: a kitsu: title switches to AniList art.
+func TestAnimeArtwork_PreferMALOnKitsu(t *testing.T) {
+	p := animeParams(t, services.AnimeArtworkMAL)
+	out := p.applyAnimeArtworkPreference(kitsuResolved())
+	if out.SourceProvider != "mal" || *out.DirectPosterURL != "https://anilist.test/cover.jpg" || *out.DirectCoverURL != "https://anilist.test/banner.jpg" {
+		t.Fatalf("got provider=%s poster=%v, want AniList art", out.SourceProvider, *out.DirectPosterURL)
+	}
+}
+
+// TestAnimeArtwork_NoOpCases: match-the-ID, same provider, a toggle off, a
+// failed lookup and normal (TMDB) titles all keep the input unchanged.
+func TestAnimeArtwork_NoOpCases(t *testing.T) {
+	cases := []struct {
+		name string
+		pref services.AnimeArtwork
+		mod  func(*ServeParams)
+		in   *services.ResolvedID
+	}{
+		{"match id on mal", services.AnimeArtworkMatchID, nil, malResolved()},
+		{"prefer kitsu on kitsu", services.AnimeArtworkKitsu, nil, kitsuResolved()},
+		{"toggle off", services.AnimeArtworkKitsu, func(p *ServeParams) { p.Settings.UseMAL = false }, malResolved()},
+		{"normal title", services.AnimeArtworkKitsu, nil, &services.ResolvedID{TMDbID: 278}},
+		{"kitsu lookup fails", services.AnimeArtworkKitsu, nil, func() *services.ResolvedID {
+			r := malResolved()
+			id := uint64(1) // not mapped by the stub
+			r.MALID = &id
+			return r
+		}()},
+	}
+	for _, c := range cases {
+		p := animeParams(t, c.pref)
+		if c.mod != nil {
+			c.mod(&p)
+		}
+		if out := p.applyAnimeArtworkPreference(c.in); out != c.in {
+			t.Errorf("%s: expected the input unchanged, got %+v", c.name, out)
+		}
+	}
+}
+
+// TestFilterAnimeAlternates: kitsu/mal cross copies are written only when a
+// request under that ID would render the same artwork.
+func TestFilterAnimeAlternates(t *testing.T) {
+	alts := []altID{{"kitsu", "3936"}, {"mal", "5114"}, {"imdb", "tt1"}}
+	types := func(a []altID) string {
+		var s []string
+		for _, x := range a {
+			s = append(s, x.idType)
+		}
+		return strings.Join(s, ",")
+	}
+	cases := []struct {
+		name     string
+		pref     services.AnimeArtwork
+		useMAL   bool
+		resolved *services.ResolvedID
+		want     string
+	}{
+		{"match id, kitsu render", services.AnimeArtworkMatchID, true, kitsuResolved(), "kitsu,imdb"},
+		{"match id, mal render", services.AnimeArtworkMatchID, true, malResolved(), "mal,imdb"},
+		{"prefer kitsu, kitsu render", services.AnimeArtworkKitsu, true, kitsuResolved(), "kitsu,mal,imdb"},
+		{"prefer kitsu but fell back to mal art", services.AnimeArtworkKitsu, true, malResolved(), "imdb"},
+		{"prefer mal, mal render", services.AnimeArtworkMAL, true, malResolved(), "kitsu,mal,imdb"},
+		{"mal toggle off, kitsu render", services.AnimeArtworkMatchID, false, kitsuResolved(), "kitsu,imdb"},
+		{"normal title keeps all", services.AnimeArtworkMatchID, true, &services.ResolvedID{TMDbID: 278}, "kitsu,mal,imdb"},
+	}
+	for _, c := range cases {
+		s := services.DefaultRenderSettings()
+		s.AnimeArtwork = c.pref
+		s.UseMAL = c.useMAL
+		p := ServeParams{Settings: &s}
+		if got := types(p.filterAnimeAlternates(c.resolved, alts)); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestWithTitleIdentity: every image of one title gets the same TitleKey so
+// the admin list can group them; the input (memcached) is never mutated.
+func TestWithTitleIdentity(t *testing.T) {
+	p := animeParams(t, services.AnimeArtworkMatchID)
+
+	tmdb := p.withTitleIdentity(&services.ResolvedID{TMDbID: 278, MediaType: services.MediaTypeMovie})
+	if tmdb.TitleKey != "tmdb:movie-278" {
+		t.Errorf("tmdb title: TitleKey %q, want tmdb:movie-278", tmdb.TitleKey)
+	}
+
+	// kitsu 3936 → tt0000278 (mapper) → TMDB movie 278: same key as above.
+	in := kitsuResolved()
+	in.ReleaseDate = nil
+	k := p.withTitleIdentity(in)
+	if k.TitleKey != "tmdb:movie-278" || k.RatingsTarget == nil || k.RatingsTarget.TMDbID != 278 {
+		t.Errorf("mapped kitsu: TitleKey %q target %+v, want tmdb:movie-278 / 278", k.TitleKey, k.RatingsTarget)
+	}
+	if in.TitleKey != "" || in.RatingsTarget != nil {
+		t.Error("input ResolvedID was mutated")
+	}
+
+	// mal 5114 → kitsu 3936 → same title.
+	if m := p.withTitleIdentity(malResolved()); m.TitleKey != "tmdb:movie-278" {
+		t.Errorf("mapped mal: TitleKey %q, want tmdb:movie-278", m.TitleKey)
+	}
+
+	// No cross-ref: fall back to the provider id.
+	kitsuID, malID := uint64(1), uint64(1)
+	if u := p.withTitleIdentity(&services.ResolvedID{KitsuID: &kitsuID, SourceProvider: "kitsu"}); u.TitleKey != "kitsu:1" || u.RatingsTarget != nil {
+		t.Errorf("unmapped kitsu: TitleKey %q target %v, want kitsu:1 / nil", u.TitleKey, u.RatingsTarget)
+	}
+	if u := p.withTitleIdentity(&services.ResolvedID{MALID: &malID, SourceProvider: "mal"}); u.TitleKey != "mal:1" {
+		t.Errorf("unmapped mal: TitleKey %q, want mal:1", u.TitleKey)
+	}
+}
+
+// TestKitsuMALReleaseDate: resolvers carry the entry's own start date.
+func TestKitsuMALReleaseDate(t *testing.T) {
+	httpClient := &http.Client{Transport: crossRefStub{}}
+	clients := services.IDClients{TMDB: services.NewTmdbClient("k", httpClient), Kitsu: services.NewKitsuClient(httpClient), AniList: services.NewAniListClient(httpClient)}
+	for _, c := range []struct {
+		idType services.IDType
+		value  string
+	}{{services.IDTypeKitsu, "3936"}, {services.IDTypeMAL, "5114"}} {
+		r, err := services.ResolveIDCtx(context.Background(), c.idType, c.value, clients)
+		if err != nil {
+			t.Fatalf("%v %s: %v", c.idType, c.value, err)
+		}
+		if r.ReleaseDate == nil || *r.ReleaseDate != "2009-04-05" {
+			t.Errorf("%v %s: ReleaseDate %v, want 2009-04-05", c.idType, c.value, r.ReleaseDate)
+		}
+	}
+}
+
+// TestResolverTitles: every resolver keeps the display name it already gets
+// (TMDB title/name, Kitsu canonicalTitle, AniList English → romaji), and a
+// Kitsu/MAL entry without one borrows the cross-referenced TMDB title.
+func TestResolverTitles(t *testing.T) {
+	httpClient := &http.Client{Transport: crossRefStub{}}
+	clients := services.IDClients{TMDB: services.NewTmdbClient("k", httpClient), Kitsu: services.NewKitsuClient(httpClient), AniList: services.NewAniListClient(httpClient)}
+	for _, c := range []struct {
+		idType services.IDType
+		value  string
+		want   string
+	}{
+		{services.IDTypeIMDB, "tt0111161", "The Shawshank Redemption"},
+		{services.IDTypeTMDB, "movie-278", "Stub Title"},
+		{services.IDTypeKitsu, "3936", "FMA:B"},
+		{services.IDTypeMAL, "5114", "FMA:B"}, // no English title in the stub → romaji
+	} {
+		r, err := services.ResolveIDCtx(context.Background(), c.idType, c.value, clients)
+		if err != nil {
+			t.Fatalf("%v %s: %v", c.idType, c.value, err)
+		}
+		if r.Title == nil || *r.Title != c.want {
+			t.Errorf("%v %s: Title %v, want %q", c.idType, c.value, r.Title, c.want)
+		}
+	}
+
+	p := animeParams(t, services.AnimeArtworkMatchID)
+	in := kitsuResolved() // no Title set
+	if out := p.withTitleIdentity(in); out.Title == nil || *out.Title != "The Shawshank Redemption" {
+		t.Errorf("cross-ref title fallback: got %v, want the TMDB title", out.Title)
+	}
 }

@@ -69,6 +69,7 @@ type APIKeySettings struct {
 	BackdropEdgeInsetY     int32  `json:"backdrop_edge_inset_y"`
 	UseKitsu               bool   `json:"use_kitsu"`
 	UseMAL                 bool   `json:"use_mal"`
+	AnimeArtwork           string `json:"anime_artwork"`
 	Colors                 string `json:"colors"`
 }
 
@@ -193,7 +194,7 @@ func GetAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) (*API
 		episode_layout, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
 		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
-		backdrop_edge_inset_x, backdrop_edge_inset_y, use_kitsu, use_mal, colors
+		backdrop_edge_inset_x, backdrop_edge_inset_y, use_kitsu, use_mal, anime_artwork, colors
 		FROM api_key_settings WHERE api_key_id = ?`, apiKeyID).Scan(
 		&s.APIKeyID, &s.ImageSource, &s.Lang, &s.Textless, &s.RatingsLimit, &s.RatingsOrder, &s.RatingsExclude,
 		&s.PosterLayout, &s.LogoRatingsLimit, &s.BackdropRatingsLimit,
@@ -213,7 +214,7 @@ func GetAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) (*API
 		&s.EpisodeLayout, &s.EpisodeBadgeDirection, &s.EpisodeBlur,
 		&s.PosterBadgeShape, &s.LogoBadgeShape, &s.BackdropBadgeShape, &s.EpisodeBadgeShape,
 		&s.PosterBadgeAlpha, &s.LogoBadgeAlpha, &s.BackdropBadgeAlpha, &s.EpisodeBadgeAlpha,
-		&s.BackdropEdgeInsetX, &s.BackdropEdgeInsetY, &s.UseKitsu, &s.UseMAL, &s.Colors,
+		&s.BackdropEdgeInsetX, &s.BackdropEdgeInsetY, &s.UseKitsu, &s.UseMAL, &s.AnimeArtwork, &s.Colors,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -245,8 +246,8 @@ func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings)
 		episode_layout, episode_badge_direction, episode_blur,
 		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
 		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
-		backdrop_edge_inset_x, backdrop_edge_inset_y, use_kitsu, use_mal, colors
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		backdrop_edge_inset_x, backdrop_edge_inset_y, use_kitsu, use_mal, anime_artwork, colors
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(api_key_id) DO UPDATE SET
 		image_source = excluded.image_source,
 		lang = excluded.lang,
@@ -306,6 +307,7 @@ func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings)
 		backdrop_edge_inset_y = excluded.backdrop_edge_inset_y,
 		use_kitsu = excluded.use_kitsu,
 		use_mal = excluded.use_mal,
+		anime_artwork = excluded.anime_artwork,
 		colors = excluded.colors`,
 		s.APIKeyID, s.ImageSource, s.Lang, s.Textless, s.RatingsLimit, s.RatingsOrder, s.RatingsExclude,
 		s.PosterLayout, s.LogoRatingsLimit, s.BackdropRatingsLimit,
@@ -325,7 +327,7 @@ func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings)
 		s.EpisodeLayout, s.EpisodeBadgeDirection, s.EpisodeBlur,
 		s.PosterBadgeShape, s.LogoBadgeShape, s.BackdropBadgeShape, s.EpisodeBadgeShape,
 		s.PosterBadgeAlpha, s.LogoBadgeAlpha, s.BackdropBadgeAlpha, s.EpisodeBadgeAlpha,
-		s.BackdropEdgeInsetX, s.BackdropEdgeInsetY, s.UseKitsu, s.UseMAL, s.Colors,
+		s.BackdropEdgeInsetX, s.BackdropEdgeInsetY, s.UseKitsu, s.UseMAL, s.AnimeArtwork, s.Colors,
 	)
 	return err
 }
@@ -416,6 +418,7 @@ func GetEffectiveRenderSettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int
 			BackdropEdgeInsetY:     ClampEdgeInset(perKey.BackdropEdgeInsetY),
 			UseKitsu:               perKey.UseKitsu,
 			UseMAL:                 perKey.UseMAL,
+			AnimeArtwork:           ParseAnimeArtwork(perKey.AnimeArtwork),
 			EpisodeRatingsLimit:    perKey.EpisodeRatingsLimit,
 			EpisodeBadgeStyle:      ParseBadgeStyle(perKey.EpisodeBadgeStyle),
 			EpisodeLabelStyle:      LabelStyle(perKey.EpisodeLabelStyle),

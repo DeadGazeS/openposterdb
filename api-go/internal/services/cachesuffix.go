@@ -184,6 +184,15 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 	if len(settings.Colors) > 0 {
 		result += ".col" + ColorsCacheToken(settings.Colors)
 	}
+	// Kitsu/MAL artwork choices change which image a kitsu:/mal: title
+	// renders with. Same rule: defaults (both on, match the ID) add nothing.
+	if !settings.UseKitsu {
+		result += ".nk"
+	}
+	if !settings.UseMAL {
+		result += ".nm"
+	}
+	result += settings.AnimeArtwork.CacheSuffix()
 	return result
 }
 

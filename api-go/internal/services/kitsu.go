@@ -43,6 +43,7 @@ type KitsuAnime struct {
 	Slug                string
 	CanonicalTitle      string
 	Subtype             string
+	StartDate           *string // "YYYY-MM-DD", nil when Kitsu has none
 	PosterImageOriginal *string
 	CoverImageOriginal  *string
 }
@@ -64,6 +65,7 @@ type kitsuAnimeResponse struct {
 			Slug           string `json:"slug"`
 			CanonicalTitle string `json:"canonicalTitle"`
 			Subtype        string `json:"subtype"`
+			StartDate      string `json:"startDate"`
 			PosterImage    struct {
 				Original *string `json:"original"`
 			} `json:"posterImage"`
@@ -139,6 +141,7 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 			Slug           string `json:"slug"`
 			CanonicalTitle string `json:"canonicalTitle"`
 			Subtype        string `json:"subtype"`
+			StartDate      string `json:"startDate"`
 			PosterImage    struct {
 				Original *string `json:"original"`
 			} `json:"posterImage"`
@@ -166,6 +169,7 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 					Slug           string `json:"slug"`
 					CanonicalTitle string `json:"canonicalTitle"`
 					Subtype        string `json:"subtype"`
+					StartDate      string `json:"startDate"`
 					PosterImage    struct {
 						Original *string `json:"original"`
 					} `json:"posterImage"`
@@ -205,6 +209,7 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 					Slug           string `json:"slug"`
 					CanonicalTitle string `json:"canonicalTitle"`
 					Subtype        string `json:"subtype"`
+					StartDate      string `json:"startDate"`
 					PosterImage    struct {
 						Original *string `json:"original"`
 					} `json:"posterImage"`
@@ -244,6 +249,7 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 		Slug:                attrs.Attributes.Slug,
 		CanonicalTitle:      attrs.Attributes.CanonicalTitle,
 		Subtype:             attrs.Attributes.Subtype,
+		StartDate:           nonEmptyPtr(attrs.Attributes.StartDate),
 		PosterImageOriginal: attrs.Attributes.PosterImage.Original,
 		CoverImageOriginal:  attrs.Attributes.CoverImage.Original,
 	}
@@ -270,6 +276,78 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 	return anime, mappings, nil
 }
 
+// AnimeIDByMALCtx returns the Kitsu anime id mapped to a MAL anime id via
+// Kitsu's /mappings endpoint, or nil when Kitsu has no mapping or the call
+// fails. Used to cross-reference mal:N titles to IMDb (through the
+// TheBeastLT Kitsu→IMDb table) purely for rating badges — AniList's
+// externalLinks rarely carry IMDb. Response shape verified 2026-09-24:
+// with include=item, data[0].relationships.item.data = {type:"anime",
+// id:"3936"} for MAL 5114. Without include=item Kitsu returns only
+// relationships.item.links (no data), so the include is required.
+// Not cached here: it only runs on an image render miss, and rendered
+// images + ratings are cached downstream.
+func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64 {
+	if c == nil || c.HTTP == nil || malID == 0 {
+		return nil
+	}
+	url := fmt.Sprintf("%s/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=%d&include=item", kitsuAPIBase, malID)
+
+	start := time.Now()
+	resp, err := SendWithRetry(&KitsuRetry, func() (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/vnd.api+json")
+		req.Header.Set("User-Agent", kitsuUserAgent)
+		return c.HTTP.Do(req)
+	})
+	logSlow("Kitsu", time.Since(start).Milliseconds())
+	if err != nil {
+		slog.Warn("kitsu mal→kitsu mapping lookup failed", "mal_id", malID, "error", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("kitsu mal→kitsu mapping lookup non-200", "mal_id", malID, "status", resp.StatusCode)
+		return nil
+	}
+
+	var parsed struct {
+		Data []struct {
+			Relationships struct {
+				Item struct {
+					Data struct {
+						Type string `json:"type"`
+						ID   string `json:"id"`
+					} `json:"data"`
+				} `json:"item"`
+			} `json:"relationships"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		slog.Warn("kitsu mal→kitsu mapping decode failed", "mal_id", malID, "error", err)
+		return nil
+	}
+	for _, d := range parsed.Data {
+		item := d.Relationships.Item.Data
+		if item.Type != "anime" {
+			continue
+		}
+		if id, err := strconv.ParseUint(item.ID, 10, 64); err == nil && id > 0 {
+			return &id
+		}
+	}
+	// Not an error for titles Kitsu doesn't map; Warn only when rows came
+	// back without an anime linkage (response-shape change).
+	if len(parsed.Data) > 0 {
+		slog.Warn("kitsu mal→kitsu mapping has no anime linkage", "mal_id", malID, "rows", len(parsed.Data))
+	}
+	return nil
+}
+
 // MALIDForMapping pulls the MAL anime id from a mappings list, or returns
 // nil if absent. Kept package-level so the resolver in id.go can call it
 // without importing this file's private types.
@@ -283,4 +361,13 @@ func MALIDForMapping(mappings []KitsuMapping) *uint64 {
 		}
 	}
 	return nil
+}
+
+// nonEmptyPtr returns &s, or nil for "" (Kitsu sends null/"" for unknown
+// start dates).
+func nonEmptyPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

@@ -63,6 +63,42 @@ func alternateKeys(resolved *services.ResolvedID, requestedIDType, requestedIDVa
 	return out
 }
 
+// filterAnimeAlternates drops kitsu/mal alternates that would render
+// different artwork than this image carries (NOTES.md #7). For a
+// Kitsu/MAL-artwork render (SourceProvider set), a kitsu:/mal: request of
+// type T would use: the preferred provider under Prefer Kitsu / Prefer MAL
+// (both toggles on), T itself under Match the ID, or TMDB/Fanart when T's
+// toggle is off. Only alternates whose expected provider matches the
+// rendered one are kept — e.g. Match the ID: a kitsu: render no longer
+// writes a mal/ copy. imdb/tmdb/tvdb alternates are untouched.
+func (p ServeParams) filterAnimeAlternates(resolved *services.ResolvedID, alts []altID) []altID {
+	if resolved == nil || resolved.SourceProvider == "" || p.Settings == nil {
+		return alts
+	}
+	expected := func(idType string) string {
+		if idType == "kitsu" && !p.Settings.UseKitsu || idType == "mal" && !p.Settings.UseMAL {
+			return "tmdb"
+		}
+		if p.Settings.UseKitsu && p.Settings.UseMAL {
+			switch services.ParseAnimeArtwork(string(p.Settings.AnimeArtwork)) {
+			case services.AnimeArtworkKitsu:
+				return "kitsu"
+			case services.AnimeArtworkMAL:
+				return "mal"
+			}
+		}
+		return idType
+	}
+	out := alts[:0:0]
+	for _, a := range alts {
+		if (a.idType == "kitsu" || a.idType == "mal") && expected(a.idType) != resolved.SourceProvider {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // writeCrossIDCache copies freshly rendered bytes under every alternate ID
 // form (imdb/tmdb/tvdb) so a request via another ID type hits the cache
 // instead of regenerating. Mirrors the Rust spawn_cross_id_cache.
@@ -74,12 +110,14 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 	if p.ExternalCacheOnly || p.Kind == "episode" {
 		return
 	}
-	alternates := alternateKeys(resolved, p.IDType, p.IDValue)
+	alternates := p.filterAnimeAlternates(resolved, alternateKeys(resolved, p.IDType, p.IDValue))
 	if len(alternates) == 0 {
 		return
 	}
 	suffix := p.renderSuffix(badges)
 	releaseDate := resolved.ReleaseDate
+	titleKey := resolved.TitleKey
+	title := resolved.Title
 	imageTypeChar := ImageDbValue(p.Kind)
 	go func() {
 		// Use a background context for the writes so the cross-id cache
@@ -101,7 +139,7 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 				slog.Warn("cross-id cache write failed", "cache_key", altKey, "error", err)
 				continue
 			}
-			if err := services.UpsertImageMetaCtx(ctx, p.DB, altKey, releaseDate, imageTypeChar); err != nil {
+			if err := services.UpsertImageMetaCtx(ctx, p.DB, altKey, releaseDate, imageTypeChar, titleKey, title); err != nil {
 				slog.Warn("cross-id meta write failed", "cache_key", altKey, "error", err)
 			}
 		}

@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	episode_blur INTEGER NOT NULL DEFAULT 0,
 	use_kitsu INTEGER NOT NULL DEFAULT 1,
 	use_mal INTEGER NOT NULL DEFAULT 1,
+	anime_artwork TEXT NOT NULL DEFAULT 'id',
 	poster_badge_shape TEXT NOT NULL DEFAULT 'r',
 	logo_badge_shape TEXT NOT NULL DEFAULT 'r',
 	backdrop_badge_shape TEXT NOT NULL DEFAULT 'r',

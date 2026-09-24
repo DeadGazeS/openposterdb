@@ -88,6 +88,9 @@ export interface RenderSettings {
   // via their own resolvers regardless. See NOTES.md #11.
   use_kitsu: boolean
   use_mal: boolean
+  // Whose artwork kitsu:/mal: titles use while both toggles are on
+  // (NOTES.md #7): the requested ID's provider, or always Kitsu / MAL.
+  anime_artwork: 'id' | 'kitsu' | 'mal'
   colors?: Record<string, SourceColors>
 }
 

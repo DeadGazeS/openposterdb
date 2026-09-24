@@ -2,7 +2,8 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSavedFlash } from '@/composables/useSavedFlash'
-import { Loader2, Check } from 'lucide-vue-next'
+import { Loader2, Check, Info } from 'lucide-vue-next'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -85,6 +86,11 @@ const editFanart = ref(props.settings.image_source === 'f')
 // gating in image/serve.go).
 const editUseKitsu = ref(props.settings.use_kitsu ?? true)
 const editUseMAL = ref(props.settings.use_mal ?? true)
+// Anime artwork preference (RenderSettings.anime_artwork, NOTES.md #7) —
+// only takes effect while both toggles above are on.
+type AnimeArtwork = 'id' | 'kitsu' | 'mal'
+const editAnimeArtwork = ref<AnimeArtwork>(props.settings.anime_artwork ?? 'id')
+const animeArtworkActive = computed(() => editUseKitsu.value && editUseMAL.value)
 const editLang = ref(props.settings.lang || 'en')
 const editTextless = ref(props.settings.textless)
 const editSource = computed(() => editFanart.value ? 'f' : 't')
@@ -144,6 +150,7 @@ function applySettings(s: RenderSettings) {
   editFanart.value = s.image_source === 'f'
   editUseKitsu.value = s.use_kitsu ?? true
   editUseMAL.value = s.use_mal ?? true
+  editAnimeArtwork.value = s.anime_artwork ?? 'id'
   editLang.value = s.lang || 'en'
   editTextless.value = s.textless
   editRatingsOrder.value = parseRatingsOrder(s.ratings_order)
@@ -261,6 +268,7 @@ function editsSnapshot() {
     episode_badge_alpha: editEpisodeBadgeAlpha.value,
     use_kitsu: editUseKitsu.value,
     use_mal: editUseMAL.value,
+    anime_artwork: editAnimeArtwork.value,
     colors: editColors.value,
   }
 }
@@ -316,6 +324,7 @@ function settingsSnapshot(s: RenderSettings) {
     episode_badge_alpha: s.episode_badge_alpha ?? 80,
     use_kitsu: s.use_kitsu ?? true,
     use_mal: s.use_mal ?? true,
+    anime_artwork: s.anime_artwork ?? 'id',
     colors: s.colors ?? {},
   }
 }
@@ -418,6 +427,7 @@ async function save() {
       episode_badge_alpha: editEpisodeBadgeAlpha.value,
       use_kitsu: editUseKitsu.value,
       use_mal: editUseMAL.value,
+      anime_artwork: editAnimeArtwork.value,
       colors: editColors.value,
     })
     if (err) {
@@ -826,7 +836,8 @@ function toggleExclude(key: string, checked: boolean) {
       </div>
     </template>
 
-    <!-- Kitsu / MAL image source — see NOTES.md #11 -->
+    <!-- Kitsu / MAL image source — see NOTES.md archive "Kitsu + MAL as direct image sources" -->
+    <TooltipProvider :delay-duration="150">
     <div class="flex items-center gap-2">
       <Checkbox
         :id="inputId('use-kitsu')"
@@ -834,7 +845,7 @@ function toggleExclude(key: string, checked: boolean) {
         data-testid="use-kitsu-checkbox"
         @update:model-value="(v) => editUseKitsu = !!v"
       />
-      <Label :for="inputId('use-kitsu')">Use Kitsu for Kitsu IDs</Label>
+      <Label :for="inputId('use-kitsu')">Use Kitsu artwork for kitsu: IDs</Label>
     </div>
     <div class="flex items-center gap-2">
       <Checkbox
@@ -843,14 +854,59 @@ function toggleExclude(key: string, checked: boolean) {
         data-testid="use-mal-checkbox"
         @update:model-value="(v) => editUseMAL = !!v"
       />
-      <Label :for="inputId('use-mal')">Use MAL for MAL IDs</Label>
+      <Label :for="inputId('use-mal')">Use MAL artwork for mal: IDs</Label>
     </div>
-    <p class="text-xs text-muted-foreground">
-      Kitsu and MAL might use their own artwork if no other ID keys (imdb / tmdb / tvdb) resolve the title.
-      This kicks in for anime that TMDB under-serves (most seasonals, many OVAs).
-      Even if disabled, Kitsu / MAL may still be used when a imdb / tmdb / tvdb key can't be found.
-      Only applies to posters and backdrops. Logos and episodes don't have Kitsu / MAL artwork.
+    <p class="text-xs text-muted-foreground flex items-center gap-1">
+      Anime posters from Kitsu / MAL instead of TMDB / Fanart.tv.
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button type="button" class="text-muted-foreground hover:text-foreground" aria-label="More about Kitsu / MAL artwork" data-testid="kitsu-mal-info">
+            <Info class="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent class="max-w-xs text-left" data-testid="kitsu-mal-info-content">
+          Turn off to use TMDB / Fanart.tv artwork for anime too. Kitsu / MAL is then only used if TMDB / Fanart.tv doesn't have the title.
+        </TooltipContent>
+      </Tooltip>
     </p>
+    <div class="space-y-1">
+      <div class="flex items-center gap-3 flex-wrap">
+        <Label :for="inputId('anime-artwork')">Anime artwork</Label>
+        <Select
+          :model-value="editAnimeArtwork"
+          :disabled="!animeArtworkActive"
+          @update:model-value="editAnimeArtwork = $event as AnimeArtwork"
+        >
+          <SelectTrigger :id="inputId('anime-artwork')" class="max-w-[220px]" data-testid="anime-artwork-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="id">Match the ID</SelectItem>
+            <SelectItem value="kitsu">Prefer Kitsu</SelectItem>
+            <SelectItem value="mal">Prefer MAL</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <p class="text-xs text-muted-foreground flex items-center gap-1">
+        <span data-testid="anime-artwork-help">
+          <template v-if="!animeArtworkActive">Needs both boxes above ticked.</template>
+          <template v-else-if="editAnimeArtwork === 'kitsu'">Always Kitsu artwork.</template>
+          <template v-else-if="editAnimeArtwork === 'mal'">Always MAL artwork.</template>
+          <template v-else>Kitsu IDs get Kitsu artwork, MAL IDs get MAL artwork.</template>
+        </span>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button type="button" class="text-muted-foreground hover:text-foreground" aria-label="More about anime artwork" data-testid="anime-artwork-info">
+              <Info class="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent class="max-w-xs text-left" data-testid="anime-artwork-info-content">
+            Prefer one site so a title looks the same no matter which ID is used. MAL images are often less sharp.
+          </TooltipContent>
+        </Tooltip>
+      </p>
+    </div>
+    </TooltipProvider>
         </div>
       </TabsContent>
 

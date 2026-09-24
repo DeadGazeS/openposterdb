@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -383,5 +384,74 @@ func TestParseGlobalRenderSettings_UseKitsuMALDefaultsToTrue(t *testing.T) {
 	s := ParseGlobalRenderSettings(globals)
 	if !s.UseKitsu || !s.UseMAL {
 		t.Errorf("UseKitsu/UseMAL should default to true when absent from globals, got %v/%v", s.UseKitsu, s.UseMAL)
+	}
+}
+
+// TestAnimeArtwork_GlobalRoundTrip guards the two hand-written global
+// settings paths (the #13 toggle bug class): anime_artwork must survive
+// ParseGlobalRenderSettings and SettingsResponseMap, unknown → "id".
+func TestAnimeArtwork_GlobalRoundTrip(t *testing.T) {
+	for in, want := range map[string]string{"kitsu": "kitsu", "mal": "mal", "id": "id", "bogus": "id", "": "id"} {
+		globals := map[string]string{"image_source": "t"}
+		if in != "" {
+			globals["anime_artwork"] = in
+		}
+		s := ParseGlobalRenderSettings(globals)
+		if string(s.AnimeArtwork) != want {
+			t.Errorf("%q: parsed %q, want %q", in, s.AnimeArtwork, want)
+		}
+		if got := SettingsResponseMap(&s)["anime_artwork"]; got != want {
+			t.Errorf("%q: response map %v, want %q", in, got, want)
+		}
+	}
+}
+
+// TestAnimeArtwork_CacheSuffix: defaults leave the image cache key unchanged
+// (no mass re-render); each non-default Kitsu/MAL choice adds its token.
+func TestAnimeArtwork_CacheSuffix(t *testing.T) {
+	base := DefaultRenderSettings()
+	def := SettingsCacheSuffix(&base, "poster", nil)
+	for _, tok := range []string{".nk", ".nm", ".ak", ".am"} {
+		if strings.Contains(def, tok) {
+			t.Errorf("default suffix %q contains %s", def, tok)
+		}
+	}
+	cases := []struct {
+		mod func(*RenderSettings)
+		tok string
+	}{
+		{func(s *RenderSettings) { s.UseKitsu = false }, ".nk"},
+		{func(s *RenderSettings) { s.UseMAL = false }, ".nm"},
+		{func(s *RenderSettings) { s.AnimeArtwork = AnimeArtworkKitsu }, ".ak"},
+		{func(s *RenderSettings) { s.AnimeArtwork = AnimeArtworkMAL }, ".am"},
+	}
+	for _, c := range cases {
+		s := DefaultRenderSettings()
+		c.mod(&s)
+		if got := SettingsCacheSuffix(&s, "poster", nil); got != def+c.tok {
+			t.Errorf("got %q, want %q", got, def+c.tok)
+		}
+	}
+}
+
+// TestAniListFuzzyDateISO: AniList start dates format like TMDB release
+// dates, dropping unknown trailing parts.
+func TestAniListFuzzyDateISO(t *testing.T) {
+	i := func(v int) *int { return &v }
+	cases := []struct {
+		d    anilistFuzzyDate
+		want string
+	}{
+		{anilistFuzzyDate{i(2018), i(10), i(7)}, "2018-10-07"},
+		{anilistFuzzyDate{i(2018), i(10), nil}, "2018-10"},
+		{anilistFuzzyDate{i(2018), nil, i(7)}, "2018"},
+	}
+	for _, c := range cases {
+		if got := c.d.ISO(); got == nil || *got != c.want {
+			t.Errorf("ISO() = %v, want %s", got, c.want)
+		}
+	}
+	if got := (anilistFuzzyDate{}).ISO(); got != nil {
+		t.Errorf("unknown year: got %v, want nil", *got)
 	}
 }

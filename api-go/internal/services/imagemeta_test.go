@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS image_meta (
 	image_type TEXT NOT NULL DEFAULT 'poster',
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
-	last_accessed INTEGER NOT NULL DEFAULT 0
+	last_accessed INTEGER NOT NULL DEFAULT 0,
+	title_key TEXT NOT NULL DEFAULT '',
+	title TEXT
 );
 `
 
@@ -365,3 +367,27 @@ func TestListImageMetaByKind_EmptyIsNonNil(t *testing.T) {
 		t.Errorf("encoded %s, want {\"items\":[]}", b)
 	}
 }
+
+// TestImageMeta_TitleKeyRoundTrip: title_key is written on insert, updated
+// on conflict, and returned by the admin list.
+func TestImageMeta_TitleKeyRoundTrip(t *testing.T) {
+	db := newImageMetaTestDB(t)
+	if err := UpsertImageMeta(db, "kitsu/13658_x", nil, "poster", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertImageMeta(db, "kitsu/13658_x", nil, "poster", "tmdb:series-46261", strPtr("Fairy Tail: Final Series")); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := ListImageMetaByKind(db, "poster", "", "", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].TitleKey != "tmdb:series-46261" {
+		t.Fatalf("got %+v, want one row with title_key tmdb:series-46261", items)
+	}
+	if items[0].Title == nil || *items[0].Title != "Fairy Tail: Final Series" {
+		t.Errorf("title = %v, want Fairy Tail: Final Series", items[0].Title)
+	}
+}
+
+func strPtr(s string) *string { return &s }

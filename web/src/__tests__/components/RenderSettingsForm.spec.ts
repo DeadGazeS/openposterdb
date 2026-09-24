@@ -75,6 +75,7 @@ const defaultSettings: RenderSettings = {
   episode_badge_alpha: 80,
   use_kitsu: true,
   use_mal: true,
+  anime_artwork: 'id',
 }
 
 function makeFetchPreview() {
@@ -331,6 +332,59 @@ describe('RenderSettingsForm', () => {
     expect(saveSettings).toHaveBeenCalledWith(
       expect.objectContaining({ lang: 'en' }),
     )
+  })
+
+  // --- Anime artwork preference (NOTES.md #7) ---
+
+  it('saves the chosen anime artwork preference', async () => {
+    const saveSettings = vi.fn().mockResolvedValue(null)
+    const settings = { ...defaultSettings }
+    const wrapper = mount(RenderSettingsForm, {
+      props: {
+        settings,
+        loadSettings: vi.fn().mockResolvedValue(settings),
+        saveSettings,
+        fetchPreview: makeFetchPreview(),
+      },
+      global: {
+        plugins: [createPinia()],
+        stubs: shadcnStubs,
+      },
+    })
+
+    const select = wrapper.find('[data-testid="anime-artwork-select"]')
+    expect((select.element as HTMLSelectElement).disabled).toBe(false)
+    const animeSelect = wrapper.findAllComponents(SelectStub).find(c => c.find('[data-testid="anime-artwork-select"]').exists())
+    expect(animeSelect?.props('modelValue')).toBe('id')
+    animeSelect!.vm.$emit('update:modelValue', 'kitsu')
+    await flushPromises()
+    await wrapper.find('[data-testid="save-settings-button"]').trigger('click')
+    await flushPromises()
+
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ anime_artwork: 'kitsu' }),
+    )
+  })
+
+  it('disables the anime artwork select unless both Kitsu and MAL are ticked', async () => {
+    const wrapper = mountForm({ use_mal: false })
+    const select = wrapper.find('[data-testid="anime-artwork-select"]')
+    expect((select.element as HTMLSelectElement).disabled).toBe(true)
+    expect(wrapper.find('[data-testid="anime-artwork-help"]').text()).toContain('Needs both boxes above ticked')
+
+    await wrapper.find('[data-testid="use-mal-checkbox"]').setValue(true)
+    await flushPromises()
+    expect((select.element as HTMLSelectElement).disabled).toBe(false)
+  })
+
+  it('offers accessible info buttons for the long Kitsu/MAL explanations', () => {
+    const wrapper = mountForm()
+    for (const id of ['kitsu-mal-info', 'anime-artwork-info']) {
+      const btn = wrapper.find(`[data-testid="${id}"]`)
+      expect(btn.exists()).toBe(true)
+      expect(btn.element.tagName).toBe('BUTTON')
+      expect(btn.attributes('aria-label')).toMatch(/^More about /)
+    }
   })
 
   // --- Exclude ratings (via the eye toggle in the rating order list) ---

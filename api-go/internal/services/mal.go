@@ -66,6 +66,7 @@ type AniListMedia struct {
 	TitleEnglish    string
 	CoverImageExtra *string
 	BannerImage     *string
+	StartDate       *string // "YYYY-MM-DD" (or "YYYY-MM" / "YYYY" when partial), nil if unknown
 	ExternalLinks   []AniListExternalLink
 }
 
@@ -89,6 +90,7 @@ type anilistMediaResponse struct {
 				ExtraLarge *string `json:"extraLarge"`
 			} `json:"coverImage"`
 			BannerImage   *string                  `json:"bannerImage"`
+			StartDate     anilistFuzzyDate         `json:"startDate"`
 			ExternalLinks []anilistExternalLinkRaw `json:"externalLinks"`
 		} `json:"Media"`
 	} `json:"data"`
@@ -113,7 +115,7 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 		return nil, apperr.NewOther("AniList client not configured")
 	}
 
-	query := fmt.Sprintf(`{ Media(idMal: %d, type: ANIME) { id idMal title { romaji english } coverImage { extraLarge } bannerImage externalLinks { url site } } }`, malID)
+	query := fmt.Sprintf(`{ Media(idMal: %d, type: ANIME) { id idMal title { romaji english } coverImage { extraLarge } bannerImage startDate { year month day } externalLinks { url site } } }`, malID)
 	payload, err := json.Marshal(map[string]string{"query": query})
 	if err != nil {
 		return nil, apperr.NewAPIError(err)
@@ -167,6 +169,7 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 		TitleEnglish:    m.Title.English,
 		CoverImageExtra: m.CoverImage.ExtraLarge,
 		BannerImage:     m.BannerImage,
+		StartDate:       m.StartDate.ISO(),
 	}
 	if len(m.ExternalLinks) > 0 {
 		media.ExternalLinks = make([]AniListExternalLink, len(m.ExternalLinks))
@@ -259,4 +262,27 @@ func (c *AniListClient) LookupIMDBByMAL(ctx context.Context, malID uint64) *stri
 		return nil
 	}
 	return &imdbID
+}
+
+// anilistFuzzyDate is AniList's FuzzyDate: any part may be null.
+type anilistFuzzyDate struct {
+	Year  *int `json:"year"`
+	Month *int `json:"month"`
+	Day   *int `json:"day"`
+}
+
+// ISO formats the date like TMDB release dates ("YYYY-MM-DD"), dropping
+// unknown trailing parts; nil when the year is unknown.
+func (d anilistFuzzyDate) ISO() *string {
+	if d.Year == nil || *d.Year <= 0 {
+		return nil
+	}
+	s := fmt.Sprintf("%04d", *d.Year)
+	if d.Month != nil && *d.Month > 0 {
+		s += fmt.Sprintf("-%02d", *d.Month)
+		if d.Day != nil && *d.Day > 0 {
+			s += fmt.Sprintf("-%02d", *d.Day)
+		}
+	}
+	return &s
 }

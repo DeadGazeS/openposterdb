@@ -77,7 +77,9 @@ func newServeTestDB(t *testing.T) *sql.DB {
 		release_date TEXT,
 		image_type TEXT NOT NULL DEFAULT 'p',
 		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL
+		updated_at INTEGER NOT NULL,
+		title_key TEXT NOT NULL DEFAULT '',
+		title TEXT
 	);`); err != nil {
 		t.Fatalf("image_meta: %v", err)
 	}

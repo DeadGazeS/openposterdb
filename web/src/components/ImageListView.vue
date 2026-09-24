@@ -38,6 +38,12 @@ interface ImageMeta {
   created_at: number
   updated_at: number
   last_accessed: number
+  // Same value for every cached image of one title (all IDs, slugs and
+  // settings variants); '' for rows cached before the backend stored it.
+  title_key?: string
+  // Display name (TMDB / Kitsu / AniList); null for rows cached before it
+  // was stored.
+  title?: string | null
 }
 
 interface ListResponse {
@@ -313,10 +319,12 @@ function groupSuffixFromIdValue(idValue: string): string {
   return match ? idValue.slice(match[0].length) : idValue
 }
 
-// Build a stable group id for an item by combining release_date + the
-// suffix-after-id-value. Items with the same group id represent the same
-// title rendered under different id types.
+// Build a stable group id for an item. Rows carrying the backend's
+// title_key group by it (every ID of one title — incl. Kitsu slugs and
+// cross-referenced MAL/Kitsu entries — lands in one group). Older rows fall
+// back to release_date + the suffix-after-id-value heuristic.
 function groupKeyFor(item: ImageMeta): string {
+  if (item.title_key) return `title::${item.title_key}`
   const { idValue } = parseKey(item.cache_key)
   return `${item.release_date ?? ''}::${groupSuffixFromIdValue(idValue)}`
 }
@@ -492,13 +500,17 @@ const SETTINGS_LABELS: Record<string, { label: string; explanation: string }> = 
   blur: { label: 'Blur background', explanation: 'episode backdrop blur flag' },
   eh:   { label: 'Edge inset X',    explanation: 'backdrop horizontal edge inset (px)' },
   ev:   { label: 'Edge inset Y',    explanation: 'backdrop vertical edge inset (px)' },
+  nk:   { label: 'Kitsu artwork off', explanation: '"Use Kitsu artwork for kitsu: IDs" unticked' },
+  nm:   { label: 'MAL artwork off',   explanation: '"Use MAL artwork for mal: IDs" unticked' },
+  ak:   { label: 'Prefer Kitsu',      explanation: 'anime artwork: Kitsu for both kitsu: and mal: IDs' },
+  am:   { label: 'Prefer MAL',        explanation: 'anime artwork: MAL for both kitsu: and mal: IDs' },
 }
 
 // Setting keys ordered longest-first so the prefix match is unambiguous
 // (e.g. `ly` beats `l`, `bw` beats `b`, `stb` falls through to `s`).
 const SETTING_KEYS_LONGEST_FIRST: readonly string[] = [
   'col', 'ly', 'ls', 'bw', 'bh', 'bz', 'ba',
-  'blur', 'ts', 'sh', 'zm', 'eh', 'ev',
+  'blur', 'ts', 'sh', 'zm', 'eh', 'ev', 'nk', 'nm', 'ak', 'am',
   's', 'l', 'd',
 ]
 
@@ -663,6 +675,7 @@ const skeletonClass = computed(() => {
             <TableHead class="w-10"></TableHead>
             <TableHead class="w-24">ID Type</TableHead>
             <TableHead class="w-40">ID Value</TableHead>
+            <TableHead class="w-56">Title</TableHead>
             <TableHead class="w-32">
               <button
                 type="button"
@@ -728,7 +741,7 @@ const skeletonClass = computed(() => {
         </TableHeader>
         <TableBody>
           <TableRow v-if="groups.length === 0">
-            <TableCell colspan="8" class="text-center text-muted-foreground">No {{ kindLabelPlural }} cached yet.</TableCell>
+            <TableCell colspan="9" class="text-center text-muted-foreground">No {{ kindLabelPlural }} cached yet.</TableCell>
           </TableRow>
           <template v-for="group in groups" :key="group.key">
             <TableRow class="cursor-pointer" @click="openPreview(group.preferred.cache_key)">
@@ -751,6 +764,7 @@ const skeletonClass = computed(() => {
               </TableCell>
               <TableCell>{{ parseKey(group.preferred.cache_key).idType }}</TableCell>
               <TableCell>{{ shortIdFromCacheKey(group.preferred.cache_key) }}</TableCell>
+              <TableCell class="max-w-56 truncate" :title="group.preferred.title ?? undefined" data-testid="title-cell">{{ group.preferred.title || '—' }}</TableCell>
               <TableCell>{{ formatReleaseDate(group.preferred.release_date) }}</TableCell>
               <TableCell>{{ relativeTime(group.preferred.last_accessed) }}</TableCell>
               <TableCell>{{ relativeTime(group.preferred.updated_at) }}</TableCell>
@@ -793,6 +807,7 @@ const skeletonClass = computed(() => {
               <TableCell></TableCell>
               <TableCell>{{ parseKey(item.cache_key).idType }}</TableCell>
               <TableCell>{{ shortIdFromCacheKey(item.cache_key) }}</TableCell>
+              <TableCell class="max-w-56 truncate" :title="item.title ?? undefined" data-testid="title-cell">{{ item.title || '—' }}</TableCell>
               <TableCell>{{ formatReleaseDate(item.release_date) }}</TableCell>
               <TableCell>{{ relativeTime(item.last_accessed) }}</TableCell>
               <TableCell>{{ relativeTime(item.updated_at) }}</TableCell>

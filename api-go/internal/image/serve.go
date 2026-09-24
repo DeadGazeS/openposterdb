@@ -523,6 +523,13 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
 	}
 
+	// Anime artwork preference (Prefer Kitsu / Prefer MAL) — swaps the
+	// direct image URLs before rendering; refreshStale reuses this result.
+	resolved = p.applyAnimeArtworkPreference(resolved)
+	// Title identity (grouping key, ratings cross-ref, release date fill) —
+	// after the artwork swap so a Prefer-Kitsu swap's Kitsu id is used.
+	resolved = p.withTitleIdentity(resolved)
+
 	// Fetch ratings, apply preferences, and build the cache key.
 	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
 	if err != nil {
@@ -601,6 +608,157 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	return rendered, contentType, nil
 }
 
+// ratingsTargetFor finds the standard (TMDB-resolved) title behind a
+// Kitsu/MAL-resolved one so its ratings can be fetched: Kitsu id (or MAL id
+// → Kitsu id via Kitsu's /mappings) → TheBeastLT Kitsu→IMDb table, else MAL
+// id → AniList externalLinks; then the IMDb id resolves through TMDB /find
+// (cached in Caches.IDs). Returns nil when no IMDb/TMDB match exists.
+// TheBeastLT maps season entries to the whole show, so a season's poster
+// gets the show's ratings.
+func (p ServeParams) ratingsTargetFor(resolved *services.ResolvedID) (*services.ResolvedID, *uint64) {
+	kitsuID := resolved.KitsuID
+	if kitsuID == nil && resolved.MALID != nil && p.Kitsu != nil {
+		kitsuID = p.Kitsu.AnimeIDByMALCtx(p.Context, *resolved.MALID)
+	}
+	var imdbID *string
+	if kitsuID != nil && p.KitsuIMDbMapper != nil {
+		imdbID = p.KitsuIMDbMapper.LookupIMDB(*kitsuID)
+	}
+	if imdbID == nil && resolved.MALID != nil && p.AniList != nil {
+		imdbID = p.AniList.LookupIMDBByMAL(p.Context, *resolved.MALID)
+	}
+	if imdbID == nil {
+		slog.Info("kitsu/mal title has no imdb match — rendering without ratings",
+			"id", p.IDType+"/"+p.IDValue,
+			"kitsu_id", derefUint(kitsuID),
+			"mal_id", derefUint(resolved.MALID),
+			"mapper_loaded", p.KitsuIMDbMapper.Loaded())
+		return nil, kitsuID
+	}
+	target, err := services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeIMDB, *imdbID, services.IDClients{TMDB: p.TMDB})
+	if err != nil || target == nil || target.TMDbID == 0 {
+		slog.Info("kitsu/mal ratings cross-ref resolve failed — rendering without ratings", "id", p.IDType+"/"+p.IDValue, "imdb_id", *imdbID, "error", err)
+		return nil, kitsuID
+	}
+	slog.Debug("kitsu/mal ratings cross-ref", "id", p.IDType+"/"+p.IDValue, "imdb_id", *imdbID, "tmdb_id", target.TMDbID)
+	return target, kitsuID
+}
+
+// withTitleIdentity returns a copy of resolved carrying the per-request
+// title identity (never mutates it — the resolver result is memcached):
+//   - TitleKey: "tmdb:<movie-/series-/episode-…>" for TMDB titles and for
+//     Kitsu/MAL titles cross-referenced to one, else "kitsu:<id>" /
+//     "mal:<id>". Stored in image_meta.title_key so the admin list groups
+//     every image of one title (all IDs, slug included) together.
+//   - RatingsTarget: the cross-referenced IMDb/TMDB title prepareRender
+//     fetches ratings for (looked up once here, whatever the ratings limit).
+//   - ReleaseDate / Title: filled from the cross-ref when Kitsu/AniList
+//     gave none.
+func (p ServeParams) withTitleIdentity(resolved *services.ResolvedID) *services.ResolvedID {
+	if resolved == nil {
+		return nil
+	}
+	out := *resolved
+	if resolved.SourceProvider == "" {
+		if resolved.TMDbID != 0 || resolved.Episode != nil {
+			out.TitleKey = "tmdb:" + services.FormatTMDbIDValue(resolved.TMDbID, resolved.MediaType, resolved.Episode)
+		}
+		return &out
+	}
+	target, kitsuID := p.ratingsTargetFor(resolved)
+	out.RatingsTarget = target
+	switch {
+	case target != nil:
+		out.TitleKey = "tmdb:" + services.FormatTMDbIDValue(target.TMDbID, target.MediaType, nil)
+		if out.ReleaseDate == nil {
+			out.ReleaseDate = target.ReleaseDate
+		}
+		if out.Title == nil {
+			out.Title = target.Title
+		}
+	case kitsuID != nil:
+		out.TitleKey = fmt.Sprintf("kitsu:%d", *kitsuID)
+	case resolved.MALID != nil:
+		out.TitleKey = fmt.Sprintf("mal:%d", *resolved.MALID)
+	}
+	return &out
+}
+
+// applyAnimeArtworkPreference implements Settings.AnimeArtwork for a
+// Kitsu/MAL-resolved title (SourceProvider set) while both UseKitsu and
+// UseMAL are on: "kitsu" swaps a MAL-sourced title to Kitsu's poster/cover
+// (MAL → Kitsu via /mappings, then GetAnimeCtx), "mal" swaps a Kitsu-sourced
+// title to AniList's cover/banner (via the MAL id Kitsu's mappings carry).
+// "id" or anything unavailable keeps the requested ID's own artwork — a
+// failed lookup never errors the request. Returns a copy when it changes
+// anything: resolved may be the memcached resolver result.
+func (p ServeParams) applyAnimeArtworkPreference(resolved *services.ResolvedID) *services.ResolvedID {
+	if resolved == nil || resolved.SourceProvider == "" || p.Settings == nil || !p.Settings.UseKitsu || !p.Settings.UseMAL {
+		return resolved
+	}
+	pref := services.ParseAnimeArtwork(string(p.Settings.AnimeArtwork))
+	switch {
+	case pref == services.AnimeArtworkKitsu && resolved.SourceProvider == "mal":
+		if p.Kitsu == nil {
+			return resolved
+		}
+		kitsuID := resolved.KitsuID
+		if kitsuID == nil && resolved.MALID != nil {
+			kitsuID = p.Kitsu.AnimeIDByMALCtx(p.Context, *resolved.MALID)
+		}
+		if kitsuID == nil {
+			slog.Info("prefer-kitsu artwork: no kitsu id for mal title, keeping mal artwork", "id", p.IDType+"/"+p.IDValue)
+			return resolved
+		}
+		anime, _, err := p.Kitsu.GetAnimeCtx(p.Context, strconv.FormatUint(*kitsuID, 10))
+		if err != nil || anime == nil {
+			slog.Info("prefer-kitsu artwork: kitsu lookup failed, keeping mal artwork", "id", p.IDType+"/"+p.IDValue, "kitsu_id", *kitsuID, "error", err)
+			return resolved
+		}
+		out := *resolved
+		id := anime.ID
+		out.KitsuID = &id
+		out.DirectPosterURL = firstNonEmpty(anime.PosterImageOriginal, resolved.DirectPosterURL)
+		out.DirectCoverURL = firstNonEmpty(anime.CoverImageOriginal, resolved.DirectCoverURL)
+		out.SourceProvider = "kitsu"
+		return &out
+	case pref == services.AnimeArtworkMAL && resolved.SourceProvider == "kitsu":
+		if p.AniList == nil || resolved.MALID == nil {
+			slog.Info("prefer-mal artwork: no mal id for kitsu title, keeping kitsu artwork", "id", p.IDType+"/"+p.IDValue)
+			return resolved
+		}
+		media, err := p.AniList.MediaByMALCtx(p.Context, *resolved.MALID)
+		if err != nil || media == nil {
+			slog.Info("prefer-mal artwork: anilist lookup failed, keeping kitsu artwork", "id", p.IDType+"/"+p.IDValue, "mal_id", *resolved.MALID, "error", err)
+			return resolved
+		}
+		out := *resolved
+		out.DirectPosterURL = firstNonEmpty(media.CoverImageExtra, resolved.DirectPosterURL)
+		out.DirectCoverURL = firstNonEmpty(media.BannerImage, resolved.DirectCoverURL)
+		out.SourceProvider = "mal"
+		return &out
+	}
+	return resolved
+}
+
+// firstNonEmpty returns preferred when it holds a URL, else fallback — so a
+// preferred provider missing one image kind keeps the original for that kind.
+func firstNonEmpty(preferred, fallback *string) *string {
+	if preferred != nil && *preferred != "" {
+		return preferred
+	}
+	return fallback
+}
+
+// derefUint returns *v, or 0 for nil, so optional ids log as numbers
+// rather than pointer addresses.
+func derefUint(v *uint64) uint64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
 // prepareRender fetches ratings (when the kind's limit allows), applies
 // preferences, and computes the cache key/path for the request's ID form.
 // It is the first half of the render pipeline, shared by ServeImage and the
@@ -609,13 +767,20 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 
 	var rawBadges []services.RatingBadge
-	// Skip ratings when the resolver returned a direct image source (kitsu/mal
-	// path). FetchRatingsCtx hits TMDB /movie/{id} or /tv/{id} which 404s on
-	// TMDbID=0, and the new resolvers don't carry an IMDb cross-ref in practice
-	// (verified 2026-08-14 against AniList externalLinks + Kitsu /mappings —
-	// neither surfaces IMDb for anime). Better to skip than to log a flood of
-	// 404s on every kitsu:N / mal:N request.
-	if limit > 0 && resolved.SourceProvider == "" {
+	// A direct image source (kitsu/mal path) carries no TMDb/IMDb id, and
+	// FetchRatingsCtx would 404 on TMDbID=0. withTitleIdentity already
+	// cross-referenced the title to its IMDb/TMDB equivalent (RatingsTarget)
+	// purely for ratings — the artwork still comes from Kitsu/MAL. No match
+	// → ratings skipped as before.
+	target := resolved
+	if resolved.SourceProvider != "" {
+		target = resolved.RatingsTarget
+	}
+	if limit > 0 && target != nil {
+		// Shadowed on purpose: the ratings query below reads the
+		// cross-referenced title; the outer resolved (artwork, release
+		// date) is untouched.
+		resolved := target
 		mediaType := "movie"
 		switch resolved.MediaType {
 		case services.MediaTypeTV:
@@ -648,6 +813,8 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 			"badges", len(rawBadges),
 			"sources", badgeSourceString(rawBadges),
 		)
+	} else if limit > 0 {
+		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "no imdb/tmdb match for kitsu/mal title")
 	} else {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "ratings_limit=0")
 	}
@@ -754,7 +921,7 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)
 		}
 	}
-	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar); err != nil {
+	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar, resolved.TitleKey, resolved.Title); err != nil {
 		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
 	}
 	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {

@@ -695,7 +695,7 @@ describe('ImageListView', () => {
     // "Last Accessed" (column order: expand, ID Type, ID Value, Release Date,
     // Last Accessed, Last Updated, Created, actions).
     const cells = wrapper.findAll('tbody tr')[0]!.findAll('td')
-    expect(cells[4]!.text()).toBe('—')
+    expect(cells[5]!.text()).toBe('—')
   })
 
   it('Created / Last Updated render relativeTime of their OWN fields; Release Date renders dd.mm.yyyy', async () => {
@@ -720,10 +720,10 @@ describe('ImageListView', () => {
     await flushPromises()
 
     const cells = wrapper.findAll('tbody tr')[0]!.findAll('td')
-    expect(cells[3]!.text()).toBe('23.09.1994')
-    expect(cells[4]!.text()).toBe('—')
-    expect(cells[5]!.text()).toBe('30m ago')
-    expect(cells[6]!.text()).toBe('3h ago')
+    expect(cells[4]!.text()).toBe('23.09.1994')
+    expect(cells[5]!.text()).toBe('—')
+    expect(cells[6]!.text()).toBe('30m ago')
+    expect(cells[7]!.text()).toBe('3h ago')
   })
 
   it('expand button renders only the chevron (no count badge)', async () => {
@@ -879,6 +879,64 @@ describe('ImageListView', () => {
       (r) => r.findAll('td')[0]!.find('button[aria-label="Expand variants"]').exists(),
     )
     expect(rowWithCluster.length).toBe(1)
+  })
+
+  it('groups rows by title_key (incl. a kitsu slug) and never merges different titles by coincidence', async () => {
+    const mocks = makeMocks()
+    const s = '_f_en@iaetk.slr.lh.dv'
+    mocks.listFn.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [
+          // One title (Fairy Tail): slug, numeric Kitsu ids, MAL ids — no release dates.
+          { cache_key: `kitsu/fairy-tail-2018${s}`, release_date: null, created_at: 1, updated_at: 1, last_accessed: 0, title_key: 'tmdb:series-46261' },
+          { cache_key: `kitsu/13658${s}`, release_date: null, created_at: 1, updated_at: 1, last_accessed: 0, title_key: 'tmdb:series-46261' },
+          { cache_key: `mal/35972${s}`, release_date: null, created_at: 1, updated_at: 1, last_accessed: 0, title_key: 'tmdb:series-46261' },
+          // A different anime with identical settings and no release date:
+          // the old heuristic merged it into the group above.
+          { cache_key: `mal/1${s}`, release_date: null, created_at: 1, updated_at: 1, last_accessed: 0, title_key: 'mal:1' },
+        ],
+        total: 4, page: 1, page_size: 50,
+      }),
+    })
+
+    const wrapper = mountView(mocks)
+    await flushPromises()
+
+    const expand = wrapper.findAll('button[aria-label="Expand variants"]')
+    expect(expand.length).toBe(1)
+    expect(expand[0]!.attributes('title')).toContain('2 more ids')
+
+    // Collapsed: only each group's preferred row is visible. The unrelated
+    // mal/1 must be its own visible row and the slug must sit inside the
+    // Fairy Tail group (the old heuristic did the exact opposite).
+    const visibleIds = wrapper.findAll('tbody tr')
+      .filter((r) => !(r.attributes('style') ?? '').includes('display: none'))
+      .map((r) => r.findAll('td')[2]!.text())
+    expect(visibleIds).toHaveLength(2)
+    expect(visibleIds).toContain('1')
+    expect(visibleIds).not.toContain('fairy-tail-2018')
+  })
+
+  it('shows the stored title in the Title column, with the full name as tooltip and — when missing', async () => {
+    const mocks = makeMocks()
+    mocks.listFn.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [
+          { cache_key: 'kitsu/13658_f_en@i', release_date: '2018-10-07', created_at: 1, updated_at: 1, last_accessed: 2, title_key: 'tmdb:series-46261', title: 'Fairy Tail: Final Series' },
+          { cache_key: 'imdb/tt0111161', release_date: '1994-09-23', created_at: 1, updated_at: 1, last_accessed: 1 },
+        ],
+        total: 2, page: 1, page_size: 50,
+      }),
+    })
+    const wrapper = mountView(mocks)
+    await flushPromises()
+
+    expect(wrapper.find('thead').text()).toContain('Title')
+    const titles = wrapper.findAll('[data-testid="title-cell"]')
+    expect(titles.map((c) => c.text())).toEqual(['Fairy Tail: Final Series', '—'])
+    expect(titles[0]!.attributes('title')).toBe('Fairy Tail: Final Series')
   })
 
   // --- 2026-08-11 short-id + more-info dialog -----------------------------

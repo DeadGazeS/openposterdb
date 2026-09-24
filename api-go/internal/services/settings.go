@@ -148,6 +148,12 @@ type RenderSettings struct {
 	// resolveKitsuMalCtx the same way.
 	UseMAL bool `json:"use_mal"`
 
+	// AnimeArtwork picks whose artwork a Kitsu/MAL-resolved title uses when
+	// both UseKitsu and UseMAL are on: "id" (the requested ID's provider,
+	// default), "kitsu" or "mal". See image/serve.go
+	// applyAnimeArtworkPreference.
+	AnimeArtwork AnimeArtwork `json:"anime_artwork"`
+
 	// Colors holds per-rating-source color overrides. Only non-default colors
 	// are stored; empty means "use the source default".
 	Colors map[string]SourceColorSet `json:"colors"`
@@ -164,6 +170,7 @@ func DefaultRenderSettings() RenderSettings {
 		IsDefault:              true,
 		UseKitsu:               true,
 		UseMAL:                 true,
+		AnimeArtwork:           AnimeArtworkMatchID,
 		PosterLayout:           DefaultLayout("poster"),
 		LogoRatingsLimit:       5,
 		BackdropRatingsLimit:   5,
@@ -291,6 +298,7 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		EpisodeBlur:            boolOr(globals, "episode_blur", defaults.EpisodeBlur),
 		UseKitsu:               boolOr(globals, "use_kitsu", defaults.UseKitsu),
 		UseMAL:                 boolOr(globals, "use_mal", defaults.UseMAL),
+		AnimeArtwork:           ParseAnimeArtwork(stringOr(globals, "anime_artwork", string(defaults.AnimeArtwork))),
 		PosterBadgeShape:       BadgeShape(stringOr(globals, "poster_badge_shape", string(defaults.PosterBadgeShape))),
 		LogoBadgeShape:         BadgeShape(stringOr(globals, "logo_badge_shape", string(defaults.LogoBadgeShape))),
 		BackdropBadgeShape:     BadgeShape(stringOr(globals, "backdrop_badge_shape", string(defaults.BackdropBadgeShape))),
@@ -612,6 +620,7 @@ func SettingsResponseMap(s *RenderSettings) map[string]any {
 		"episode_blur":             s.EpisodeBlur,
 		"use_kitsu":                s.UseKitsu,
 		"use_mal":                  s.UseMAL,
+		"anime_artwork":            string(ParseAnimeArtwork(string(s.AnimeArtwork))),
 		"poster_badge_shape":       string(s.PosterBadgeShape),
 		"logo_badge_shape":         string(s.LogoBadgeShape),
 		"backdrop_badge_shape":     string(s.BackdropBadgeShape),

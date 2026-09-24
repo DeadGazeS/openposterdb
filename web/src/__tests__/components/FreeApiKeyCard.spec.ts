@@ -66,6 +66,7 @@ function makeDefaults(overrides: Partial<FreeKeyDefaults> = {}): FreeKeyDefaults
     episode_blur: false,
     use_kitsu: true,
     use_mal: true,
+    anime_artwork: 'id',
     ...overrides,
   }
 }

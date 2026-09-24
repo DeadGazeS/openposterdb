@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS api_key_settings (
 	episode_blur INTEGER NOT NULL DEFAULT 0,
 	use_kitsu INTEGER NOT NULL DEFAULT 1,
 	use_mal INTEGER NOT NULL DEFAULT 1,
+	anime_artwork TEXT NOT NULL DEFAULT 'id',
 	poster_badge_shape TEXT NOT NULL DEFAULT 'r',
 	logo_badge_shape TEXT NOT NULL DEFAULT 'r',
 	backdrop_badge_shape TEXT NOT NULL DEFAULT 'r',
@@ -713,5 +714,31 @@ func TestGalleryBadgeUsesPosterStyle(t *testing.T) {
 	w, h = render("lr")
 	if w <= h {
 		t.Errorf("lr gallery badge %dx%d: want a horizontal (wider) badge", w, h)
+	}
+}
+
+// TestKeySettingsUpdateMerge_AnimeArtworkPreserveOnOmit: an omitted
+// anime_artwork keeps the stored value; an explicit one overrides it; an
+// unknown value normalises to "id".
+func TestKeySettingsUpdateMerge_AnimeArtworkPreserveOnOmit(t *testing.T) {
+	base := &services.APIKeySettings{AnimeArtwork: "kitsu"}
+	var body keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"lang":"de"}`), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := mergeKeySettingsUpdate(base, &body).AnimeArtwork; got != "kitsu" {
+		t.Errorf("omitted anime_artwork: got %q, want stored %q", got, "kitsu")
+	}
+	var body2 keySettingsUpdate
+	if err := json.Unmarshal([]byte(`{"anime_artwork":"mal"}`), &body2); err != nil {
+		t.Fatal(err)
+	}
+	if got := mergeKeySettingsUpdate(base, &body2).AnimeArtwork; got != "mal" {
+		t.Errorf("explicit anime_artwork: got %q, want mal", got)
+	}
+	s := &services.APIKeySettings{AnimeArtwork: "bogus", Lang: "en", RatingsOrder: "imdb", RatingsLimit: 3}
+	_ = validateAndNormalizeKeySettings(s)
+	if s.AnimeArtwork != "id" {
+		t.Errorf("unknown anime_artwork normalised to %q, want id", s.AnimeArtwork)
 	}
 }

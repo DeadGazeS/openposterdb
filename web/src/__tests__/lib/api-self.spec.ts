@@ -78,6 +78,7 @@ function makePayload(overrides: Partial<SaveSettingsPayload> = {}): SaveSettings
     episode_badge_alpha: 80,
     use_kitsu: true,
     use_mal: true,
+    anime_artwork: 'id',
     ...overrides,
   }
 }

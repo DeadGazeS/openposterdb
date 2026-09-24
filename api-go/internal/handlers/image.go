@@ -177,6 +177,7 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
 			Context: r.Context(), DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
+			Kitsu: d.Kitsu, AniList: d.AniList, KitsuIMDbMapper: d.KitsuIMDbMapper,
 			IDType: idTypeStr, IDValue: idValue, Kind: kind,
 			Settings: settings, RatingsLimit: query.RatingsLimit,
 			CacheDir: d.Config.CacheDir, ExternalCacheOnly: d.Config.ExternalCacheOnly,

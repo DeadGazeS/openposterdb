@@ -470,4 +470,21 @@ var Migrations = []Migration{
 		SQL:           "ALTER TABLE api_key_settings ADD COLUMN use_mal INTEGER NOT NULL DEFAULT 1",
 		ExpectedError: "duplicate column",
 	},
+	{
+		// Per-key RenderSettings.AnimeArtwork ("id" / "kitsu" / "mal"),
+		// see NOTES.md #7.
+		SQL:           "ALTER TABLE api_key_settings ADD COLUMN anime_artwork TEXT NOT NULL DEFAULT 'id'",
+		ExpectedError: "duplicate column",
+	},
+	{
+		// image_meta.title_key groups every cached image of one title in the
+		// admin list (NOTES.md #8). '' for rows written before this column.
+		SQL:           "ALTER TABLE image_meta ADD COLUMN title_key TEXT NOT NULL DEFAULT ''",
+		ExpectedError: "duplicate column",
+	},
+	{
+		// image_meta.title — display name shown in the admin lists (NOTES.md #9).
+		SQL:           "ALTER TABLE image_meta ADD COLUMN title TEXT",
+		ExpectedError: "duplicate column",
+	},
 }

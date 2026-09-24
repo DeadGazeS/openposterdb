@@ -199,4 +199,41 @@ func (f PosterFit) CacheSuffix() string {
 	}
 }
 
+// --- AnimeArtwork ---
+
+// AnimeArtwork picks whose artwork a Kitsu/MAL-resolved title uses when both
+// UseKitsu and UseMAL are on: the requested ID's own provider (default), or
+// always Kitsu / always MAL (AniList) so a mixed library looks consistent.
+type AnimeArtwork string
+
+const (
+	AnimeArtworkMatchID AnimeArtwork = "id"
+	AnimeArtworkKitsu   AnimeArtwork = "kitsu"
+	AnimeArtworkMAL     AnimeArtwork = "mal"
+)
+
+func ParseAnimeArtwork(s string) AnimeArtwork {
+	switch s {
+	case "kitsu":
+		return AnimeArtworkKitsu
+	case "mal":
+		return AnimeArtworkMAL
+	default:
+		return AnimeArtworkMatchID
+	}
+}
+
+// CacheSuffix folds a non-default preference into the image cache key; the
+// default adds nothing so existing keys stay stable.
+func (a AnimeArtwork) CacheSuffix() string {
+	switch ParseAnimeArtwork(string(a)) {
+	case AnimeArtworkKitsu:
+		return ".ak"
+	case AnimeArtworkMAL:
+		return ".am"
+	default:
+		return ""
+	}
+}
+
 // --- Default values ---

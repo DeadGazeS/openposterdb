@@ -24,6 +24,11 @@ type ImageMetaItem struct {
 	CreatedAt    int64   `json:"created_at"`
 	UpdatedAt    int64   `json:"updated_at"`
 	LastAccessed int64   `json:"last_accessed"`
+	// TitleKey groups every cached image of one title in the admin list
+	// (NOTES.md #8); "" for rows written before the column existed.
+	TitleKey string `json:"title_key"`
+	// Title is the display name (NOTES.md #9); nil for older rows.
+	Title *string `json:"title"`
 }
 
 // allowlisted columns and directions for ListImageMetaByKindCtx sorting — the
@@ -63,7 +68,7 @@ func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType, sortBy, 
 	}
 
 	offset := (page - 1) * pageSize
-	query := "SELECT cache_key, release_date, image_type, created_at, updated_at, last_accessed FROM image_meta WHERE image_type = ? ORDER BY " + sortBy + " " + sortDir + ", cache_key " + sortDir + " LIMIT ? OFFSET ?"
+	query := "SELECT cache_key, release_date, image_type, created_at, updated_at, last_accessed, title_key, title FROM image_meta WHERE image_type = ? ORDER BY " + sortBy + " " + sortDir + ", cache_key " + sortDir + " LIMIT ? OFFSET ?"
 	rows, err := db.QueryContext(ctx, query, imageType, pageSize, offset)
 	if err != nil {
 		return nil, 0, err
@@ -75,7 +80,7 @@ func ListImageMetaByKindCtx(ctx context.Context, db *sql.DB, imageType, sortBy, 
 	items := make([]ImageMetaItem, 0)
 	for rows.Next() {
 		var item ImageMetaItem
-		if err := rows.Scan(&item.CacheKey, &item.ReleaseDate, &item.ImageType, &item.CreatedAt, &item.UpdatedAt, &item.LastAccessed); err != nil {
+		if err := rows.Scan(&item.CacheKey, &item.ReleaseDate, &item.ImageType, &item.CreatedAt, &item.UpdatedAt, &item.LastAccessed, &item.TitleKey, &item.Title); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, item)
@@ -168,18 +173,18 @@ func DeleteAllImageMeta(db *sql.DB) (int64, error) {
 	return DeleteAllImageMetaCtx(context.Background(), db)
 }
 
-func UpsertImageMetaCtx(ctx context.Context, db *sql.DB, cacheKey string, releaseDate *string, imageType string) error {
+func UpsertImageMetaCtx(ctx context.Context, db *sql.DB, cacheKey string, releaseDate *string, imageType, titleKey string, title *string) error {
 	now := nowUnix()
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO image_meta (cache_key, release_date, image_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(cache_key) DO UPDATE SET release_date = ?, updated_at = ?`,
-		cacheKey, releaseDate, imageType, now, now, releaseDate, now,
+		`INSERT INTO image_meta (cache_key, release_date, image_type, created_at, updated_at, title_key, title) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(cache_key) DO UPDATE SET release_date = ?, updated_at = ?, title_key = ?, title = ?`,
+		cacheKey, releaseDate, imageType, now, now, titleKey, title, releaseDate, now, titleKey, title,
 	)
 	return err
 }
 
-func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType string) error {
-	return UpsertImageMetaCtx(context.Background(), db, cacheKey, releaseDate, imageType)
+func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType, titleKey string, title *string) error {
+	return UpsertImageMetaCtx(context.Background(), db, cacheKey, releaseDate, imageType, titleKey, title)
 }
 
 // TouchImageAccess bumps image_meta.last_accessed for the given cache_key,

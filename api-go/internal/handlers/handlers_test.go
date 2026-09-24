@@ -676,3 +676,53 @@ func TestHandleImage_HeadAllowed(t *testing.T) {
 		}
 	}
 }
+
+// notFoundAnimeStub answers Kitsu and AniList with "not found" and TMDB with
+// empty results, so a kitsu:/mal: request that actually reaches the clients
+// ends in a clean 404.
+type notFoundAnimeStub struct{}
+
+func (notFoundAnimeStub) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json")
+	switch req.URL.Host {
+	case "kitsu.io":
+		rec.WriteHeader(http.StatusNotFound)
+		rec.WriteString(`{"errors":[{"status":"404"}]}`)
+	case "graphql.anilist.co":
+		rec.WriteString(`{"data":{"Media":null},"errors":[{"message":"Not Found.","status":404}]}`)
+	default:
+		rec.WriteString(`{}`)
+	}
+	return rec.Result(), nil
+}
+
+// TestHandleImage_KitsuMALClientsWired guards the public image route passing
+// the Kitsu/AniList clients into ServeImage. Without them every
+// /{apiKey}/kitsu/... and /{apiKey}/mal/... URL failed with a 500
+// "Kitsu/AniList client not configured"; with them an unknown id is a 404.
+func TestHandleImage_KitsuMALClientsWired(t *testing.T) {
+	httpClient := &http.Client{Transport: notFoundAnimeStub{}}
+	deps := ImageDeps{
+		DB:      newHandlersTestDB(t),
+		Config:  &ImageServeConfig{CacheDir: t.TempDir()},
+		TMDB:    services.NewTmdbClient("test-key", httpClient),
+		Kitsu:   services.NewKitsuClient(httpClient),
+		AniList: services.NewAniListClient(httpClient),
+	}
+	h := HandleImage(func() ImageDeps { return deps }, func() bool { return true })
+	for _, path := range []string{
+		"/" + freeAPIKey + "/kitsu/poster-default/999999.jpg",
+		"/" + freeAPIKey + "/mal/poster-default/999999.jpg",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rest := strings.TrimPrefix(path, "/"+freeAPIKey+"/")
+		req.SetPathValue("apiKey", freeAPIKey)
+		req.SetPathValue("rest", rest)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if strings.Contains(rec.Body.String(), "not configured") || rec.Code != http.StatusNotFound {
+			t.Errorf("%s: got %d %s, want 404 from the Kitsu/AniList lookup", path, rec.Code, rec.Body.String())
+		}
+	}
+}
