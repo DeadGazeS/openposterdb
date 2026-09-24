@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
+	"strings"
 
 	"openposterdb/internal/httpx"
 	"openposterdb/internal/services"
@@ -187,161 +189,26 @@ func validateKeySettingsLayouts(s *services.APIKeySettings) error {
 	return nil
 }
 
-// keySettingsUpdate is the partial-update payload for per-key settings. Every
-// numeric/bool field the web client might omit is a pointer so an omitted
-// field preserves the stored value while an explicit 0 (e.g. a ratings limit
-// of 0 meaning "no ratings") is honoured. Everything else decodes into Body
-// via APIKeySettings' layout-normalising UnmarshalJSON.
-//
-// The pointer fields here mirror the int32/bool columns of APIKeySettings; the
-// pattern closes the #10.2 latent bug where Body's non-pointer fields zeroed
-// out any omitted column on upsert (badge_size fires today, the rest are
-// "loaded weapons" against any future partial-payload path).
+// keySettingsUpdate is a decoded per-key settings PUT body. Body holds the
+// payload as APIKeySettings (layouts / colors normalised by its
+// UnmarshalJSON); present records which top-level JSON keys the client
+// actually sent, so mergeKeySettingsUpdate can keep the stored value for
+// every omitted field — without a hand-maintained pointer field per setting.
 type keySettingsUpdate struct {
-	// Ratings + badge direction (existing pointer preservation).
-	RatingsLimit           *int32                   `json:"ratings_limit"`
-	LogoRatingsLimit       *int32                   `json:"logo_ratings_limit"`
-	BackdropRatingsLimit   *int32                   `json:"backdrop_ratings_limit"`
-	EpisodeRatingsLimit    *int32                   `json:"episode_ratings_limit"`
-	PosterBadgeDirection   *services.BadgeDirection `json:"poster_badge_direction"`
-	BackdropBadgeDirection *services.BadgeDirection `json:"backdrop_badge_direction"`
-	EpisodeBadgeDirection  *services.BadgeDirection `json:"episode_badge_direction"`
-
-	// Bool columns (#10.2).
-	Textless    *bool `json:"textless"`
-	EpisodeBlur *bool `json:"episode_blur"`
-
-	// Kitsu/MAL fallback opt-ins (see NOTES.md #13/#14 — previously not
-	// modeled per-key at all).
-	UseKitsu *bool `json:"use_kitsu"`
-	UseMAL   *bool `json:"use_mal"`
-
-	// Anime artwork preference (NOTES.md #7): "id" / "kitsu" / "mal".
-	AnimeArtwork *string `json:"anime_artwork"`
-
-	// Text/badge/logo/badge-alpha sizes (#10.1 badge_size + #10.2 the rest).
-	PosterTextSize     *int32 `json:"poster_text_size"`
-	LogoTextSize       *int32 `json:"logo_text_size"`
-	BackdropTextSize   *int32 `json:"backdrop_text_size"`
-	EpisodeTextSize    *int32 `json:"episode_text_size"`
-	PosterBadgeSize    *int32 `json:"poster_badge_size"`
-	LogoBadgeSize      *int32 `json:"logo_badge_size"`
-	BackdropBadgeSize  *int32 `json:"backdrop_badge_size"`
-	EpisodeBadgeSize   *int32 `json:"episode_badge_size"`
-	PosterLogoSize     *int32 `json:"poster_logo_size"`
-	LogoLogoSize       *int32 `json:"logo_logo_size"`
-	BackdropLogoSize   *int32 `json:"backdrop_logo_size"`
-	EpisodeLogoSize    *int32 `json:"episode_logo_size"`
-	PosterBadgeAlpha   *int32 `json:"poster_badge_alpha"`
-	LogoBadgeAlpha     *int32 `json:"logo_badge_alpha"`
-	BackdropBadgeAlpha *int32 `json:"backdrop_badge_alpha"`
-	EpisodeBadgeAlpha  *int32 `json:"episode_badge_alpha"`
-
-	// Badge per-axis dimensions (#10.2).
-	PosterBadgeWidth    *int32 `json:"poster_badge_width"`
-	PosterBadgeHeight   *int32 `json:"poster_badge_height"`
-	LogoBadgeWidth      *int32 `json:"logo_badge_width"`
-	LogoBadgeHeight     *int32 `json:"logo_badge_height"`
-	BackdropBadgeWidth  *int32 `json:"backdrop_badge_width"`
-	BackdropBadgeHeight *int32 `json:"backdrop_badge_height"`
-	EpisodeBadgeWidth   *int32 `json:"episode_badge_width"`
-	EpisodeBadgeHeight  *int32 `json:"episode_badge_height"`
-
-	// Edge insets (#10.2).
-	BackdropEdgeInsetX *int32 `json:"backdrop_edge_inset_x"`
-	BackdropEdgeInsetY *int32 `json:"backdrop_edge_inset_y"`
-
-	Body services.APIKeySettings `json:"-"`
+	present map[string]bool
+	Body    services.APIKeySettings
 }
 
 func (u *keySettingsUpdate) UnmarshalJSON(data []byte) error {
-	// First pass: capture every preservable field as a pointer so an absent
-	// JSON key leaves the pointer nil and the merge can fall back to base.
-	// Second pass: decode the full payload into Body (custom UnmarshalJSON
-	// normalises the four layouts + colors into their stored JSON-string form).
-	var p struct {
-		RatingsLimit           *int32                   `json:"ratings_limit"`
-		LogoRatingsLimit       *int32                   `json:"logo_ratings_limit"`
-		BackdropRatingsLimit   *int32                   `json:"backdrop_ratings_limit"`
-		EpisodeRatingsLimit    *int32                   `json:"episode_ratings_limit"`
-		PosterBadgeDirection   *services.BadgeDirection `json:"poster_badge_direction"`
-		BackdropBadgeDirection *services.BadgeDirection `json:"backdrop_badge_direction"`
-		EpisodeBadgeDirection  *services.BadgeDirection `json:"episode_badge_direction"`
-		Textless               *bool                    `json:"textless"`
-		EpisodeBlur            *bool                    `json:"episode_blur"`
-		UseKitsu               *bool                    `json:"use_kitsu"`
-		UseMAL                 *bool                    `json:"use_mal"`
-		AnimeArtwork           *string                  `json:"anime_artwork"`
-		PosterTextSize         *int32                   `json:"poster_text_size"`
-		LogoTextSize           *int32                   `json:"logo_text_size"`
-		BackdropTextSize       *int32                   `json:"backdrop_text_size"`
-		EpisodeTextSize        *int32                   `json:"episode_text_size"`
-		PosterBadgeSize        *int32                   `json:"poster_badge_size"`
-		LogoBadgeSize          *int32                   `json:"logo_badge_size"`
-		BackdropBadgeSize      *int32                   `json:"backdrop_badge_size"`
-		EpisodeBadgeSize       *int32                   `json:"episode_badge_size"`
-		PosterLogoSize         *int32                   `json:"poster_logo_size"`
-		LogoLogoSize           *int32                   `json:"logo_logo_size"`
-		BackdropLogoSize       *int32                   `json:"backdrop_logo_size"`
-		EpisodeLogoSize        *int32                   `json:"episode_logo_size"`
-		PosterBadgeAlpha       *int32                   `json:"poster_badge_alpha"`
-		LogoBadgeAlpha         *int32                   `json:"logo_badge_alpha"`
-		BackdropBadgeAlpha     *int32                   `json:"backdrop_badge_alpha"`
-		EpisodeBadgeAlpha      *int32                   `json:"episode_badge_alpha"`
-		PosterBadgeWidth       *int32                   `json:"poster_badge_width"`
-		PosterBadgeHeight      *int32                   `json:"poster_badge_height"`
-		LogoBadgeWidth         *int32                   `json:"logo_badge_width"`
-		LogoBadgeHeight        *int32                   `json:"logo_badge_height"`
-		BackdropBadgeWidth     *int32                   `json:"backdrop_badge_width"`
-		BackdropBadgeHeight    *int32                   `json:"backdrop_badge_height"`
-		EpisodeBadgeWidth      *int32                   `json:"episode_badge_width"`
-		EpisodeBadgeHeight     *int32                   `json:"episode_badge_height"`
-		BackdropEdgeInsetX     *int32                   `json:"backdrop_edge_inset_x"`
-		BackdropEdgeInsetY     *int32                   `json:"backdrop_edge_inset_y"`
-	}
-	if err := json.Unmarshal(data, &p); err != nil {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
 		return err
 	}
-	*u = keySettingsUpdate{
-		RatingsLimit:           p.RatingsLimit,
-		LogoRatingsLimit:       p.LogoRatingsLimit,
-		BackdropRatingsLimit:   p.BackdropRatingsLimit,
-		EpisodeRatingsLimit:    p.EpisodeRatingsLimit,
-		PosterBadgeDirection:   p.PosterBadgeDirection,
-		BackdropBadgeDirection: p.BackdropBadgeDirection,
-		EpisodeBadgeDirection:  p.EpisodeBadgeDirection,
-		Textless:               p.Textless,
-		EpisodeBlur:            p.EpisodeBlur,
-		UseKitsu:               p.UseKitsu,
-		UseMAL:                 p.UseMAL,
-		AnimeArtwork:           p.AnimeArtwork,
-		PosterTextSize:         p.PosterTextSize,
-		LogoTextSize:           p.LogoTextSize,
-		BackdropTextSize:       p.BackdropTextSize,
-		EpisodeTextSize:        p.EpisodeTextSize,
-		PosterBadgeSize:        p.PosterBadgeSize,
-		LogoBadgeSize:          p.LogoBadgeSize,
-		BackdropBadgeSize:      p.BackdropBadgeSize,
-		EpisodeBadgeSize:       p.EpisodeBadgeSize,
-		PosterLogoSize:         p.PosterLogoSize,
-		LogoLogoSize:           p.LogoLogoSize,
-		BackdropLogoSize:       p.BackdropLogoSize,
-		EpisodeLogoSize:        p.EpisodeLogoSize,
-		PosterBadgeAlpha:       p.PosterBadgeAlpha,
-		LogoBadgeAlpha:         p.LogoBadgeAlpha,
-		BackdropBadgeAlpha:     p.BackdropBadgeAlpha,
-		EpisodeBadgeAlpha:      p.EpisodeBadgeAlpha,
-		PosterBadgeWidth:       p.PosterBadgeWidth,
-		PosterBadgeHeight:      p.PosterBadgeHeight,
-		LogoBadgeWidth:         p.LogoBadgeWidth,
-		LogoBadgeHeight:        p.LogoBadgeHeight,
-		BackdropBadgeWidth:     p.BackdropBadgeWidth,
-		BackdropBadgeHeight:    p.BackdropBadgeHeight,
-		EpisodeBadgeWidth:      p.EpisodeBadgeWidth,
-		EpisodeBadgeHeight:     p.EpisodeBadgeHeight,
-		BackdropEdgeInsetX:     p.BackdropEdgeInsetX,
-		BackdropEdgeInsetY:     p.BackdropEdgeInsetY,
+	u.present = make(map[string]bool, len(keys))
+	for k := range keys {
+		u.present[k] = true
 	}
+	u.Body = services.APIKeySettings{}
 	return json.Unmarshal(data, &u.Body)
 }
 
@@ -396,229 +263,23 @@ func loadKeySettingsBase(ctx context.Context, db *sql.DB, apiKeyID int64) (*serv
 }
 
 // mergeKeySettingsUpdate overlays the client payload onto the stored (or
-// effective-default) settings: omitted optional fields keep the stored value,
-// an explicit 0 for a numeric field or `false` for a bool is honoured, and all
-// other fields take the payload's values (the web client always sends them).
-// String/enum fields not declared as pointers in keySettingsUpdate decode via
-// Body and use the payload's value directly — those fields are always sent by
-// the web client.
+// effective-default) settings: every field the payload omits keeps the
+// stored value, and every field it sends — including an explicit 0, false
+// or "" — is taken as-is. Driven by APIKeySettings' json tags, so a new
+// per-key field gets preserve-on-omit automatically. Colors additionally
+// keep the stored value when sent as null / "" (legacy clients).
 func mergeKeySettingsUpdate(base *services.APIKeySettings, body *keySettingsUpdate) services.APIKeySettings {
 	merged := body.Body
-
-	// Ratings limits (#10.2 already-pointer + explicit-0 honoured).
-	if body.RatingsLimit != nil {
-		merged.RatingsLimit = *body.RatingsLimit
-	} else {
-		merged.RatingsLimit = base.RatingsLimit
+	mv := reflect.ValueOf(&merged).Elem()
+	bv := reflect.ValueOf(base).Elem()
+	for i := 0; i < mv.NumField(); i++ {
+		tag := strings.Split(mv.Type().Field(i).Tag.Get("json"), ",")[0]
+		if tag == "api_key_id" || body.present[tag] {
+			continue
+		}
+		mv.Field(i).Set(bv.Field(i))
 	}
-	if body.LogoRatingsLimit != nil {
-		merged.LogoRatingsLimit = *body.LogoRatingsLimit
-	} else {
-		merged.LogoRatingsLimit = base.LogoRatingsLimit
-	}
-	if body.BackdropRatingsLimit != nil {
-		merged.BackdropRatingsLimit = *body.BackdropRatingsLimit
-	} else {
-		merged.BackdropRatingsLimit = base.BackdropRatingsLimit
-	}
-	if body.EpisodeRatingsLimit != nil {
-		merged.EpisodeRatingsLimit = *body.EpisodeRatingsLimit
-	} else {
-		merged.EpisodeRatingsLimit = base.EpisodeRatingsLimit
-	}
-
-	// Badge directions (#10.2 already-pointer).
-	if body.PosterBadgeDirection != nil {
-		merged.PosterBadgeDirection = string(*body.PosterBadgeDirection)
-	} else {
-		merged.PosterBadgeDirection = base.PosterBadgeDirection
-	}
-	if body.BackdropBadgeDirection != nil {
-		merged.BackdropBadgeDirection = string(*body.BackdropBadgeDirection)
-	} else {
-		merged.BackdropBadgeDirection = base.BackdropBadgeDirection
-	}
-	if body.EpisodeBadgeDirection != nil {
-		merged.EpisodeBadgeDirection = string(*body.EpisodeBadgeDirection)
-	} else {
-		merged.EpisodeBadgeDirection = base.EpisodeBadgeDirection
-	}
-
-	// Bools (#10.2).
-	if body.Textless != nil {
-		merged.Textless = *body.Textless
-	} else {
-		merged.Textless = base.Textless
-	}
-	if body.EpisodeBlur != nil {
-		merged.EpisodeBlur = *body.EpisodeBlur
-	} else {
-		merged.EpisodeBlur = base.EpisodeBlur
-	}
-
-	// Kitsu/MAL fallback opt-ins (#13/#14 — previously not modeled per-key).
-	if body.UseKitsu != nil {
-		merged.UseKitsu = *body.UseKitsu
-	} else {
-		merged.UseKitsu = base.UseKitsu
-	}
-	if body.UseMAL != nil {
-		merged.UseMAL = *body.UseMAL
-	} else {
-		merged.UseMAL = base.UseMAL
-	}
-	if body.AnimeArtwork != nil {
-		merged.AnimeArtwork = *body.AnimeArtwork
-	} else {
-		merged.AnimeArtwork = base.AnimeArtwork
-	}
-
-	// Text sizes (#10.2).
-	if body.PosterTextSize != nil {
-		merged.PosterTextSize = *body.PosterTextSize
-	} else {
-		merged.PosterTextSize = base.PosterTextSize
-	}
-	if body.LogoTextSize != nil {
-		merged.LogoTextSize = *body.LogoTextSize
-	} else {
-		merged.LogoTextSize = base.LogoTextSize
-	}
-	if body.BackdropTextSize != nil {
-		merged.BackdropTextSize = *body.BackdropTextSize
-	} else {
-		merged.BackdropTextSize = base.BackdropTextSize
-	}
-	if body.EpisodeTextSize != nil {
-		merged.EpisodeTextSize = *body.EpisodeTextSize
-	} else {
-		merged.EpisodeTextSize = base.EpisodeTextSize
-	}
-
-	// Badge sizes (#10.1 — the field that fires today: first save on any
-	// per-key surface previously zeroed all four badge_sizes → clamped to 50).
-	if body.PosterBadgeSize != nil {
-		merged.PosterBadgeSize = *body.PosterBadgeSize
-	} else {
-		merged.PosterBadgeSize = base.PosterBadgeSize
-	}
-	if body.LogoBadgeSize != nil {
-		merged.LogoBadgeSize = *body.LogoBadgeSize
-	} else {
-		merged.LogoBadgeSize = base.LogoBadgeSize
-	}
-	if body.BackdropBadgeSize != nil {
-		merged.BackdropBadgeSize = *body.BackdropBadgeSize
-	} else {
-		merged.BackdropBadgeSize = base.BackdropBadgeSize
-	}
-	if body.EpisodeBadgeSize != nil {
-		merged.EpisodeBadgeSize = *body.EpisodeBadgeSize
-	} else {
-		merged.EpisodeBadgeSize = base.EpisodeBadgeSize
-	}
-
-	// Logo sizes (#10.2).
-	if body.PosterLogoSize != nil {
-		merged.PosterLogoSize = *body.PosterLogoSize
-	} else {
-		merged.PosterLogoSize = base.PosterLogoSize
-	}
-	if body.LogoLogoSize != nil {
-		merged.LogoLogoSize = *body.LogoLogoSize
-	} else {
-		merged.LogoLogoSize = base.LogoLogoSize
-	}
-	if body.BackdropLogoSize != nil {
-		merged.BackdropLogoSize = *body.BackdropLogoSize
-	} else {
-		merged.BackdropLogoSize = base.BackdropLogoSize
-	}
-	if body.EpisodeLogoSize != nil {
-		merged.EpisodeLogoSize = *body.EpisodeLogoSize
-	} else {
-		merged.EpisodeLogoSize = base.EpisodeLogoSize
-	}
-
-	// Badge alphas (#10.2).
-	if body.PosterBadgeAlpha != nil {
-		merged.PosterBadgeAlpha = *body.PosterBadgeAlpha
-	} else {
-		merged.PosterBadgeAlpha = base.PosterBadgeAlpha
-	}
-	if body.LogoBadgeAlpha != nil {
-		merged.LogoBadgeAlpha = *body.LogoBadgeAlpha
-	} else {
-		merged.LogoBadgeAlpha = base.LogoBadgeAlpha
-	}
-	if body.BackdropBadgeAlpha != nil {
-		merged.BackdropBadgeAlpha = *body.BackdropBadgeAlpha
-	} else {
-		merged.BackdropBadgeAlpha = base.BackdropBadgeAlpha
-	}
-	if body.EpisodeBadgeAlpha != nil {
-		merged.EpisodeBadgeAlpha = *body.EpisodeBadgeAlpha
-	} else {
-		merged.EpisodeBadgeAlpha = base.EpisodeBadgeAlpha
-	}
-
-	// Badge per-axis dimensions (#10.2).
-	if body.PosterBadgeWidth != nil {
-		merged.PosterBadgeWidth = *body.PosterBadgeWidth
-	} else {
-		merged.PosterBadgeWidth = base.PosterBadgeWidth
-	}
-	if body.PosterBadgeHeight != nil {
-		merged.PosterBadgeHeight = *body.PosterBadgeHeight
-	} else {
-		merged.PosterBadgeHeight = base.PosterBadgeHeight
-	}
-	if body.LogoBadgeWidth != nil {
-		merged.LogoBadgeWidth = *body.LogoBadgeWidth
-	} else {
-		merged.LogoBadgeWidth = base.LogoBadgeWidth
-	}
-	if body.LogoBadgeHeight != nil {
-		merged.LogoBadgeHeight = *body.LogoBadgeHeight
-	} else {
-		merged.LogoBadgeHeight = base.LogoBadgeHeight
-	}
-	if body.BackdropBadgeWidth != nil {
-		merged.BackdropBadgeWidth = *body.BackdropBadgeWidth
-	} else {
-		merged.BackdropBadgeWidth = base.BackdropBadgeWidth
-	}
-	if body.BackdropBadgeHeight != nil {
-		merged.BackdropBadgeHeight = *body.BackdropBadgeHeight
-	} else {
-		merged.BackdropBadgeHeight = base.BackdropBadgeHeight
-	}
-	if body.EpisodeBadgeWidth != nil {
-		merged.EpisodeBadgeWidth = *body.EpisodeBadgeWidth
-	} else {
-		merged.EpisodeBadgeWidth = base.EpisodeBadgeWidth
-	}
-	if body.EpisodeBadgeHeight != nil {
-		merged.EpisodeBadgeHeight = *body.EpisodeBadgeHeight
-	} else {
-		merged.EpisodeBadgeHeight = base.EpisodeBadgeHeight
-	}
-
-	// Edge insets (#10.2).
-	if body.BackdropEdgeInsetX != nil {
-		merged.BackdropEdgeInsetX = *body.BackdropEdgeInsetX
-	} else {
-		merged.BackdropEdgeInsetX = base.BackdropEdgeInsetX
-	}
-	if body.BackdropEdgeInsetY != nil {
-		merged.BackdropEdgeInsetY = *body.BackdropEdgeInsetY
-	} else {
-		merged.BackdropEdgeInsetY = base.BackdropEdgeInsetY
-	}
-
 	if merged.Colors == "" {
-		// Omitted colours keep the stored value (the web client always sends
-		// them, so this only affects partial/legacy payloads).
 		merged.Colors = base.Colors
 	}
 	return merged

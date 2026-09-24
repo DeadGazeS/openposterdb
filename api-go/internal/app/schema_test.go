@@ -373,28 +373,10 @@ var requiredTableColumns = []struct {
 	{"available_ratings", []string{
 		"id_key", "sources", "updated_at", "release_date",
 	}},
-	{"api_key_settings", []string{
-		"api_key_id", "image_source", "lang", "textless",
-		"ratings_limit", "ratings_order", "ratings_exclude",
-		"poster_layout", "logo_layout", "backdrop_layout", "episode_layout",
-		"logo_ratings_limit", "backdrop_ratings_limit", "episode_ratings_limit",
-		"poster_badge_style", "logo_badge_style", "backdrop_badge_style", "episode_badge_style",
-		"poster_label_style", "logo_label_style", "backdrop_label_style", "episode_label_style",
-		"poster_badge_direction", "backdrop_badge_direction", "episode_badge_direction",
-		"poster_fit", "poster_text_size", "logo_text_size", "backdrop_text_size", "episode_text_size",
-		"poster_badge_size", "logo_badge_size", "backdrop_badge_size", "episode_badge_size",
-		"poster_badge_width", "poster_badge_height",
-		"logo_badge_width", "logo_badge_height",
-		"backdrop_badge_width", "backdrop_badge_height",
-		"episode_badge_width", "episode_badge_height",
-		"poster_logo_size", "logo_logo_size", "backdrop_logo_size", "episode_logo_size",
-		"episode_blur",
-		"poster_badge_shape", "logo_badge_shape", "backdrop_badge_shape", "episode_badge_shape",
-		"poster_badge_alpha", "logo_badge_alpha", "backdrop_badge_alpha", "episode_badge_alpha",
-		"backdrop_edge_inset_x", "backdrop_edge_inset_y",
-		"use_kitsu", "use_mal", "anime_artwork",
-		"colors",
-	}},
+	// Derived from the APIKeySettings struct (the per-key SQL is generated
+	// from it too), so a new per-key field without its ALTER TABLE migration
+	// fails here.
+	{"api_key_settings", services.APIKeySettingsColumns()},
 }
 
 // TestFullBootstrap_AllTableColumnsPresent (#10.6) extends the original

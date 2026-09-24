@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
+	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -173,49 +175,64 @@ func (s *APIKeySettings) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// The api_key_settings column list is derived from APIKeySettings: one
+// column per struct field, named by its json tag (they match by
+// convention), in field order. Adding a per-key setting therefore means a
+// struct field plus its ALTER TABLE migration — the SELECT / Scan / INSERT
+// / ON CONFLICT lists below follow automatically, and
+// TestFullBootstrap_AllTableColumnsPresent checks the migration exists.
+var apiKeySettingsColumns = func() []string {
+	t := reflect.TypeOf(APIKeySettings{})
+	cols := make([]string, t.NumField())
+	for i := range cols {
+		cols[i] = strings.Split(t.Field(i).Tag.Get("json"), ",")[0]
+	}
+	return cols
+}()
+
+// APIKeySettingsColumns returns the api_key_settings columns the code reads
+// and writes (see apiKeySettingsColumns).
+func APIKeySettingsColumns() []string { return slices.Clone(apiKeySettingsColumns) }
+
+var (
+	selectAPIKeySettingsSQL = "SELECT " + strings.Join(apiKeySettingsColumns, ", ") +
+		" FROM api_key_settings WHERE api_key_id = ?"
+	upsertAPIKeySettingsSQL = func() string {
+		sets := make([]string, 0, len(apiKeySettingsColumns)-1)
+		for _, c := range apiKeySettingsColumns {
+			if c != "api_key_id" {
+				sets = append(sets, c+" = excluded."+c)
+			}
+		}
+		return "INSERT INTO api_key_settings (" + strings.Join(apiKeySettingsColumns, ", ") +
+			") VALUES (" + strings.TrimSuffix(strings.Repeat("?, ", len(apiKeySettingsColumns)), ", ") +
+			") ON CONFLICT(api_key_id) DO UPDATE SET " + strings.Join(sets, ", ")
+	}()
+)
+
+// apiKeySettingsFieldPtrs / apiKeySettingsFieldValues return the struct's
+// fields in apiKeySettingsColumns order, for Scan and Exec respectively.
+func apiKeySettingsFieldPtrs(s *APIKeySettings) []any {
+	v := reflect.ValueOf(s).Elem()
+	out := make([]any, v.NumField())
+	for i := range out {
+		out[i] = v.Field(i).Addr().Interface()
+	}
+	return out
+}
+
+func apiKeySettingsFieldValues(s *APIKeySettings) []any {
+	v := reflect.ValueOf(s).Elem()
+	out := make([]any, v.NumField())
+	for i := range out {
+		out[i] = v.Field(i).Interface()
+	}
+	return out
+}
+
 func GetAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 	var s APIKeySettings
-	err := db.QueryRowContext(ctx, `SELECT
-		api_key_id, image_source, lang, textless, ratings_limit, ratings_order, ratings_exclude,
-		poster_layout, logo_ratings_limit, backdrop_ratings_limit,
-		poster_badge_style, logo_badge_style, backdrop_badge_style,
-		poster_label_style, logo_label_style, backdrop_label_style,
-		poster_badge_direction, poster_fit,
-		poster_text_size, logo_text_size, backdrop_text_size,
-		poster_badge_size, logo_badge_size, backdrop_badge_size,
-		poster_badge_width, poster_badge_height,
-		logo_badge_width, logo_badge_height,
-		backdrop_badge_width, backdrop_badge_height,
-		poster_logo_size, logo_logo_size, backdrop_logo_size,
-		logo_layout,
-		backdrop_layout, backdrop_badge_direction,
-		episode_ratings_limit, episode_badge_style, episode_label_style, episode_text_size,
-		episode_badge_size, episode_badge_width, episode_badge_height, episode_logo_size,
-		episode_layout, episode_badge_direction, episode_blur,
-		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
-		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
-		backdrop_edge_inset_x, backdrop_edge_inset_y, use_kitsu, use_mal, anime_artwork, colors
-		FROM api_key_settings WHERE api_key_id = ?`, apiKeyID).Scan(
-		&s.APIKeyID, &s.ImageSource, &s.Lang, &s.Textless, &s.RatingsLimit, &s.RatingsOrder, &s.RatingsExclude,
-		&s.PosterLayout, &s.LogoRatingsLimit, &s.BackdropRatingsLimit,
-		&s.PosterBadgeStyle, &s.LogoBadgeStyle, &s.BackdropBadgeStyle,
-		&s.PosterLabelStyle, &s.LogoLabelStyle, &s.BackdropLabelStyle,
-		&s.PosterBadgeDirection, &s.PosterFit,
-		&s.PosterTextSize, &s.LogoTextSize, &s.BackdropTextSize,
-		&s.PosterBadgeSize, &s.LogoBadgeSize, &s.BackdropBadgeSize,
-		&s.PosterBadgeWidth, &s.PosterBadgeHeight,
-		&s.LogoBadgeWidth, &s.LogoBadgeHeight,
-		&s.BackdropBadgeWidth, &s.BackdropBadgeHeight,
-		&s.PosterLogoSize, &s.LogoLogoSize, &s.BackdropLogoSize,
-		&s.LogoLayout,
-		&s.BackdropLayout, &s.BackdropBadgeDirection,
-		&s.EpisodeRatingsLimit, &s.EpisodeBadgeStyle, &s.EpisodeLabelStyle, &s.EpisodeTextSize,
-		&s.EpisodeBadgeSize, &s.EpisodeBadgeWidth, &s.EpisodeBadgeHeight, &s.EpisodeLogoSize,
-		&s.EpisodeLayout, &s.EpisodeBadgeDirection, &s.EpisodeBlur,
-		&s.PosterBadgeShape, &s.LogoBadgeShape, &s.BackdropBadgeShape, &s.EpisodeBadgeShape,
-		&s.PosterBadgeAlpha, &s.LogoBadgeAlpha, &s.BackdropBadgeAlpha, &s.EpisodeBadgeAlpha,
-		&s.BackdropEdgeInsetX, &s.BackdropEdgeInsetY, &s.UseKitsu, &s.UseMAL, &s.AnimeArtwork, &s.Colors,
-	)
+	err := db.QueryRowContext(ctx, selectAPIKeySettingsSQL, apiKeyID).Scan(apiKeySettingsFieldPtrs(&s)...)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -227,108 +244,7 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 }
 
 func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings) error {
-	_, err := db.ExecContext(ctx, `INSERT INTO api_key_settings (
-		api_key_id, image_source, lang, textless, ratings_limit, ratings_order, ratings_exclude,
-		poster_layout, logo_ratings_limit, backdrop_ratings_limit,
-		poster_badge_style, logo_badge_style, backdrop_badge_style,
-		poster_label_style, logo_label_style, backdrop_label_style,
-		poster_badge_direction, poster_fit,
-		poster_text_size, logo_text_size, backdrop_text_size,
-		poster_badge_size, logo_badge_size, backdrop_badge_size,
-		poster_badge_width, poster_badge_height,
-		logo_badge_width, logo_badge_height,
-		backdrop_badge_width, backdrop_badge_height,
-		poster_logo_size, logo_logo_size, backdrop_logo_size,
-		logo_layout,
-		backdrop_layout, backdrop_badge_direction,
-		episode_ratings_limit, episode_badge_style, episode_label_style, episode_text_size,
-		episode_badge_size, episode_badge_width, episode_badge_height, episode_logo_size,
-		episode_layout, episode_badge_direction, episode_blur,
-		poster_badge_shape, logo_badge_shape, backdrop_badge_shape, episode_badge_shape,
-		poster_badge_alpha, logo_badge_alpha, backdrop_badge_alpha, episode_badge_alpha,
-		backdrop_edge_inset_x, backdrop_edge_inset_y, use_kitsu, use_mal, anime_artwork, colors
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(api_key_id) DO UPDATE SET
-		image_source = excluded.image_source,
-		lang = excluded.lang,
-		textless = excluded.textless,
-		ratings_limit = excluded.ratings_limit,
-		ratings_order = excluded.ratings_order,
-		ratings_exclude = excluded.ratings_exclude,
-		poster_layout = excluded.poster_layout,
-		logo_ratings_limit = excluded.logo_ratings_limit,
-		backdrop_ratings_limit = excluded.backdrop_ratings_limit,
-		poster_badge_style = excluded.poster_badge_style,
-		logo_badge_style = excluded.logo_badge_style,
-		backdrop_badge_style = excluded.backdrop_badge_style,
-		poster_label_style = excluded.poster_label_style,
-		logo_label_style = excluded.logo_label_style,
-		backdrop_label_style = excluded.backdrop_label_style,
-		poster_badge_direction = excluded.poster_badge_direction,
-		poster_fit = excluded.poster_fit,
-		poster_text_size = excluded.poster_text_size,
-		logo_text_size = excluded.logo_text_size,
-		backdrop_text_size = excluded.backdrop_text_size,
-		poster_badge_size = excluded.poster_badge_size,
-		logo_badge_size = excluded.logo_badge_size,
-		backdrop_badge_size = excluded.backdrop_badge_size,
-		poster_badge_width = excluded.poster_badge_width,
-		poster_badge_height = excluded.poster_badge_height,
-		logo_badge_width = excluded.logo_badge_width,
-		logo_badge_height = excluded.logo_badge_height,
-		backdrop_badge_width = excluded.backdrop_badge_width,
-		backdrop_badge_height = excluded.backdrop_badge_height,
-		poster_logo_size = excluded.poster_logo_size,
-		logo_logo_size = excluded.logo_logo_size,
-		backdrop_logo_size = excluded.backdrop_logo_size,
-		logo_layout = excluded.logo_layout,
-		backdrop_layout = excluded.backdrop_layout,
-		backdrop_badge_direction = excluded.backdrop_badge_direction,
-		episode_ratings_limit = excluded.episode_ratings_limit,
-		episode_badge_style = excluded.episode_badge_style,
-		episode_label_style = excluded.episode_label_style,
-		episode_text_size = excluded.episode_text_size,
-		episode_badge_size = excluded.episode_badge_size,
-		episode_badge_width = excluded.episode_badge_width,
-		episode_badge_height = excluded.episode_badge_height,
-		episode_logo_size = excluded.episode_logo_size,
-		episode_layout = excluded.episode_layout,
-		episode_badge_direction = excluded.episode_badge_direction,
-		episode_blur = excluded.episode_blur,
-		poster_badge_shape = excluded.poster_badge_shape,
-		logo_badge_shape = excluded.logo_badge_shape,
-		backdrop_badge_shape = excluded.backdrop_badge_shape,
-		episode_badge_shape = excluded.episode_badge_shape,
-		poster_badge_alpha = excluded.poster_badge_alpha,
-		logo_badge_alpha = excluded.logo_badge_alpha,
-		backdrop_badge_alpha = excluded.backdrop_badge_alpha,
-		episode_badge_alpha = excluded.episode_badge_alpha,
-		backdrop_edge_inset_x = excluded.backdrop_edge_inset_x,
-		backdrop_edge_inset_y = excluded.backdrop_edge_inset_y,
-		use_kitsu = excluded.use_kitsu,
-		use_mal = excluded.use_mal,
-		anime_artwork = excluded.anime_artwork,
-		colors = excluded.colors`,
-		s.APIKeyID, s.ImageSource, s.Lang, s.Textless, s.RatingsLimit, s.RatingsOrder, s.RatingsExclude,
-		s.PosterLayout, s.LogoRatingsLimit, s.BackdropRatingsLimit,
-		s.PosterBadgeStyle, s.LogoBadgeStyle, s.BackdropBadgeStyle,
-		s.PosterLabelStyle, s.LogoLabelStyle, s.BackdropLabelStyle,
-		s.PosterBadgeDirection, s.PosterFit,
-		s.PosterTextSize, s.LogoTextSize, s.BackdropTextSize,
-		s.PosterBadgeSize, s.LogoBadgeSize, s.BackdropBadgeSize,
-		s.PosterBadgeWidth, s.PosterBadgeHeight,
-		s.LogoBadgeWidth, s.LogoBadgeHeight,
-		s.BackdropBadgeWidth, s.BackdropBadgeHeight,
-		s.PosterLogoSize, s.LogoLogoSize, s.BackdropLogoSize,
-		s.LogoLayout,
-		s.BackdropLayout, s.BackdropBadgeDirection,
-		s.EpisodeRatingsLimit, s.EpisodeBadgeStyle, s.EpisodeLabelStyle, s.EpisodeTextSize,
-		s.EpisodeBadgeSize, s.EpisodeBadgeWidth, s.EpisodeBadgeHeight, s.EpisodeLogoSize,
-		s.EpisodeLayout, s.EpisodeBadgeDirection, s.EpisodeBlur,
-		s.PosterBadgeShape, s.LogoBadgeShape, s.BackdropBadgeShape, s.EpisodeBadgeShape,
-		s.PosterBadgeAlpha, s.LogoBadgeAlpha, s.BackdropBadgeAlpha, s.EpisodeBadgeAlpha,
-		s.BackdropEdgeInsetX, s.BackdropEdgeInsetY, s.UseKitsu, s.UseMAL, s.AnimeArtwork, s.Colors,
-	)
+	_, err := db.ExecContext(ctx, upsertAPIKeySettingsSQL, apiKeySettingsFieldValues(s)...)
 	return err
 }
 

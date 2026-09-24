@@ -21,69 +21,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 	last_used_at TEXT
 );
 CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS api_key_settings (
-	api_key_id INTEGER PRIMARY KEY,
-	image_source TEXT NOT NULL DEFAULT 't',
-	lang TEXT NOT NULL DEFAULT 'en',
-	textless INTEGER NOT NULL DEFAULT 0,
-	ratings_limit INTEGER NOT NULL DEFAULT 3,
-	ratings_order TEXT NOT NULL DEFAULT '',
-	ratings_exclude TEXT NOT NULL DEFAULT '',
-	poster_layout TEXT NOT NULL DEFAULT '{"bottom":{"per_row":3,"rows":1,"start":"c"}}',
-	logo_ratings_limit INTEGER NOT NULL DEFAULT 5,
-	backdrop_ratings_limit INTEGER NOT NULL DEFAULT 5,
-	poster_badge_style TEXT NOT NULL DEFAULT 'h',
-	logo_badge_style TEXT NOT NULL DEFAULT 'v',
-	backdrop_badge_style TEXT NOT NULL DEFAULT 'v',
-	poster_label_style TEXT NOT NULL DEFAULT 'o',
-	logo_label_style TEXT NOT NULL DEFAULT 'o',
-	backdrop_label_style TEXT NOT NULL DEFAULT 'o',
-	poster_badge_direction TEXT NOT NULL DEFAULT 'd',
-	poster_fit TEXT NOT NULL DEFAULT 'native',
-	poster_text_size INTEGER NOT NULL DEFAULT 100,
-	logo_text_size INTEGER NOT NULL DEFAULT 100,
-	backdrop_text_size INTEGER NOT NULL DEFAULT 100,
-	poster_badge_size INTEGER NOT NULL DEFAULT 100,
-	logo_badge_size INTEGER NOT NULL DEFAULT 100,
-	backdrop_badge_size INTEGER NOT NULL DEFAULT 100,
-	poster_badge_width INTEGER NOT NULL DEFAULT 100,
-	poster_badge_height INTEGER NOT NULL DEFAULT 100,
-	logo_badge_width INTEGER NOT NULL DEFAULT 100,
-	logo_badge_height INTEGER NOT NULL DEFAULT 100,
-	backdrop_badge_width INTEGER NOT NULL DEFAULT 100,
-	backdrop_badge_height INTEGER NOT NULL DEFAULT 100,
-	episode_badge_width INTEGER NOT NULL DEFAULT 100,
-	episode_badge_height INTEGER NOT NULL DEFAULT 100,
-	poster_logo_size INTEGER NOT NULL DEFAULT 100,
-	logo_logo_size INTEGER NOT NULL DEFAULT 100,
-	backdrop_logo_size INTEGER NOT NULL DEFAULT 100,
-	logo_layout TEXT NOT NULL DEFAULT '{"bottom":{"per_row":5,"rows":1,"start":"c"}}',
-	backdrop_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":5,"rows":1,"start":"r"}}',
-	backdrop_badge_direction TEXT NOT NULL DEFAULT 'd',
-	episode_ratings_limit INTEGER NOT NULL DEFAULT 1,
-	episode_badge_style TEXT NOT NULL DEFAULT 'v',
-	episode_label_style TEXT NOT NULL DEFAULT 'o',
-	episode_text_size INTEGER NOT NULL DEFAULT 100,
-	episode_badge_size INTEGER NOT NULL DEFAULT 100,
-	episode_logo_size INTEGER NOT NULL DEFAULT 100,
-	episode_layout TEXT NOT NULL DEFAULT '{"right":{"per_row":1,"rows":1,"start":"t"}}',
-	episode_badge_direction TEXT NOT NULL DEFAULT 'v',
-	episode_blur INTEGER NOT NULL DEFAULT 0,
-	use_kitsu INTEGER NOT NULL DEFAULT 1,
-	use_mal INTEGER NOT NULL DEFAULT 1,
-	anime_artwork TEXT NOT NULL DEFAULT 'id',
-	poster_badge_shape TEXT NOT NULL DEFAULT 'r',
-	logo_badge_shape TEXT NOT NULL DEFAULT 'r',
-	backdrop_badge_shape TEXT NOT NULL DEFAULT 'r',
-	episode_badge_shape TEXT NOT NULL DEFAULT 'r',
-	poster_badge_alpha INTEGER NOT NULL DEFAULT 80,
-	logo_badge_alpha INTEGER NOT NULL DEFAULT 80,
-	backdrop_badge_alpha INTEGER NOT NULL DEFAULT 80,
-	episode_badge_alpha INTEGER NOT NULL DEFAULT 80,
-	backdrop_edge_inset_x INTEGER NOT NULL DEFAULT 0,
-	backdrop_edge_inset_y INTEGER NOT NULL DEFAULT 0,
-	colors TEXT NOT NULL DEFAULT ''
-);
+
 `
 
 func newExportTestDB(t *testing.T) *sql.DB {
@@ -92,7 +30,7 @@ func newExportTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(exportTestSchema); err != nil {
+	if _, err := db.Exec(exportTestSchema + apiKeySettingsTestDDL()); err != nil {
 		t.Fatal(err)
 	}
 	return db

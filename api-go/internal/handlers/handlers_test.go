@@ -359,17 +359,6 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 func TestLogoutRevokesRefreshTokens(t *testing.T) {
 	db := newHandlersTestDB(t)
 
-	// refresh_tokens isn't in apiKeySettingsTestSchema; create a minimal copy.
-	if _, err := db.Exec(`CREATE TABLE refresh_tokens (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id INTEGER NOT NULL,
-		token_hash TEXT NOT NULL UNIQUE,
-		expires_at TEXT NOT NULL,
-		created_at TEXT NOT NULL DEFAULT (datetime('now'))
-	)`); err != nil {
-		t.Fatal(err)
-	}
-
 	// Seed an admin user.
 	res, err := db.Exec("INSERT INTO admin_users (username, password_hash) VALUES ('admin', 'x')")
 	if err != nil {

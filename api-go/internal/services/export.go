@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"time"
 
@@ -427,177 +428,17 @@ func overlayAPIKeySettingsNonZero(base, over *APIKeySettings) *APIKeySettings {
 	if over == nil {
 		return base
 	}
+	// Every field (reflection, so new per-key fields are covered without an
+	// edit here): a non-zero value in `over` wins, zero keeps `base`.
 	merged := *base
-	if over.ImageSource != "" {
-		merged.ImageSource = over.ImageSource
-	}
-	if over.Lang != "" {
-		merged.Lang = over.Lang
-	}
-	if over.Textless {
-		merged.Textless = over.Textless
-	}
-	if over.RatingsLimit != 0 {
-		merged.RatingsLimit = over.RatingsLimit
-	}
-	if over.RatingsOrder != "" {
-		merged.RatingsOrder = over.RatingsOrder
-	}
-	if over.RatingsExclude != "" {
-		merged.RatingsExclude = over.RatingsExclude
-	}
-	if over.PosterLayout != "" {
-		merged.PosterLayout = over.PosterLayout
-	}
-	if over.LogoRatingsLimit != 0 {
-		merged.LogoRatingsLimit = over.LogoRatingsLimit
-	}
-	if over.BackdropRatingsLimit != 0 {
-		merged.BackdropRatingsLimit = over.BackdropRatingsLimit
-	}
-	if over.PosterBadgeStyle != "" {
-		merged.PosterBadgeStyle = over.PosterBadgeStyle
-	}
-	if over.LogoBadgeStyle != "" {
-		merged.LogoBadgeStyle = over.LogoBadgeStyle
-	}
-	if over.BackdropBadgeStyle != "" {
-		merged.BackdropBadgeStyle = over.BackdropBadgeStyle
-	}
-	if over.PosterLabelStyle != "" {
-		merged.PosterLabelStyle = over.PosterLabelStyle
-	}
-	if over.LogoLabelStyle != "" {
-		merged.LogoLabelStyle = over.LogoLabelStyle
-	}
-	if over.BackdropLabelStyle != "" {
-		merged.BackdropLabelStyle = over.BackdropLabelStyle
-	}
-	if over.PosterBadgeDirection != "" {
-		merged.PosterBadgeDirection = over.PosterBadgeDirection
-	}
-	if over.PosterFit != "" {
-		merged.PosterFit = over.PosterFit
-	}
-	if over.PosterTextSize != 0 {
-		merged.PosterTextSize = over.PosterTextSize
-	}
-	if over.LogoTextSize != 0 {
-		merged.LogoTextSize = over.LogoTextSize
-	}
-	if over.BackdropTextSize != 0 {
-		merged.BackdropTextSize = over.BackdropTextSize
-	}
-	if over.PosterBadgeSize != 0 {
-		merged.PosterBadgeSize = over.PosterBadgeSize
-	}
-	if over.LogoBadgeSize != 0 {
-		merged.LogoBadgeSize = over.LogoBadgeSize
-	}
-	if over.BackdropBadgeSize != 0 {
-		merged.BackdropBadgeSize = over.BackdropBadgeSize
-	}
-	if over.PosterBadgeWidth != 0 {
-		merged.PosterBadgeWidth = over.PosterBadgeWidth
-	}
-	if over.PosterBadgeHeight != 0 {
-		merged.PosterBadgeHeight = over.PosterBadgeHeight
-	}
-	if over.LogoBadgeWidth != 0 {
-		merged.LogoBadgeWidth = over.LogoBadgeWidth
-	}
-	if over.LogoBadgeHeight != 0 {
-		merged.LogoBadgeHeight = over.LogoBadgeHeight
-	}
-	if over.BackdropBadgeWidth != 0 {
-		merged.BackdropBadgeWidth = over.BackdropBadgeWidth
-	}
-	if over.BackdropBadgeHeight != 0 {
-		merged.BackdropBadgeHeight = over.BackdropBadgeHeight
-	}
-	if over.EpisodeBadgeWidth != 0 {
-		merged.EpisodeBadgeWidth = over.EpisodeBadgeWidth
-	}
-	if over.EpisodeBadgeHeight != 0 {
-		merged.EpisodeBadgeHeight = over.EpisodeBadgeHeight
-	}
-	if over.PosterLogoSize != 0 {
-		merged.PosterLogoSize = over.PosterLogoSize
-	}
-	if over.LogoLogoSize != 0 {
-		merged.LogoLogoSize = over.LogoLogoSize
-	}
-	if over.BackdropLogoSize != 0 {
-		merged.BackdropLogoSize = over.BackdropLogoSize
-	}
-	if over.LogoLayout != "" {
-		merged.LogoLayout = over.LogoLayout
-	}
-	if over.BackdropLayout != "" {
-		merged.BackdropLayout = over.BackdropLayout
-	}
-	if over.BackdropBadgeDirection != "" {
-		merged.BackdropBadgeDirection = over.BackdropBadgeDirection
-	}
-	if over.BackdropEdgeInsetX != 0 {
-		merged.BackdropEdgeInsetX = over.BackdropEdgeInsetX
-	}
-	if over.BackdropEdgeInsetY != 0 {
-		merged.BackdropEdgeInsetY = over.BackdropEdgeInsetY
-	}
-	if over.EpisodeRatingsLimit != 0 {
-		merged.EpisodeRatingsLimit = over.EpisodeRatingsLimit
-	}
-	if over.EpisodeBadgeStyle != "" {
-		merged.EpisodeBadgeStyle = over.EpisodeBadgeStyle
-	}
-	if over.EpisodeLabelStyle != "" {
-		merged.EpisodeLabelStyle = over.EpisodeLabelStyle
-	}
-	if over.EpisodeTextSize != 0 {
-		merged.EpisodeTextSize = over.EpisodeTextSize
-	}
-	if over.EpisodeBadgeSize != 0 {
-		merged.EpisodeBadgeSize = over.EpisodeBadgeSize
-	}
-	if over.EpisodeLogoSize != 0 {
-		merged.EpisodeLogoSize = over.EpisodeLogoSize
-	}
-	if over.EpisodeLayout != "" {
-		merged.EpisodeLayout = over.EpisodeLayout
-	}
-	if over.EpisodeBadgeDirection != "" {
-		merged.EpisodeBadgeDirection = over.EpisodeBadgeDirection
-	}
-	if over.EpisodeBlur {
-		merged.EpisodeBlur = over.EpisodeBlur
-	}
-	if over.PosterBadgeShape != "" {
-		merged.PosterBadgeShape = over.PosterBadgeShape
-	}
-	if over.LogoBadgeShape != "" {
-		merged.LogoBadgeShape = over.LogoBadgeShape
-	}
-	if over.BackdropBadgeShape != "" {
-		merged.BackdropBadgeShape = over.BackdropBadgeShape
-	}
-	if over.EpisodeBadgeShape != "" {
-		merged.EpisodeBadgeShape = over.EpisodeBadgeShape
-	}
-	if over.PosterBadgeAlpha != 0 {
-		merged.PosterBadgeAlpha = over.PosterBadgeAlpha
-	}
-	if over.LogoBadgeAlpha != 0 {
-		merged.LogoBadgeAlpha = over.LogoBadgeAlpha
-	}
-	if over.BackdropBadgeAlpha != 0 {
-		merged.BackdropBadgeAlpha = over.BackdropBadgeAlpha
-	}
-	if over.EpisodeBadgeAlpha != 0 {
-		merged.EpisodeBadgeAlpha = over.EpisodeBadgeAlpha
-	}
-	if over.Colors != "" {
-		merged.Colors = over.Colors
+	mv, ov := reflect.ValueOf(&merged).Elem(), reflect.ValueOf(over).Elem()
+	for i := 0; i < mv.NumField(); i++ {
+		if apiKeySettingsColumns[i] == "api_key_id" { // the row identity stays base's
+			continue
+		}
+		if !ov.Field(i).IsZero() {
+			mv.Field(i).Set(ov.Field(i))
+		}
 	}
 	return &merged
 }
