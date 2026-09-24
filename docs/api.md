@@ -4,6 +4,7 @@ OpenPosterDB is a drop-in replacement for [RPDB](https://ratingposterdb.com) —
 
 - [Endpoints](#endpoints)
 - [Common parameters](#common-parameters)
+- [Anime IDs (Kitsu / MAL)](#anime-ids-kitsu--mal)
 - [Image sizes](#image-sizes)
 
 ## Endpoints
@@ -61,8 +62,8 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 
 ## Common parameters
 
-- `id_type`: `imdb`, `tmdb`, `tvdb`
-- `id_value`: e.g. `tt1234567`, `movie-123`, `series-456`, `episode-1396-S1E1`. Episode IMDb IDs (e.g. `tt0959621`), TVDB episode IDs, and series-level IDs with season/episode (e.g. `episode-tt14786934-S1E1`, `episode-81189-S3E5`) are also supported
+- `id_type`: `imdb`, `tmdb`, `tvdb`, `kitsu`, `mal` (see [Anime IDs](#anime-ids-kitsu--mal))
+- `id_value`: e.g. `tt1234567`, `movie-123`, `series-456`, `episode-1396-S1E1`. Episode IMDb IDs (e.g. `tt0959621`), TVDB episode IDs, and series-level IDs with season/episode (e.g. `episode-tt14786934-S1E1`, `episode-81189-S3E5`) are also supported. Kitsu takes a numeric ID or a slug (`13658` or `fairy-tail-2018`), MAL a numeric ID (`35972`)
 - `?fallback=true`: accepted for RPDB plugin compatibility but ignored as OPDB falls back to TMDB by default
 - `?lang={code}`: override the image language for this request (e.g. `?lang=de` for German, `?lang=pt-BR` for Brazilian Portuguese). Supports regional variants — when a region-specific image exists (e.g. `pt-BR`), it is preferred; otherwise falls back to the base language (`pt`), then English. Applies to posters and logos. Backdrops are language-agnostic and ignore this parameter
 - `?imageSize={size}`: control output image dimensions. Available sizes vary by image type (see [Image sizes](#image-sizes))
@@ -89,6 +90,21 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 Old RPDB parameter names `?poster_source=` and `?fanart_textless=` are accepted as aliases.
 
 **Scope notes:** `textless`, `fit`, and `layout` (poster) are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `text_size`, `badge_size`, `badge_width`, `badge_height`, `logo_size`, `badge_shape`, `badge_background`, `image_source`, `layout`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
+
+## Anime IDs (Kitsu / MAL)
+
+```
+GET /{api_key}/kitsu/poster-default/13658.jpg
+GET /{api_key}/mal/poster-default/35972.jpg
+```
+
+- Posters and backdrops come straight from Kitsu or MAL, so anime that TMDB covers poorly still gets artwork. MAL artwork is served via AniList and is often lower resolution than Kitsu's.
+- Rating badges come from the matching IMDb / TMDB title, found through Kitsu's mappings and a Kitsu→IMDb table. No match means no badges.
+- Logos and episode stills need a TMDB match (Kitsu and MAL don't have them).
+- If an `imdb` / `tmdb` / `tvdb` ID can't be found, the lookup also tries Kitsu, then MAL.
+- Settings (Image Settings, global or per key):
+  - **Use Kitsu artwork for kitsu: IDs** / **Use MAL artwork for mal: IDs**: when off, the title is matched to TMDB first and TMDB / Fanart.tv artwork is used; Kitsu / MAL artwork only when there's no match.
+  - **Anime artwork**: *Match the ID* (default: kitsu IDs get Kitsu art, mal IDs get MAL art), *Prefer Kitsu* or *Prefer MAL* (both ID types use that site, so a title looks the same whichever ID your media server sends). Needs both boxes above on.
 
 ## Image sizes
 

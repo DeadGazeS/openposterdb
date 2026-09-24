@@ -31,6 +31,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - **High-resolution label style** — a `High Res` label option renders each rating source's crisp, source-SVG logo (instead of the 48px official PNGs).
 - **Aspect-ratio fitting** — poster fit modes (`native`/`cover`/`pad`/`blur`) keep non-2:3 posters from being cropped.
 - **Episode blur** — optional blur for spoiler protection.
+- **Anime IDs** — `kitsu:` and `mal:` IDs with artwork straight from Kitsu / MAL and ratings from the matching IMDb / TMDB title ([details](docs/api.md#anime-ids-kitsu--mal)).
 
 ### Ratings
 - Aggregates ratings from the MDBList, OMDb, Trakt, and TMDB APIs across all ten rating sources: IMDb, Rotten Tomatoes (critics and audience), Metacritic, TMDB, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.

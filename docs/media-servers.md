@@ -6,6 +6,8 @@ OpenPosterDB serves rating-badged posters, backdrops, logos, and episode stills 
 - [Jellyfin](#jellyfin)
 - [Plex](#plex)
 
+Anime: besides IMDb / TMDB / TVDB IDs, image URLs also accept `kitsu` and `mal` IDs — see [Anime IDs](api.md#anime-ids-kitsu--mal).
+
 ## AIOMetadata
 
 To use OpenPosterDB with [AIOMetadata](https://github.com/cedya77/AIOMetadata), set the following URL templates in your AIOMetadata configuration. `{type}` is `movie` or `series` depending on the media type.
