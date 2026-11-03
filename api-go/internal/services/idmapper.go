@@ -78,7 +78,7 @@ func (m *KitsuIMDbMapper) Load(ctx context.Context) error {
 	// resets retry cleanly with the same backoff the rest of the Kitsu
 	// code paths use. The previous direct-m.HTTP.Do path was vulnerable to
 	// "invalid Read on closed Body" when the transport reset mid-stream.
-	resp, err := SendWithRetry(&MALRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &MALRetry, func() (*http.Response, error) {
 		// Re-build the request inside the retry closure because the previous
 		// attempt's request may have been mutated by the transport
 		// (http.Client reuses req.Body across retries, which is fine for

@@ -244,7 +244,7 @@ func selectImageRanked(images []TmdbImage, lang string, textless bool, hasTarget
 }
 
 func httpGetCtx(ctx context.Context, client *http.Client, config *RetryConfig, url string) (*http.Response, error) {
-	return SendWithRetry(config, func() (*http.Response, error) {
+	return SendWithRetryCtx(ctx, config, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err

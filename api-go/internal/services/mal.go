@@ -124,7 +124,7 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 	}
 
 	start := time.Now()
-	resp, err := SendWithRetry(&MALRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &MALRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "POST", anilistGraphQLEndpoint, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err

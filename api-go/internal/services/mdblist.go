@@ -81,7 +81,7 @@ func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistRespo
 	fullURL := fmt.Sprintf("%s?apikey=%s", url, apiKey)
 
 	start := time.Now()
-	resp, err := SendWithRetry(&MDBListRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &MDBListRetry, func() (*http.Response, error) {
 		req, _ := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 		req.Header.Set("User-Agent", UserAgent())
 		return c.HTTP.Do(req)

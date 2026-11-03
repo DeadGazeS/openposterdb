@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"openposterdb/internal/errors"
@@ -168,6 +170,11 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 					ext = ".png"
 				}
 				target := "/c/" + hash + "/" + idTypeStr + "/" + imageKind + "/" + idValue + ext
+				// imageSize is a request parameter, not a render setting, so
+				// it is not part of the hash — carry it on the redirect.
+				if query.ImageSize != nil && *query.ImageSize != "" {
+					target += "?imageSize=" + url.QueryEscape(*query.ImageSize)
+				}
 				w.Header().Set("Location", target)
 				w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=3600")
 				w.WriteHeader(http.StatusFound)
@@ -175,23 +182,9 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 			}
 		}
 
-		bytes, contentType, err := image.ServeImage(image.ServeParams{
-			Context: r.Context(), DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
-			Kitsu: d.Kitsu, AniList: d.AniList, KitsuIMDbMapper: d.KitsuIMDbMapper,
-			IDType: idTypeStr, IDValue: idValue, Kind: kind,
-			Settings: settings, RatingsLimit: query.RatingsLimit,
-			CacheDir: d.Config.CacheDir, ExternalCacheOnly: d.Config.ExternalCacheOnly,
-			RatingsMinStaleSecs: d.Config.RatingsMinStaleSecs, RatingsMaxAgeSecs: d.Config.RatingsMaxAgeSecs,
-			ImageStaleSecs: d.Config.ImageStaleSecs, Quality: d.Config.ImageQuality,
-			ImageSizeStr: query.ImageSize, Caches: d.Config.Caches,
-			Inflight: d.Config.Inflight,
-		})
+		bytes, contentType, err := image.ServeImage(d.serveParams(r.Context(), idTypeStr, idValue, kind, settings, query.RatingsLimit, query.ImageSize))
 		if err != nil {
-			if appErr, ok := err.(*errors.AppError); ok {
-				httpx.WriteError(w, appErr.Status, appErr.Message)
-			} else {
-				httpx.WriteError(w, 500, err.Error())
-			}
+			writeServeError(w, err)
 			return
 		}
 
@@ -224,12 +217,36 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc
 		}
 
 		keyHash := services.HashAPIKey(apiKey)
-		_, err := services.FindAPIKeyByHashCtx(r.Context(), db, keyHash)
-		if err != nil {
+		k, err := services.FindAPIKeyByHashCtx(r.Context(), db, keyHash)
+		if err != nil || k == nil {
 			httpx.WriteJSON(w, 401, map[string]interface{}{"error": "Invalid or missing API key"})
 			return
 		}
 
 		httpx.WriteJSON(w, 200, map[string]interface{}{"valid": true})
 	}
+}
+
+// serveParams builds the ServeImage parameters shared by the authed image
+// route and the /c/ CDN route, so both render (and cache-key) identically.
+func (d ImageDeps) serveParams(ctx context.Context, idType, idValue, kind string, settings *services.RenderSettings, ratingsLimit *int32, imageSize *string) image.ServeParams {
+	return image.ServeParams{
+		Context: ctx, DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
+		Kitsu: d.Kitsu, AniList: d.AniList, KitsuIMDbMapper: d.KitsuIMDbMapper,
+		IDType: idType, IDValue: idValue, Kind: kind,
+		Settings: settings, RatingsLimit: ratingsLimit,
+		CacheDir: d.Config.CacheDir, ExternalCacheOnly: d.Config.ExternalCacheOnly,
+		RatingsMinStaleSecs: d.Config.RatingsMinStaleSecs, RatingsMaxAgeSecs: d.Config.RatingsMaxAgeSecs,
+		ImageStaleSecs: d.Config.ImageStaleSecs, Quality: d.Config.ImageQuality,
+		ImageSizeStr: imageSize, Caches: d.Config.Caches,
+		Inflight: d.Config.Inflight,
+	}
+}
+
+func writeServeError(w http.ResponseWriter, err error) {
+	if appErr, ok := err.(*errors.AppError); ok {
+		httpx.WriteError(w, appErr.Status, appErr.Message)
+		return
+	}
+	httpx.WriteError(w, 500, err.Error())
 }

@@ -39,7 +39,7 @@ func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbRes
 	url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", apiKey, imdbID)
 
 	start := time.Now()
-	resp, err := SendWithRetry(&OMDBRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &OMDBRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err

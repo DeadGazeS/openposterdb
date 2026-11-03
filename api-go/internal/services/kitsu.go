@@ -110,7 +110,7 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 	}
 
 	start := time.Now()
-	resp, err := SendWithRetry(&KitsuRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &KitsuRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err
@@ -293,7 +293,7 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 	url := fmt.Sprintf("%s/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=%d&include=item", kitsuAPIBase, malID)
 
 	start := time.Now()
-	resp, err := SendWithRetry(&KitsuRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &KitsuRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err

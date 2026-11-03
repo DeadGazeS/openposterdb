@@ -52,7 +52,7 @@ func (c *TraktClient) getRatingCtx(ctx context.Context, url string) (*TraktRatin
 	}
 
 	start := time.Now()
-	resp, err := SendWithRetry(&TraktRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &TraktRetry, func() (*http.Response, error) {
 		return c.HTTP.Do(req)
 	})
 	logSlow("Trakt", time.Since(start).Milliseconds())

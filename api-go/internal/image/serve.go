@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -484,6 +485,10 @@ func resolveIMDbViaAnimeTable(ctx context.Context, cache *services.MemCache, idV
 	return &out
 }
 
+// renderTimeout bounds a coalesced or background render, which runs detached
+// from any single request's cancellation.
+const renderTimeout = 2 * time.Minute
+
 func ServeImage(p ServeParams) ([]byte, string, error) {
 	if p.Context == nil {
 		p.Context = context.Background()
@@ -634,9 +639,15 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 
 	// Render (fetch artwork + generate + persist), coalesced so concurrent
-	// requests for the same cache key share a single render.
+	// requests for the same cache key share a single render. The shared
+	// render must not die with the leader's request: detach it from the
+	// caller's cancellation (keeping its values) and bound it instead.
 	render := func() ([]byte, error) {
-		return p.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(p.Context), renderTimeout)
+		defer cancel()
+		rp := p
+		rp.Context = ctx
+		return rp.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
 	}
 	var rendered []byte
 	if p.Inflight != nil {
@@ -1015,8 +1026,10 @@ func fetchDirectImageBytesCtx(ctx context.Context, httpClient *http.Client, url 
 // request that triggered it (this is server-side cache maintenance, not part
 // of the user's response).
 func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize) {
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	defer cancel()
 	bgParams := p
-	bgParams.Context = context.Background()
+	bgParams.Context = ctx
 	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := bgParams.prepareRender(resolved)
 	if err != nil {
 		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)

@@ -61,7 +61,7 @@ func (c *FanartClient) GetMovieImagesCtx(ctx context.Context, tmdbID uint64) (*F
 	url := fmt.Sprintf("https://webservice.fanart.tv/v3/movies/%d?api_key=%s", tmdbID, apiKey)
 
 	start := time.Now()
-	resp, err := SendWithRetry(&FanartRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &FanartRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err
@@ -102,7 +102,7 @@ func (c *FanartClient) GetTVImagesCtx(ctx context.Context, id uint64) (*FanartIm
 	url := fmt.Sprintf("https://webservice.fanart.tv/v3/tv/%d?api_key=%s", id, apiKey)
 
 	start := time.Now()
-	resp, err := SendWithRetry(&FanartRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &FanartRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err
@@ -140,7 +140,7 @@ func (c *FanartClient) GetTVImages(id uint64) (*FanartImages, error) {
 
 func (c *FanartClient) FetchPosterBytesCtx(ctx context.Context, url string) ([]byte, error) {
 	start := time.Now()
-	resp, err := SendWithRetry(&FanartRetry, func() (*http.Response, error) {
+	resp, err := SendWithRetryCtx(ctx, &FanartRetry, func() (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err

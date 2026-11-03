@@ -246,6 +246,11 @@ const {
   // edits survive Refresh. A fresh reference re-applies the saved config
   // (same path as discard, plus pulling the latest save).
   structuralSharing: false,
+  // ...which also means every automatic refetch re-applies the saved config.
+  // A focus refetch would silently wipe unsaved edits (and re-fire all
+  // previews), so only refetch on mount and on an explicit Refresh.
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
   queryFn: async () => okOrThrow<SettingsResponse>(await adminApi.getSettings(), 'Failed to fetch settings'),
 })
 

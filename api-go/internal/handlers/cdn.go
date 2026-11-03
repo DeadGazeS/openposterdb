@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"openposterdb/internal/httpx"
 	appimg "openposterdb/internal/image"
@@ -21,12 +19,10 @@ type CDNLookup interface {
 // behind CDN edges. The hash is registered by HandleImage when it issues a
 // 302 redirect.
 //
-// The handler is read-only — it looks up the hash in the registry, computes
-// the cache key from the effective settings, and serves the cached bytes if
-// present. If the hash is unknown, the cache key doesn't exist, or the
-// cached file is missing, the request gets a 404 — the edge should retry the
-// original authenticated URL so HandleImage re-registers the hash and
-// re-populates the cache.
+// It looks up the hash in the registry and renders through ServeImage with
+// the registered settings (cache hits are served from the usual mem/disk
+// caches). An unknown or expired hash is a 404 — the edge should retry the
+// original authenticated URL so HandleImage re-registers the hash.
 //
 // deps is a per-request resolver (matching HandleImage) so that updates to
 // ImageServeConfig (CacheDir / ImageStaleSecs) are visible to in-flight
@@ -84,46 +80,34 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 			return
 		}
 
-		// Compute the cache key the original authenticated request would have
-		// written: idType + idValue + variant + suffix. lang override is
-		// honoured so a /c/.../?lang=de hit still finds the right cache entry
-		// when the authed URL used lang=en.
-		query := r.URL.Query()
+		// Render (or serve from cache) with the registered settings, exactly as
+		// the authed route would: HandleImage 302s here before rendering, so
+		// this route is the one that fills the cache. Only settings an authed
+		// request registered can be rendered. ?lang and ?imageSize are the
+		// only overrides honoured (the redirect carries imageSize; neither
+		// changes the work a render does beyond the registered settings).
 		s := *settings
+		query := r.URL.Query()
 		if lang := query.Get("lang"); lang != "" {
 			if err := services.ValidateLang(lang); err == nil {
 				s.Lang = lang
 			}
 		}
-		if lang := query.Get("lang"); lang != "" {
-			if err := services.ValidateLang(lang); err == nil {
-				s.Lang = lang
-			}
-		}
-		suffix := services.SettingsCacheSuffix(&s, kind, nil)
-		variant := ""
-		cacheValue := idValue + variant + suffix
-		cacheKey := idTypeStr + "/" + cacheValue
-		cachePath, err := services.TypedCachePath(d.Config.CacheDir, services.ImageSubdir(kind), idTypeStr, cacheValue, services.ImageExt(kind))
-		if err != nil {
-			httpx.WriteAppError(w, err)
-			return
+		var imageSize *string
+		if v := query.Get("imageSize"); v != "" {
+			imageSize = &v
 		}
 
-		entry, err := services.ReadCache(cachePath, d.Config.ImageStaleSecs)
-		if err != nil || entry.IsStale {
-			httpx.WriteError(w, http.StatusNotFound, "cached image not found")
+		bytes, contentType, err := appimg.ServeImage(d.serveParams(r.Context(), idTypeStr, idValue, kind, &s, nil, imageSize))
+		if err != nil {
+			writeServeError(w, err)
 			return
-		}
-		if _, err := d.DB.Exec(`UPDATE image_meta SET updated_at = ? WHERE cache_key = ?`, time.Now().Unix(), cacheKey); err != nil {
-			// best-effort; cache hit is unaffected — log so we can spot a stuck row
-			slog.Warn("image_meta touched_at update failed", "cache_key", cacheKey, "error", err)
 		}
 
 		// CDN-cached for a long time; the settings hash is the cache key, so
 		// the CDN edge sees at most one entry per hash per image.
 		w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
-		w.Header().Set("Content-Type", appimg.ImageContentType(kind))
-		w.Write(entry.Bytes)
+		w.Header().Set("Content-Type", contentType)
+		w.Write(bytes)
 	}
 }
