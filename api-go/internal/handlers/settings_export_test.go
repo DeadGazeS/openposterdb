@@ -44,3 +44,15 @@ func TestExportSettings_PassphraseRules(t *testing.T) {
 	}
 	_ = http.MethodGet
 }
+
+// Import takes the passphrase from the body only (URLs end up in logs).
+func TestImportSettings_RejectsPassphraseInURL(t *testing.T) {
+	db := newHandlersTestDB(t)
+	h := HandleImportSettings(db, nil)
+	req := httptest.NewRequest("POST", "/?passphrase=leaky", strings.NewReader(`{"kind":"openposterdb/settings-encrypted"}`))
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "request body") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}

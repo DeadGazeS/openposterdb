@@ -86,13 +86,18 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 		// Two accepted body shapes:
 		// (a) { "kind": "openposterdb/settings",            ... }                (plain)
 		// (b) { "passphrase": "...", "payload": { ... } }                        (encrypted)
-		// (c) { "kind": "openposterdb/settings-encrypted", ... }                (encrypted, passphrase in query)
+		// (c) { "kind": "openposterdb/settings-encrypted", ... }                (encrypted; needs the (b) envelope for the passphrase)
 		//
 		// Read the body bytes once. httpx.DecodeJSON closes r.Body (its
 		// invariant), but resolveImportPayload needs to re-read r.Body when
 		// the envelope has no payload field — reading a closed body
 		// returns "http: invalid Read on closed Body" (bug observed 2026-08-15
 		// docker logs). Pass the bytes through instead.
+		if r.URL.Query().Has("passphrase") {
+			httpx.WriteError(w, 400, "send the passphrase in the request body, not the URL")
+			return
+		}
+
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
 			httpx.WriteError(w, 400, "could not read request body")
@@ -140,8 +145,9 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 
 // resolveImportPayload routes the import request to the right decode path.
 // Plain (kind=openposterdb/settings) goes straight through; encrypted
-// (kind=openposterdb/settings-encrypted) requires a passphrase either in the
-// envelope body or in the `passphrase` query string.
+// (kind=openposterdb/settings-encrypted) requires a passphrase in the envelope
+// body ({"passphrase": ..., "payload": ...}); a passphrase in the URL is
+// rejected by HandleImportSettings (URLs end up in access logs).
 //
 // bodyBytes is the raw HTTP body, captured once in HandleImportSettings
 // before r.Body was closed. We never read r.Body here — doing so would
@@ -190,9 +196,6 @@ func resolveImportPayload(envelope struct {
 
 func resolveEncrypted(enc services.EncryptedExport, bodyPassphrase string, r *http.Request) (*services.ExportPayload, error) {
 	passphrase := bodyPassphrase
-	if passphrase == "" {
-		passphrase = r.URL.Query().Get("passphrase")
-	}
 	if passphrase == "" {
 		return nil, errors.New("passphrase required for encrypted export")
 	}

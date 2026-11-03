@@ -285,7 +285,16 @@ func (r *Router) registerAdminRoutes() {
 	// Public rating-source logos used by the admin UI (plain brand icons, not
 	// sensitive). Served without auth so <img> tags can load them.
 	r.mux.Handle("/api/icons/{kind}/{key}", http.HandlerFunc(handlers.HandleIcon))
-	r.mux.HandleFunc("/api/icons/badge", handlers.HandleBadgePreview(s.DB))
+	// Unauthenticated and renders on every request: per-IP limit. Generous,
+	// since the settings page loads a row of badges per colour change.
+	badgeLimiter := newRateLimiter(600)
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		for range ticker.C {
+			badgeLimiter.SweepIdle()
+		}
+	}()
+	r.mux.Handle("/api/icons/badge", RateLimit(badgeLimiter)(handlers.HandleBadgePreview(s.DB)))
 }
 
 // registerKindRoutes wires the list/clear, per-title purge/image/fetch routes

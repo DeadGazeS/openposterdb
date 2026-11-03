@@ -52,13 +52,16 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, "missing value")
 			return
 		}
-
-		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
-		if err != nil {
-			httpx.WriteError(w, 500, "failed to load settings")
+		// Rating values are a few characters ("8.7", "93%"); an arbitrary
+		// length string would just be expensive text to render.
+		if len(value) > 16 {
+			httpx.WriteError(w, 400, "value too long")
 			return
 		}
-		settings := services.ParseGlobalRenderSettings(globals)
+
+		// Unauthenticated endpoint: settings come from the settings cache,
+		// not a DB read per request.
+		settings := services.GlobalRenderSettingsCachedCtx(r.Context(), db)
 
 		q := r.URL.Query()
 		shape := settings.PosterBadgeShape
