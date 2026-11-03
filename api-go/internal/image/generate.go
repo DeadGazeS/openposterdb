@@ -2,6 +2,7 @@ package image
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -17,6 +18,21 @@ import (
 var blackUniform = image.NewUniform(color.Black)
 
 const maxImagePixels = 8192 * 8192
+
+// decodeImage decodes artwork after checking its declared dimensions, so a
+// tiny file claiming e.g. 50000x50000 pixels (a decompression bomb) is
+// rejected before the decoder allocates gigabytes for it.
+func decodeImage(b []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
+		return nil, fmt.Errorf("image dimensions %dx%d exceed the %d pixel limit", cfg.Width, cfg.Height, maxImagePixels)
+	}
+	img, _, err := image.Decode(bytes.NewReader(b))
+	return img, err
+}
 
 // Sample artwork used by the admin preview endpoints. Built once at startup so
 // previews render without external API calls.
@@ -114,7 +130,7 @@ func RenderPosterSync(posterBytes []byte, params RenderParams) ([]byte, error) {
 	}
 	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
-	base, _, err := image.Decode(bytes.NewReader(posterBytes))
+	base, err := decodeImage(posterBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -201,11 +217,19 @@ func fitPoster(base image.Image, targetWidth uint32, fit services.PosterFit) *im
 		// cover-crop of the artwork, blurred via the same dependency-free
 		// downscale/upscale trick the episode spoiler blur uses, with the
 		// sharp full poster drawn centred on top.
+		// The fill is cover-cropped straight to 1/blurDivisor size (rather
+		// than full size and then shrunk again inside blurImage), blurred,
+		// and upscaled into the frame.
 		th := posterTargetHeight(targetWidth)
 		scaled := image.NewRGBA(image.Rect(0, 0, int(targetWidth), int(th)))
-		filled := resizeToFill(base, int(targetWidth), int(th))
-		filled = blurImage(filled, 4)
-		draw.Draw(scaled, scaled.Bounds(), filled, image.Point{}, draw.Src)
+		const blurDivisor = 4
+		if int(targetWidth) >= blurDivisor*2 && int(th) >= blurDivisor*2 {
+			small := resizeToFill(base, int(targetWidth)/blurDivisor, int(th)/blurDivisor)
+			gaussianBlurRGBA(small)
+			draw.CatmullRom.Scale(scaled, scaled.Bounds(), small, small.Bounds(), draw.Src, nil)
+		} else {
+			draw.Draw(scaled, scaled.Bounds(), resizeToFill(base, int(targetWidth), int(th)), image.Point{}, draw.Src)
+		}
 		scaledImg := resizeExact(base, int(targetWidth), int(th))
 		ox := (int(targetWidth) - int(scaledImg.Bounds().Dx())) / 2
 		oy := (int(th) - int(scaledImg.Bounds().Dy())) / 2
@@ -218,22 +242,23 @@ func fitPoster(base image.Image, targetWidth uint32, fit services.PosterFit) *im
 	return rgba
 }
 
+// resizeToFill scales img to cover targetW x targetH and centre-crops it. Only
+// the source rectangle that survives the crop is scaled (straight into the
+// target), instead of scaling the whole image to an oversized intermediate
+// and discarding the overflow.
 func resizeToFill(img image.Image, targetW, targetH int) *image.RGBA {
 	bounds := img.Bounds()
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
 	scale := math.Max(float64(targetW)/float64(srcW), float64(targetH)/float64(srcH))
-	scaledW := int(math.Round(float64(srcW) * scale))
-	scaledH := int(math.Round(float64(srcH) * scale))
-
-	scaled := image.NewRGBA(image.Rect(0, 0, scaledW, scaledH))
-	draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), img, bounds, draw.Src, nil)
+	cropW := min(srcW, max(1, int(math.Round(float64(targetW)/scale))))
+	cropH := min(srcH, max(1, int(math.Round(float64(targetH)/scale))))
+	x0 := bounds.Min.X + (srcW-cropW)/2
+	y0 := bounds.Min.Y + (srcH-cropH)/2
 
 	result := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
-	ox := (scaledW - targetW) / 2
-	oy := (scaledH - targetH) / 2
-	draw.Draw(result, result.Bounds(), scaled, image.Point{ox, oy}, draw.Src)
+	draw.ApproxBiLinear.Scale(result, result.Bounds(), img, image.Rect(x0, y0, x0+cropW, y0+cropH), draw.Src, nil)
 	return result
 }
 
@@ -263,7 +288,7 @@ func RenderLogoSync(logoBytes []byte, params RenderParams) ([]byte, error) {
 	}
 	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
-	base, _, err := image.Decode(bytes.NewReader(logoBytes))
+	base, err := decodeImage(logoBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +482,7 @@ func RenderBackdropSync(backdropBytes []byte, params RenderParams) ([]byte, erro
 	}
 	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
-	base, _, err := image.Decode(bytes.NewReader(backdropBytes))
+	base, err := decodeImage(backdropBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +540,7 @@ func RenderEpisodeSync(imageBytes []byte, params RenderParams) ([]byte, error) {
 	}
 	params.Appearance.Style = params.BadgeStyle.ResolveDefault()
 
-	base, _, err := image.Decode(bytes.NewReader(imageBytes))
+	base, err := decodeImage(imageBytes)
 	if err != nil {
 		return nil, err
 	}

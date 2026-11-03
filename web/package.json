@@ -20,7 +20,6 @@
     "@scalar/api-reference": "^1.48.7",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/vue-query": "^5.92.9",
-    "@tanstack/vue-table": "^8.21.3",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

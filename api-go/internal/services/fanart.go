@@ -15,13 +15,31 @@ import (
 type FanartClient struct {
 	KeyPool *APIKeyPool
 	HTTP    *http.Client
+	// images caches movie/TV image lists across renders. nil disables it.
+	images *MemCache
 }
 
 func NewFanartClient(keys []string, httpClient *http.Client) *FanartClient {
 	return &FanartClient{
 		KeyPool: NewAPIKeyPool(keys),
 		HTTP:    httpClient,
+		images:  NewMemCache(0, 5000, upstreamListTTL, 0),
 	}
+}
+
+// cachedImages returns the cached list for key, or fetches and caches it.
+// Errors are not cached. The returned value is shared: callers only read it.
+func (c *FanartClient) cachedImages(key string, fetch func() (*FanartImages, error)) (*FanartImages, error) {
+	if c.images != nil {
+		if v, ok := c.images.Get(key); ok {
+			return v.(*FanartImages), nil
+		}
+	}
+	imgs, err := fetch()
+	if err == nil && imgs != nil && c.images != nil {
+		c.images.Set(key, imgs, 1)
+	}
+	return imgs, err
 }
 
 type FanartPoster struct {
@@ -57,6 +75,10 @@ const (
 )
 
 func (c *FanartClient) GetMovieImagesCtx(ctx context.Context, tmdbID uint64) (*FanartImages, error) {
+	return c.cachedImages(fmt.Sprintf("movie/%d", tmdbID), func() (*FanartImages, error) { return c.fetchMovieImages(ctx, tmdbID) })
+}
+
+func (c *FanartClient) fetchMovieImages(ctx context.Context, tmdbID uint64) (*FanartImages, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	url := fmt.Sprintf("https://webservice.fanart.tv/v3/movies/%d?api_key=%s", tmdbID, apiKey)
 
@@ -98,6 +120,10 @@ func (c *FanartClient) GetMovieImages(tmdbID uint64) (*FanartImages, error) {
 }
 
 func (c *FanartClient) GetTVImagesCtx(ctx context.Context, id uint64) (*FanartImages, error) {
+	return c.cachedImages(fmt.Sprintf("tv/%d", id), func() (*FanartImages, error) { return c.fetchTVImages(ctx, id) })
+}
+
+func (c *FanartClient) fetchTVImages(ctx context.Context, id uint64) (*FanartImages, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
 	url := fmt.Sprintf("https://webservice.fanart.tv/v3/tv/%d?api_key=%s", id, apiKey)
 
@@ -156,7 +182,7 @@ func (c *FanartClient) FetchPosterBytesCtx(ctx context.Context, url string) ([]b
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.NewOther(fmt.Sprintf("Fanart CDN returned %d", resp.StatusCode))
 	}
-	return io.ReadAll(resp.Body)
+	return ReadAllLimited(resp.Body, MaxArtworkBytes)
 }
 
 func (c *FanartClient) FetchPosterBytes(url string) ([]byte, error) {

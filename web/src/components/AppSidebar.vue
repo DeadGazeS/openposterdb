@@ -98,14 +98,42 @@ function isNewer(a: number[], b: number[]): boolean {
   return false
 }
 
+// The unauthenticated GitHub API allows 60 requests/hour per IP, shared by
+// everyone behind it; remember the answer for the browser session.
+const RELEASE_CACHE_KEY = 'opdb:latest-release'
+const RELEASE_CACHE_MS = 60 * 60 * 1000
+
+function cachedReleaseTag(): string | null | undefined {
+  try {
+    const raw = sessionStorage.getItem(RELEASE_CACHE_KEY)
+    if (!raw) return undefined
+    const { tag, at } = JSON.parse(raw) as { tag: string | null; at: number }
+    return Date.now() - at < RELEASE_CACHE_MS ? tag : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function fetchReleaseTag(): Promise<string | null> {
+  const cached = cachedReleaseTag()
+  if (cached !== undefined) return cached
+  const res = await fetch(
+    'https://api.github.com/repos/DeadGazeS/openposterdb/releases/latest',
+  )
+  if (!res.ok) return null
+  const release = (await res.json()) as { tag_name?: string }
+  const tag = release.tag_name ?? null
+  try {
+    sessionStorage.setItem(RELEASE_CACHE_KEY, JSON.stringify({ tag, at: Date.now() }))
+  } catch {
+    // storage unavailable: just don't cache
+  }
+  return tag
+}
+
 onMounted(async () => {
   try {
-    const res = await fetch(
-      'https://api.github.com/repos/DeadGazeS/openposterdb/releases/latest',
-    )
-    if (!res.ok) return
-    const release = (await res.json()) as { tag_name?: string }
-    const tag = release.tag_name
+    const tag = await fetchReleaseTag()
     if (!tag) return
     const remote = parseVersion(tag)
     const local = parseVersion(version)

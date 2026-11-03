@@ -17,12 +17,20 @@ import (
 type TmdbClient struct {
 	APIKey string
 	HTTP   *http.Client
+	// images caches /images responses: every settings variant of a title
+	// re-rendered the same list. nil (a struct literal) disables caching.
+	images *MemCache
 }
+
+// upstreamListTTL bounds how long an artwork list (TMDB /images, fanart.tv)
+// is reused across renders before it is fetched again.
+const upstreamListTTL = 30 * time.Minute
 
 func NewTmdbClient(apiKey string, httpClient *http.Client) *TmdbClient {
 	return &TmdbClient{
 		APIKey: apiKey,
 		HTTP:   httpClient,
+		images: NewMemCache(0, 5000, upstreamListTTL, 0),
 	}
 }
 
@@ -69,7 +77,7 @@ func (c *TmdbClient) FetchImageBytesCtx(ctx context.Context, filePath, size stri
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.NewOther(fmt.Sprintf("TMDB CDN returned %d for %s", resp.StatusCode, filePath))
 	}
-	return io.ReadAll(resp.Body)
+	return ReadAllLimited(resp.Body, MaxArtworkBytes)
 }
 
 func (c *TmdbClient) FetchImageBytes(filePath, size string) ([]byte, error) {
@@ -109,7 +117,7 @@ func (c *TmdbClient) FetchPosterBytesConditionalCtx(ctx context.Context, posterP
 		return nil, false, errors.NewOther(fmt.Sprintf("TMDB CDN returned %d", resp.StatusCode))
 	}
 
-	bytes, err := io.ReadAll(resp.Body)
+	bytes, err := ReadAllLimited(resp.Body, MaxArtworkBytes)
 	if err != nil {
 		return nil, false, errors.NewAPIError(err)
 	}
@@ -127,9 +135,18 @@ func (c *TmdbClient) GetImagesCtx(ctx context.Context, mediaType string, tmdbID 
 		includeLang = base + ",null"
 	}
 	path := fmt.Sprintf("/%s/%d/images", mediaType, tmdbID)
+	key := path + "?" + includeLang
+	if c.images != nil {
+		if v, ok := c.images.Get(key); ok {
+			return v.(*TmdbImagesResponse), nil // shared: callers only read it
+		}
+	}
 	var result TmdbImagesResponse
 	if err := c.GetCtx(ctx, path, map[string]string{"include_image_language": includeLang}, &result); err != nil {
 		return nil, err
+	}
+	if c.images != nil {
+		c.images.Set(key, &result, 1)
 	}
 	return &result, nil
 }

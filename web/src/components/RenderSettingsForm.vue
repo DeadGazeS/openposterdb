@@ -959,6 +959,7 @@ function toggleExclude(key: string, checked: boolean) {
                   :src="badgePreviewUrl(baseSourceKey(source), sample.value)"
                   :alt="`${source.label} badge (${sample.label})`"
                   :title="`${source.label} badge — ${sample.label}`"
+                  loading="lazy"
                   class="h-10 w-auto"
                 />
               </div>

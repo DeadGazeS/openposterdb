@@ -2,9 +2,12 @@ package services
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	apperr "openposterdb/internal/errors"
 )
@@ -201,23 +204,50 @@ func ResolveID(idType IDType, idValue string, clients IDClients) (*ResolvedID, e
 	return ResolveIDCtx(context.Background(), idType, idValue, clients)
 }
 
-// ResolveIDCached resolves an ID, caching successful results in the given
+// idNotFoundTTL is how long a definite "unknown id" (404) is remembered, so a
+// media server re-requesting an id TMDB doesn't know doesn't hit /find each
+// time, while a title added upstream later is picked up within minutes.
+const idNotFoundTTL = 10 * time.Minute
+
+// idMiss is a negative ID-cache entry; it carries its own, shorter expiry.
+type idMiss struct {
+	err   error
+	until time.Time
+}
+
+// ResolveIDCachedCtx resolves an ID, caching successful results in the given
 // in-memory cache (key "idtype/idvalue", matching the Rust id_cache). A nil
-// cache bypasses caching. Errors are never cached, so a transient TMDB failure
-// doesn't poison the cache.
+// cache bypasses caching. A 404 (id not found) is cached for idNotFoundTTL;
+// every other error is never cached, so a transient TMDB failure doesn't
+// poison the cache.
 func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
-	if cache != nil {
-		key := idType.String() + "/" + idValue
-		if v, ok := cache.Get(key); ok {
-			return v.(*ResolvedID), nil
-		}
-		resolved, err := ResolveIDCtx(ctx, idType, idValue, clients)
-		if err == nil {
-			cache.Set(key, resolved, 1)
-		}
-		return resolved, err
+	if cache == nil {
+		return ResolveIDCtx(ctx, idType, idValue, clients)
 	}
-	return ResolveIDCtx(ctx, idType, idValue, clients)
+	key := idType.String() + "/" + idValue
+	if v, ok := cache.Get(key); ok {
+		switch e := v.(type) {
+		case *ResolvedID:
+			return e, nil
+		case idMiss:
+			if time.Now().Before(e.until) {
+				return nil, e.err
+			}
+			cache.Delete(key)
+		}
+	}
+	resolved, err := ResolveIDCtx(ctx, idType, idValue, clients)
+	if err == nil {
+		cache.Set(key, resolved, 1)
+	} else if isIDNotFound(err) {
+		cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
+	}
+	return resolved, err
+}
+
+func isIDNotFound(err error) bool {
+	var appErr *apperr.AppError
+	return stderrors.As(err, &appErr) && appErr.Status == http.StatusNotFound
 }
 
 // ResolveIDCached resolves an ID, caching successful results in the given

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -1015,7 +1014,7 @@ func fetchDirectImageBytesCtx(ctx context.Context, httpClient *http.Client, url 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("direct image fetch returned %d for %s", resp.StatusCode, url)
 	}
-	return io.ReadAll(resp.Body)
+	return services.ReadAllLimited(resp.Body, services.MaxArtworkBytes)
 }
 
 // refreshStale regenerates a stale cache entry in the background with fresh
