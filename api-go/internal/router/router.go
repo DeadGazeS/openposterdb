@@ -69,13 +69,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Check if this is an API or image route before going to mux
 	path := req.URL.Path
 	if !isAPIPath(path) && r.fs != nil {
-		fullPath := filepath.Join(r.staticDir, path)
-		if _, err := os.Stat(fullPath); err == nil {
-			r.fs.ServeHTTP(w, req)
-			return
-		}
-		// SPA fallback for non-API routes
-		http.ServeFile(w, req, filepath.Join(r.staticDir, "index.html"))
+		Gzip(http.HandlerFunc(r.serveStatic)).ServeHTTP(w, req)
 		return
 	}
 
@@ -121,4 +115,28 @@ func (r *Router) jwtSecret() []byte {
 
 func (r *Router) lastUsed() handlers.KeyRecorder {
 	return r.state.LastUsedFlusher
+}
+
+// serveStatic serves the built SPA. Vite's /assets/* files carry a content
+// hash in their name, so they are immutable; index.html (and the SPA
+// fallback) must be revalidated so a deploy is picked up immediately instead
+// of a heuristically-cached page pointing at chunks that no longer exist.
+// Directories never produce an http.FileServer listing.
+func (r *Router) serveStatic(w http.ResponseWriter, req *http.Request) {
+	path := req.URL.Path
+	if path != "/" {
+		if fi, err := os.Stat(filepath.Join(r.staticDir, filepath.FromSlash(path))); err == nil && !fi.IsDir() {
+			switch {
+			case strings.HasPrefix(path, "/assets/"):
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			default:
+				w.Header().Set("Cache-Control", "public, max-age=86400")
+			}
+			r.fs.ServeHTTP(w, req)
+			return
+		}
+	}
+	// "/" and the SPA fallback for unknown non-API routes.
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeFile(w, req, filepath.Join(r.staticDir, "index.html"))
 }

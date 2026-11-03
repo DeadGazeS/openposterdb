@@ -57,26 +57,67 @@ type CacheEntry struct {
 }
 
 func ReadCache(path string, staleSecs uint64) (*CacheEntry, error) {
-	bytes, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(path)
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	age := time.Since(info.ModTime()).Seconds()
-	isStale := staleSecs > 0 && uint64(age) > staleSecs
-
-	return &CacheEntry{Bytes: bytes, IsStale: isStale}, nil
+	bytes := make([]byte, info.Size())
+	if _, err := io.ReadFull(f, bytes); err != nil {
+		return nil, err
+	}
+	return &CacheEntry{Bytes: bytes, IsStale: isStaleAge(info.ModTime(), staleSecs)}, nil
 }
 
+// CacheIsStale reports the staleness of a cache file from its mtime alone,
+// without reading it (for revalidating entries already held in memory).
+func CacheIsStale(path string, staleSecs uint64) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return isStaleAge(info.ModTime(), staleSecs), nil
+}
+
+func isStaleAge(modTime time.Time, staleSecs uint64) bool {
+	return staleSecs > 0 && uint64(time.Since(modTime).Seconds()) > staleSecs
+}
+
+// WriteCache writes atomically (temp file + rename in the same directory), so
+// a concurrent ReadCache — e.g. a cache hit during a background refresh —
+// never sees a half-written image.
 func WriteCache(path string, bytes []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, bytes, 0644)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(bytes); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func WriteCacheIf(path string, data io.Reader) error {

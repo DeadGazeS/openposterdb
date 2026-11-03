@@ -66,7 +66,14 @@ func main() {
 
 	app.SeedAdminIfNeeded(db, cfg.AdminUsername, cfg.AdminPassword)
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	// One shared transport for every upstream (TMDB API + image CDN, OMDb,
+	// MDBList, Trakt, Fanart, Kitsu, AniList). The default keeps only 2 idle
+	// connections per host, so concurrent renders kept re-handshaking TLS.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 256
+	transport.MaxIdleConnsPerHost = 64
+	transport.IdleConnTimeout = 90 * time.Second
+	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: transport}
 
 	mgr := services.NewServiceKeyManager(db, cfg.SecretsKey, cfg.JWTSecret, httpClient,
 		cfg.TMDBAPIKey, cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID)
@@ -161,6 +168,9 @@ func main() {
 			select {
 			case <-ticker.C:
 				state.CDNHashes.SweepExpired()
+				// MemCache.Set only trims from the LRU back; drop expired
+				// entries elsewhere so they don't sit in memory.
+				state.Caches.SweepExpired()
 			case <-cdnSweeperDone:
 				return
 			}

@@ -595,7 +595,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		if v, ok, due := p.Caches.ImageMem.GetDue(cacheKey); ok {
 			if due && !p.ExternalCacheOnly {
 				revalStaleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
-				if entry, err := services.ReadCache(cachePath, revalStaleSecs); err == nil && entry.IsStale {
+				if stale, err := services.CacheIsStale(cachePath, revalStaleSecs); err == nil && stale {
 					slog.Debug("image mem cache entry stale, background refresh", "kind", p.Kind, "cache_key", cacheKey)
 					go p.refreshStale(resolved, imageSize)
 				}

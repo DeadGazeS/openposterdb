@@ -1,13 +1,15 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.25-bookworm AS api-builder
 WORKDIR /app
-ARG APP_VERSION
 
 COPY api-go/go.mod api-go/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY api-go/ ./
+# Declared after `go mod download`: an ARG is part of every later RUN's cache
+# key, so declaring it earlier re-ran the download on every version change.
+ARG APP_VERSION
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -ldflags="-s -w -X openposterdb/internal/services.Version=${APP_VERSION:-dev}" -o openposterdb ./cmd/server/
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X openposterdb/internal/services.Version=${APP_VERSION:-dev}" -o openposterdb ./cmd/server/
 
 FROM node:22-bookworm AS web-builder
 WORKDIR /app

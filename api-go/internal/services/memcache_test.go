@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -176,5 +177,56 @@ func TestMemCacheGetDue_ExpiredStillRemoves(t *testing.T) {
 	}
 	if c.Len() != 0 {
 		t.Fatalf("expired entry not removed, Len=%d", c.Len())
+	}
+}
+
+// TestMemCacheSweepExpired: Set no longer scans the whole map, so expired
+// entries that aren't at the LRU back stay until SweepExpired (or access).
+func TestMemCacheSweepExpired(t *testing.T) {
+	// "a" is expired but at the LRU front (accessed after "b" was inserted),
+	// so Set's back-trim can't reach it.
+	c := NewMemCache(0, 0, 60*time.Millisecond, 0)
+	c.Set("a", 1, 1)
+	time.Sleep(35 * time.Millisecond)
+	c.Set("b", 2, 1)
+	c.Get("a")
+	time.Sleep(35 * time.Millisecond)
+	c.Set("c", 3, 1)
+	if c.Len() != 3 {
+		t.Fatalf("Len = %d, want 3 before the sweep", c.Len())
+	}
+	if n := c.SweepExpired(); n != 1 {
+		t.Fatalf("SweepExpired removed %d, want 1", n)
+	}
+	if _, ok := c.Get("b"); !ok {
+		t.Fatal("unexpired entry must survive the sweep")
+	}
+	var nilCache *MemCache
+	nilCache.SweepExpired()
+	var nilSet *MemCacheSet
+	nilSet.SweepExpired()
+	(&MemCacheSet{}).SweepExpired()
+}
+
+// TestMemCacheSetTrimsExpiredBack: expired entries at the LRU back are still
+// dropped on Set (cheap — no full scan).
+func TestMemCacheSetTrimsExpiredBack(t *testing.T) {
+	c := NewMemCache(0, 0, 0, 20*time.Millisecond)
+	c.Set("idle", 1, 1)
+	time.Sleep(30 * time.Millisecond)
+	c.Set("new", 2, 1)
+	if c.Len() != 1 {
+		t.Fatalf("Len = %d, want 1 (idle back entry trimmed on Set)", c.Len())
+	}
+}
+
+func BenchmarkMemCacheSet50k(b *testing.B) {
+	c := NewMemCache(0, 50_000, time.Hour, 0)
+	for i := 0; i < 50_000; i++ {
+		c.Set(strconv.Itoa(i), i, 1)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Set(strconv.Itoa(i%60_000), i, 1)
 	}
 }

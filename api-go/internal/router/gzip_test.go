@@ -104,3 +104,52 @@ func TestAcceptsGzip(t *testing.T) {
 		}
 	}
 }
+
+// Uncompressed responses with several writes must send the header once (the
+// writer used to re-run WriteHeader on every Write when not gzipping).
+func TestGzip_UncompressedMultiWrite(t *testing.T) {
+	h := Gzip(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write([]byte("ab"))
+		w.Write([]byte("cd"))
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := &countingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	h.ServeHTTP(rec, req)
+	if rec.headerCalls != 1 {
+		t.Errorf("WriteHeader called %d times, want 1", rec.headerCalls)
+	}
+	if rec.Body.String() != "abcd" {
+		t.Errorf("body = %q", rec.Body.String())
+	}
+}
+
+// Flush mid-stream must not terminate the gzip stream.
+func TestGzip_FlushThenWrite(t *testing.T) {
+	h := Gzip(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("hello "))
+		w.(http.Flusher).Flush()
+		w.Write([]byte("world"))
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(zr)
+	if err != nil || string(b) != "hello world" {
+		t.Fatalf("got %q err %v", b, err)
+	}
+}
+
+type countingRecorder struct {
+	*httptest.ResponseRecorder
+	headerCalls int
+}
+
+func (c *countingRecorder) WriteHeader(s int) { c.headerCalls++; c.ResponseRecorder.WriteHeader(s) }

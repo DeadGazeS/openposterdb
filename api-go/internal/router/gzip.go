@@ -7,7 +7,12 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
+
+// gzipWriters recycles gzip.Writers (each holds ~800 KB of compressor state,
+// so allocating one per response is the dominant cost of small JSON bodies).
+var gzipWriters = sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}
 
 // gzippableTypes is the set of Content-Type prefixes we compress. Anything
 // else (images, octet-stream, already-encoded responses) passes through
@@ -15,6 +20,9 @@ import (
 // is also compressed.
 var gzippableTypes = []string{
 	"application/json",
+	"application/javascript",
+	"application/manifest+json",
+	"image/svg+xml",
 	"text/",
 }
 
@@ -22,7 +30,8 @@ var gzippableTypes = []string{
 // is worth gzipping. We skip 1xx/2xx/3xx/4xx/5xx codes with no body, images,
 // octet-streams, and responses that already declare a content encoding.
 func shouldCompress(status int, contentType, contentEncoding string) bool {
-	if status < 200 || status == http.StatusNoContent || status == http.StatusNotModified {
+	// 206: a byte range of the identity encoding can't be gzipped on its own.
+	if status < 200 || status == http.StatusNoContent || status == http.StatusNotModified || status == http.StatusPartialContent {
 		return false
 	}
 	if contentEncoding != "" {
@@ -36,62 +45,61 @@ func shouldCompress(status int, contentType, contentEncoding string) bool {
 	return false
 }
 
-// gzipResponseWriter wraps http.ResponseWriter so the first Write triggers a
-// gzip writer. Headers must be sent before any body bytes (HTTP semantics), so
-// we set the Content-Encoding header at write time and let the original
-// ResponseWriter hand the encoded stream to the wire.
+// gzipResponseWriter wraps http.ResponseWriter and decides at WriteHeader
+// time (when Content-Type is known) whether to compress. Headers must be sent
+// before any body bytes, so Content-Encoding is set there too.
 type gzipResponseWriter struct {
 	http.ResponseWriter
-	gz            io.WriteCloser
-	wrote         bool
-	originalWrite func([]byte) (int, error)
-	originalHdr   http.Header
-	shouldGzip    bool
-	status        int
+	gz            *gzip.Writer
+	headerWritten bool
 }
 
 func (g *gzipResponseWriter) WriteHeader(status int) {
-	g.status = status
-	g.wrote = false // permit Write after
-	g.originalWrite = g.ResponseWriter.Write
-	g.originalHdr = g.ResponseWriter.Header()
-	g.shouldGzip = shouldCompress(status, g.originalHdr.Get("Content-Type"), g.originalHdr.Get("Content-Encoding"))
-	if g.shouldGzip {
-		g.gz = gzip.NewWriter(g.ResponseWriter)
-		g.originalHdr.Set("Content-Encoding", "gzip")
-		g.originalHdr.Set("Vary", "Accept-Encoding")
+	if g.headerWritten {
+		return
+	}
+	g.headerWritten = true
+	hdr := g.ResponseWriter.Header()
+	if shouldCompress(status, hdr.Get("Content-Type"), hdr.Get("Content-Encoding")) {
+		g.gz = gzipWriters.Get().(*gzip.Writer)
+		g.gz.Reset(g.ResponseWriter)
+		hdr.Set("Content-Encoding", "gzip")
+		hdr.Add("Vary", "Accept-Encoding")
 		// Drop Content-Length — the gzipped body has a different size.
-		g.originalHdr.Del("Content-Length")
-	} else {
-		g.gz = nil
+		hdr.Del("Content-Length")
 	}
 	g.ResponseWriter.WriteHeader(status)
 }
 
 func (g *gzipResponseWriter) Write(b []byte) (int, error) {
-	if g.gz == nil {
-		// WriteHeader wasn't called yet — flush implicit 200 and install the
-		// gzip writer before any body bytes hit the wire.
+	if !g.headerWritten {
+		// Implicit 200, same as net/http.
 		g.WriteHeader(http.StatusOK)
 	}
-	if g.shouldGzip {
+	if g.gz != nil {
 		return g.gz.Write(b)
 	}
 	return g.ResponseWriter.Write(b)
 }
 
-// Close the gzip writer to flush any trailer bytes (gzip has no trailer, but
-// the underlying Writer contract may require Close). Wrap once.
+// close finishes the gzip stream and returns the writer to the pool.
 func (g *gzipResponseWriter) close() error {
 	if g.gz == nil {
 		return nil
 	}
-	return g.gz.Close()
+	err := g.gz.Close()
+	g.gz.Reset(io.Discard) // drop the reference to the ResponseWriter
+	gzipWriters.Put(g.gz)
+	g.gz = nil
+	return err
 }
 
-// Flush bridges bufio.Flusher if the underlying ResponseWriter supports it.
+// Flush pushes buffered compressed bytes to the client without ending the
+// gzip stream (Close would write the footer and break later writes).
 func (g *gzipResponseWriter) Flush() {
-	g.close()
+	if g.gz != nil {
+		g.gz.Flush()
+	}
 	if f, ok := g.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

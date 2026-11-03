@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"path/filepath"
+	"time"
 )
 
 // DBPath resolves the database directory to an absolute path and returns the
@@ -34,6 +35,10 @@ func OpenDatabase(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(32)
-	db.SetMaxIdleConns(4)
+	// Keep enough idle connections that bursts don't constantly reopen them
+	// (each reopen re-runs the pragmas and drops its page cache), but let
+	// them go after a quiet spell — each holds up to an 8 MB page cache.
+	db.SetMaxIdleConns(16)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 	return db, nil
 }

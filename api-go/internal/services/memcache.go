@@ -80,7 +80,7 @@ func (c *MemCache) get(key string) (any, bool, bool) {
 		return nil, false, false
 	}
 	now := time.Now()
-	if (c.ttl > 0 && now.Sub(e.inserted) > c.ttl) || (c.idleTTL > 0 && now.Sub(e.lastUsed) > c.idleTTL) {
+	if c.expired(e, now) {
 		c.remove(e)
 		return nil, false, false
 	}
@@ -124,14 +124,18 @@ func (c *MemCache) Set(key string, value any, weight int64) {
 	c.evict(now)
 }
 
+// evict runs on every Set, so it must stay O(evicted), not O(entries): it
+// only trims from the LRU back — expired entries there, then anything over
+// capacity. Expired entries elsewhere in the list are dropped on access
+// (get) or by SweepExpired.
 func (c *MemCache) evict(now time.Time) {
-	// Expired sweep.
-	for _, e := range c.entries {
-		if (c.ttl > 0 && now.Sub(e.inserted) > c.ttl) || (c.idleTTL > 0 && now.Sub(e.lastUsed) > c.idleTTL) {
-			c.remove(e)
+	for back := c.lru.Back(); back != nil; back = c.lru.Back() {
+		e := back.Value.(*memEntry)
+		if !c.expired(e, now) {
+			break
 		}
+		c.remove(e)
 	}
-	// Capacity eviction: least-recently-used from the back.
 	for (c.maxBytes > 0 && c.totalBytes > c.maxBytes) || (c.maxEntries > 0 && len(c.entries) > c.maxEntries) {
 		back := c.lru.Back()
 		if back == nil {
@@ -139,6 +143,42 @@ func (c *MemCache) evict(now time.Time) {
 		}
 		c.remove(back.Value.(*memEntry))
 	}
+}
+
+func (c *MemCache) expired(e *memEntry, now time.Time) bool {
+	return (c.ttl > 0 && now.Sub(e.inserted) > c.ttl) || (c.idleTTL > 0 && now.Sub(e.lastUsed) > c.idleTTL)
+}
+
+// SweepExpired removes every expired entry (a full scan — call it from a
+// periodic janitor, not per request). Returns the number removed. Nil-safe.
+func (c *MemCache) SweepExpired() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ttl <= 0 && c.idleTTL <= 0 {
+		return 0
+	}
+	now := time.Now()
+	n := 0
+	for _, e := range c.entries {
+		if c.expired(e, now) {
+			c.remove(e)
+			n++
+		}
+	}
+	return n
+}
+
+// SweepExpired sweeps all caches in the set. Nil-safe.
+func (s *MemCacheSet) SweepExpired() {
+	if s == nil {
+		return
+	}
+	s.ImageMem.SweepExpired()
+	s.IDs.SweepExpired()
+	s.Ratings.SweepExpired()
 }
 
 func (c *MemCache) remove(e *memEntry) {

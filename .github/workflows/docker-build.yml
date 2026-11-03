@@ -29,7 +29,9 @@ jobs:
           else
             VERSION="${BASE}-${{ github.ref_name }}-${SHORT_SHA}"
           fi
-          jq --arg v "${VERSION}" '.version = $v' web/package.json > tmp.json && mv tmp.json web/package.json
+          # No package.json rewrite here: it changed the `COPY web/package.json`
+          # layer and busted the npm ci cache on every commit. The Dockerfile
+          # injects APP_VERSION after npm ci.
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
