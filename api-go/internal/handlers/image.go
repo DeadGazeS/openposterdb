@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"database/sql"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -131,21 +130,19 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 		}
 
 		var settings *services.RenderSettings
+		// Cached lookups (services/settingscache.go): invalidated by every
+		// settings/key write, so a cache hit needs no DB round-trip here.
 		if apiKey == freeAPIKey {
-			globals, err := services.GetGlobalSettingsCtx(r.Context(), d.DB)
-			if err != nil {
-				slog.Warn("free-key GetGlobalSettings failed; falling back to defaults", "error", err)
-			}
-			s := services.ParseGlobalRenderSettings(globals)
+			s := services.GlobalRenderSettingsCachedCtx(r.Context(), d.DB)
 			settings = &s
 		} else {
 			keyHash := services.HashAPIKey(apiKey)
-			k, err := services.FindAPIKeyByHashCtx(r.Context(), d.DB, keyHash)
+			k, err := services.FindAPIKeyByHashCachedCtx(r.Context(), d.DB, keyHash)
 			if err != nil || k == nil {
 				httpx.WriteError(w, 401, "invalid api key")
 				return
 			}
-			s := services.GetEffectiveRenderSettingsCtx(r.Context(), d.DB, k.ID, nil)
+			s := services.EffectiveRenderSettingsCachedCtx(r.Context(), d.DB, k.ID)
 			settings = &s
 		}
 
@@ -217,7 +214,7 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc
 		}
 
 		keyHash := services.HashAPIKey(apiKey)
-		k, err := services.FindAPIKeyByHashCtx(r.Context(), db, keyHash)
+		k, err := services.FindAPIKeyByHashCachedCtx(r.Context(), db, keyHash)
 		if err != nil || k == nil {
 			httpx.WriteJSON(w, 401, map[string]interface{}{"error": "Invalid or missing API key"})
 			return

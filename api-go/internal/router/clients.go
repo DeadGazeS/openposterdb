@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"openposterdb/internal/handlers"
 	"openposterdb/internal/services"
 )
@@ -145,8 +146,7 @@ func (s *AppState) isFreeAPIKeyEnabled() bool {
 	if s.Config.FreeKeyEnabled != nil {
 		return *s.Config.FreeKeyEnabled
 	}
-	val, _ := services.GetGlobalSetting(s.DB, "free_api_key_enabled")
-	return val == "true"
+	return services.GlobalSettingCachedCtx(context.Background(), s.DB, "free_api_key_enabled") == "true"
 }
 
 func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {

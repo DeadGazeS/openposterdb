@@ -33,6 +33,7 @@ func DecryptAPIKey(encrypted string, secretsKey []byte) (string, error) {
 }
 
 func CreateAPIKeyCtx(ctx context.Context, db *sql.DB, name, keyHash, keyPrefix, encryptedKey string, createdBy int64) (int64, error) {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	now := nowUTC()
 	result, err := db.ExecContext(ctx,
 		"INSERT INTO api_keys (name, key_hash, key_prefix, encrypted_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -146,6 +147,7 @@ func ListAPIKeys(db *sql.DB) ([]APIKey, error) {
 }
 
 func DeleteAPIKeyCtx(ctx context.Context, db *sql.DB, id int64) error {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	_, err := db.ExecContext(ctx, "DELETE FROM api_keys WHERE id = ?", id)
 	return err
 }

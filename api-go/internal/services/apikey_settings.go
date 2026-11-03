@@ -244,6 +244,7 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 }
 
 func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings) error {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	_, err := db.ExecContext(ctx, upsertAPIKeySettingsSQL, apiKeySettingsFieldValues(s)...)
 	return err
 }
@@ -253,6 +254,7 @@ func UpsertAPIKeySettings(db *sql.DB, s *APIKeySettings) error {
 }
 
 func DeleteAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) error {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	_, err := db.ExecContext(ctx, "DELETE FROM api_key_settings WHERE api_key_id = ?", apiKeyID)
 	return err
 }
@@ -264,8 +266,15 @@ func DeleteAPIKeySettings(db *sql.DB, apiKeyID int64) error {
 // --- Effective render settings ---
 
 func GetEffectiveRenderSettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64, cachedGlobals *RenderSettings) RenderSettings {
-	defaults := DefaultRenderSettings()
 	perKey, err := GetAPIKeySettingsCtx(ctx, db, apiKeyID)
+	return effectiveFromPerKey(ctx, db, apiKeyID, perKey, err, cachedGlobals)
+}
+
+// effectiveFromPerKey merges an already-read per-key row (or its read error)
+// with the globals. Split out so the cached lookup can see the read error and
+// avoid caching a globals fallback caused by a transient failure.
+func effectiveFromPerKey(ctx context.Context, db *sql.DB, apiKeyID int64, perKey *APIKeySettings, err error, cachedGlobals *RenderSettings) RenderSettings {
+	defaults := DefaultRenderSettings()
 	if err != nil {
 		// The per-key SELECT failed (transient connection issue, schema drift,
 		// or a corrupt row). The previous version silently fell back to globals

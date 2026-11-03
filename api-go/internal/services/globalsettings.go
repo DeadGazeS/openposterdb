@@ -42,6 +42,7 @@ func GetGlobalSettings(db *sql.DB) (map[string]string, error) {
 }
 
 func SetGlobalSettingCtx(ctx context.Context, db *sql.DB, key, value string) error {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	_, err := db.ExecContext(ctx,
 		"INSERT INTO global_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
 		key, value, value,
@@ -54,6 +55,7 @@ func SetGlobalSetting(db *sql.DB, key, value string) error {
 }
 
 func SetGlobalSettingsBatchCtx(ctx context.Context, db *sql.DB, settings map[string]string) error {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -79,6 +81,7 @@ func SetGlobalSettingsBatch(db *sql.DB, settings map[string]string) error {
 // drop settings that are no longer set (e.g. per-source color overrides that
 // were reset to their default), since SetGlobalSettingsBatch only upserts.
 func RemoveGlobalSettingsCtx(ctx context.Context, db *sql.DB, keys []string) error {
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
 	if len(keys) == 0 {
 		return nil
 	}
