@@ -134,7 +134,12 @@ jobs:
           # external shell files — keep both in sync when changing).
           JWT_SECRET: abababababababababababababababababababababababababababababababab
           LISTEN_ADDR: 0.0.0.0:3333
+          # Required at startup; the binary runs without entrypoint.sh (which
+          # generates one), so CI must set it. Non-secret test value.
+          SECRETS_KEY: cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
           COOKIE_SECURE: "false"
+          # The suite logs in far more often than the production per-IP limit.
+          RATE_LIMIT_AUTH_RPM: "0"
           CACHE_DIR: /tmp/openposterdb-e2e
           DB_DIR: /tmp/openposterdb-e2e
           STATIC_DIR: web/dist

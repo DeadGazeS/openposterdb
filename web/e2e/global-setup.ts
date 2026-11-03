@@ -79,6 +79,8 @@ export default async function globalSetup() {
     '-e LISTEN_ADDR=0.0.0.0:3000',
     '-e COOKIE_SECURE=false',
     '-e CACHE_DIR=/tmp/openposterdb-e2e',
+    // The suite logs in far more often than the production per-IP limit allows.
+    '-e RATE_LIMIT_AUTH_RPM=0',
   ]
 
   execSync(

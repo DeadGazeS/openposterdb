@@ -55,6 +55,7 @@ $CTR run -d --name "$CONTAINER_NAME" \
     -e JWT_SECRET="${TEST_JWT_SECRET}" \
     -e LISTEN_ADDR=0.0.0.0:3000 \
     -e COOKIE_SECURE=false \
+    -e RATE_LIMIT_AUTH_RPM=0 \
     -e CACHE_DIR=/tmp/openposterdb-e2e \
     -e DB_DIR=/tmp/openposterdb-e2e \
     -e FREE_KEY_ENABLED=true \
