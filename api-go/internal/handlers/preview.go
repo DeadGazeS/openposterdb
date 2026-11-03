@@ -37,7 +37,9 @@ func loadPreviewFonts(w http.ResponseWriter, textSize services.ScalePercent) (la
 // image/jpeg for poster/backdrop/episode, image/png for logo.
 func writePreviewImage(w http.ResponseWriter, contentType string, rendered []byte) {
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	// private: previews answer authenticated admin requests, so a shared
+	// cache (CDN) must not store one and hand it to someone else.
+	w.Header().Set("Cache-Control", "private, max-age=60")
 	w.Write(rendered)
 }
 

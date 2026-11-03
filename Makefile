@@ -12,9 +12,11 @@ pull:
 build:
 	$(COMPOSE) $(FILES) build --no-cache --build-arg APP_VERSION=$(APP_VERSION)
 
+# Removes this project's containers, images and volumes only. (It used to
+# also run `docker system prune -af --volumes`, which deleted every unused
+# image and volume on the machine, other projects' data included.)
 nuke:
 	$(COMPOSE) $(FILES) down --rmi all -v
-	docker system prune -af --volumes
 
 rebuild: nuke build
 
