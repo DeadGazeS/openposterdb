@@ -35,9 +35,10 @@ func (c *FanartClient) cachedImages(key string, fetch func() (*FanartImages, err
 			return v.(*FanartImages), nil
 		}
 	}
+	gen := upstreamGenNow()
 	imgs, err := fetch()
 	if err == nil && imgs != nil && c.images != nil {
-		upstreamSet(c.images, key, imgs)
+		upstreamSet(c.images, key, gen, imgs)
 	}
 	return imgs, err
 }

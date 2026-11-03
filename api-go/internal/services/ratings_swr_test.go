@@ -154,3 +154,108 @@ func waitNoIDRefresh(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func withStaleServeMax(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := staleServeMax
+	staleServeMax = d
+	t.Cleanup(func() { waitNoRefresh(t); waitNoIDRefresh(t); staleServeMax = old })
+}
+
+// While refreshes keep coming back empty, the old badges are only kept up to
+// staleServeMax after their last successful fetch (re-storing them used to
+// reset the cache TTL, so they were served forever).
+func TestFetchRatingsCached_StaleCapAppliesDuringOutage(t *testing.T) {
+	withRatingsRefreshAfter(t, 10*time.Millisecond)
+	withStaleServeMax(t, 60*time.Millisecond)
+	stub := &omdbStub{}
+	clients := RatingsClients{OMDB: NewOmdbClient([]string{"k"}, &http.Client{Transport: stub})}
+	cache := NewMemCache(0, 100, time.Hour, 0)
+	q := imdbOnly("tt0000007")
+	FetchRatingsCachedCtx(t.Context(), cache, clients, q)
+	stub.empty = true
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := FetchRatingsCachedCtx(t.Context(), cache, clients, q)
+		if len(got) == 0 {
+			break // the cap kicked in
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stale badges were served past staleServeMax")
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+}
+
+// Background image refreshes use FetchRatingsFreshCtx: an entry past its
+// refresh age is refetched synchronously instead of served stale.
+func TestFetchRatingsFresh_BypassesStale(t *testing.T) {
+	withRatingsRefreshAfter(t, 10*time.Millisecond)
+	stub := &omdbStub{}
+	clients := RatingsClients{OMDB: NewOmdbClient([]string{"k"}, &http.Client{Transport: stub})}
+	cache := NewMemCache(0, 100, time.Hour, 0)
+	q := imdbOnly("tt0000008")
+	FetchRatingsCachedCtx(t.Context(), cache, clients, q)
+	time.Sleep(20 * time.Millisecond)
+	stub.fixed = "7.7"
+	if got := FetchRatingsFreshCtx(t.Context(), cache, clients, q); len(got) != 1 || got[0].Value != "7.7" {
+		t.Fatalf("fresh fetch returned stale badges: %v", got)
+	}
+}
+
+// A TMDB 404 on refresh means the id is gone or remapped: it replaces the old
+// resolution instead of keeping it like a transient failure.
+func TestResolveIDCached_RefreshNotFoundReplaces(t *testing.T) {
+	old := idRefreshAfter
+	idRefreshAfter = 10 * time.Millisecond
+	t.Cleanup(func() { waitNoIDRefresh(t); idRefreshAfter = old })
+	var gone atomic.Bool
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"movie_results":[{"id":278,"poster_path":"/a.jpg","popularity":1}],"tv_results":[]}`
+		if gone.Load() {
+			body = `{"movie_results":[],"tv_results":[],"tv_episode_results":[]}`
+		}
+		return (&upstreamCounter{status: 200, body: body}).RoundTrip(r)
+	})
+	clients := IDClients{TMDB: NewTmdbClient("k", &http.Client{Transport: transport})}
+	cache := NewMemCache(0, 100, time.Hour, 0)
+	if _, err := ResolveIDCachedCtx(t.Context(), cache, IDTypeIMDB, "tt0111161", clients); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	gone.Store(true)
+	ResolveIDCachedCtx(t.Context(), cache, IDTypeIMDB, "tt0111161", clients) // triggers the refresh
+	waitNoIDRefresh(t)
+	if _, err := ResolveIDCachedCtx(t.Context(), cache, IDTypeIMDB, "tt0111161", clients); err == nil {
+		t.Fatal("an id TMDB no longer knows must stop resolving after the refresh")
+	}
+}
+
+// A transiently failing refresh keeps the old resolution only up to the cap.
+func TestResolveIDCached_StaleCapAppliesDuringOutage(t *testing.T) {
+	old := idRefreshAfter
+	idRefreshAfter = 10 * time.Millisecond
+	t.Cleanup(func() { waitNoIDRefresh(t); idRefreshAfter = old })
+	withStaleServeMax(t, 60*time.Millisecond)
+	var down atomic.Bool
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if down.Load() {
+			return (&upstreamCounter{status: 401, body: `{}`}).RoundTrip(r)
+		}
+		return (&upstreamCounter{status: 200, body: `{"movie_results":[{"id":278,"poster_path":"/a.jpg","popularity":1}],"tv_results":[]}`}).RoundTrip(r)
+	})
+	clients := IDClients{TMDB: NewTmdbClient("k", &http.Client{Transport: transport})}
+	cache := NewMemCache(0, 100, time.Hour, 0)
+	ResolveIDCachedCtx(t.Context(), cache, IDTypeIMDB, "tt0111161", clients)
+	down.Store(true)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := ResolveIDCachedCtx(t.Context(), cache, IDTypeIMDB, "tt0111161", clients); err != nil {
+			break // past the cap: resolved synchronously, and TMDB is down
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stale resolution served past staleServeMax")
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+}

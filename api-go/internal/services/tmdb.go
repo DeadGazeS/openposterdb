@@ -141,12 +141,13 @@ func (c *TmdbClient) GetImagesCtx(ctx context.Context, mediaType string, tmdbID 
 			return v.(*TmdbImagesResponse), nil // shared: callers only read it
 		}
 	}
+	gen := upstreamGenNow()
 	var result TmdbImagesResponse
 	if err := c.GetCtx(ctx, path, map[string]string{"include_image_language": includeLang}, &result); err != nil {
 		return nil, err
 	}
 	if c.images != nil {
-		upstreamSet(c.images, key, &result)
+		upstreamSet(c.images, key, gen, &result)
 	}
 	return &result, nil
 }

@@ -318,6 +318,12 @@ type ServeParams struct {
 	ImageSizeStr        *string
 	Caches              *services.MemCacheSet
 	Inflight            *InflightSet
+	// Served, when set, receives the cache key/path the response was served
+	// under (the CDN redirect records it for the /c/ route).
+	Served *services.CDNServed
+	// freshRatings bypasses the ratings stale-while-revalidate (background
+	// refreshes must render with current badges).
+	freshRatings bool
 }
 
 // resolveKitsuMalCtx resolves a kitsu:N or mal:N URL. The UseKitsu and
@@ -582,6 +588,9 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
 	if err != nil {
 		return nil, "", err
+	}
+	if p.Served != nil {
+		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType}
 	}
 
 	// Serve from the in-memory cache first (fast path; works even with
@@ -863,7 +872,11 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 			epEpisode = resolved.Episode.EpisodeNumber
 		}
 
-		rawBadges = services.FetchRatingsCachedCtx(p.Context, p.Caches.Ratings,
+		fetchRatings := services.FetchRatingsCachedCtx
+		if p.freshRatings {
+			fetchRatings = services.FetchRatingsFreshCtx
+		}
+		rawBadges = fetchRatings(p.Context, p.Caches.Ratings,
 			services.RatingsClients{TMDB: p.TMDB, OMDB: p.OMDB, MDBList: p.MDBList, Trakt: p.Trakt},
 			services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
 				EpisodeShowTMDbID: epShowID, EpisodeSeason: epSeason, EpisodeEpisode: epEpisode},
@@ -1029,6 +1042,7 @@ func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize servi
 	defer cancel()
 	bgParams := p
 	bgParams.Context = ctx
+	bgParams.freshRatings = true
 	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := bgParams.prepareRender(resolved)
 	if err != nil {
 		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)

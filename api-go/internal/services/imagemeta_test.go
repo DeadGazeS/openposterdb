@@ -424,3 +424,23 @@ func TestImageMeta_TitleKeyRoundTrip(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// A failed flush keeps its touches for the next one (they used to be dropped).
+func TestTouchImageAccess_FailedFlushRetried(t *testing.T) {
+	db := newImageMetaTestDB(t)
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	seedImageMetaRow(t, db, "a", "poster", nil, 1, 1, 1)
+	TouchImageAccess(db, "a")
+	if _, err := db.Exec(`ALTER TABLE image_meta RENAME TO image_meta_away`); err != nil {
+		t.Fatal(err)
+	}
+	FlushImageAccess(db) // fails: table missing
+	if _, err := db.Exec(`ALTER TABLE image_meta_away RENAME TO image_meta`); err != nil {
+		t.Fatal(err)
+	}
+	FlushImageAccess(db)
+	if got := readLastAccessed(t, db, "a"); got == 1 {
+		t.Fatal("the touch from the failed flush was lost")
+	}
+}

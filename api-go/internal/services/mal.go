@@ -133,11 +133,12 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 			c.media.Delete(key)
 		}
 	}
+	gen := upstreamGenNow()
 	media, err := c.fetchMediaByMAL(ctx, malID)
 	if err == nil {
-		upstreamSet(c.media, key, media)
+		upstreamSet(c.media, key, gen, media)
 	} else if isIDNotFound(err) {
-		upstreamSet(c.media, key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)})
+		upstreamSet(c.media, key, gen, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)})
 	}
 	return media, err
 }

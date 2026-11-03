@@ -108,3 +108,28 @@ func TestClearUpstreamCaches(t *testing.T) {
 		t.Fatalf("Kitsu+AniList calls after clear = %d, want 2", n)
 	}
 }
+
+// A fetch that started before "Clear cache" must not repopulate the cache
+// with its pre-clear result.
+func TestClearUpstreamCaches_InFlightFetchDoesNotSurvive(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return (&upstreamCounter{status: 200, body: `{"posters":[]}`}).RoundTrip(r)
+	})
+	c := NewTmdbClient("k", &http.Client{Transport: transport})
+	done := make(chan struct{})
+	go func() { c.GetImagesCtx(t.Context(), "movie", 9, "en"); close(done) }()
+	<-started
+	ClearUpstreamCaches()
+	close(release)
+	<-done
+	c.GetImagesCtx(t.Context(), "movie", 9, "en")
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("calls = %d, want 2 (the pre-clear result must not be served)", n)
+	}
+}

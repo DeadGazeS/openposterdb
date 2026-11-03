@@ -29,8 +29,11 @@ func TestCDNHandler_HashMiss(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("hash miss: got %d want 404", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "settings hash") {
-		t.Errorf("body should explain the hash miss, got %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "original image URL") {
+		t.Errorf("body should point back to the original URL, got %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("a miss must not be edge-cached, Cache-Control = %q", got)
 	}
 }
 

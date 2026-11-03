@@ -5,24 +5,22 @@ import (
 	"strings"
 
 	"openposterdb/internal/httpx"
-	appimg "openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
 
 // CDNLookup is satisfied by services.HashRegistry; defined as an interface so
 // the handler doesn't depend on the concrete type (and tests can stub it).
 type CDNLookup interface {
-	Lookup(hash string) (*services.RenderSettings, bool)
+	LookupServed(key string) (services.CDNServed, bool)
 }
 
 // HandleCDNImage serves the content-addressed /c/{hash}/{rest...} route used
 // behind CDN edges. The hash is registered by HandleImage when it issues a
 // 302 redirect.
 //
-// It looks up the hash in the registry and renders through ServeImage with
-// the registered settings (cache hits are served from the usual mem/disk
-// caches). An unknown or expired hash is a 404 — the edge should retry the
-// original authenticated URL so HandleImage re-registers the hash.
+// It serves only the cache entry an authenticated request recorded for the
+// URL (HandleImage renders before redirecting); anything else is a 404 the
+// edge must not cache.
 //
 // deps is a per-request resolver (matching HandleImage) so that updates to
 // ImageServeConfig (CacheDir / ImageStaleSecs) are visible to in-flight
@@ -40,12 +38,6 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 
 		hash := r.PathValue("hash")
 		rest := r.PathValue("rest")
-
-		settings, ok := registry.Lookup(hash)
-		if !ok {
-			httpx.WriteError(w, http.StatusNotFound, "settings hash not found or expired")
-			return
-		}
 
 		parts := strings.SplitN(rest, "/", 3)
 		if len(parts) < 3 {
@@ -80,34 +72,40 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 			return
 		}
 
-		// Render (or serve from cache) with the registered settings, exactly as
-		// the authed route would: HandleImage 302s here before rendering, so
-		// this route is the one that fills the cache. Only settings an authed
-		// request registered can be rendered. ?lang and ?imageSize are the
-		// only overrides honoured (the redirect carries imageSize; neither
-		// changes the work a render does beyond the registered settings).
-		s := *settings
-		query := r.URL.Query()
-		if lang := query.Get("lang"); lang != "" {
-			if err := services.ValidateLang(lang); err == nil {
-				s.Lang = lang
+		// Serve only what an authenticated request rendered for this URL
+		// (recorded by HandleImage before its redirect): no id resolution,
+		// ratings fetch or render here, so a settings hash grants nothing
+		// beyond already-produced images.
+		notFound := func() {
+			// Don't let the edge cache the miss; the authed URL re-renders.
+			w.Header().Set("Cache-Control", "no-store")
+			httpx.WriteError(w, http.StatusNotFound, "image not found — request the original image URL")
+		}
+		served, ok := registry.LookupServed(services.CDNServedKey(hash, idTypeStr, kind, idValue, r.URL.Query().Get("imageSize")))
+		if !ok || d.Config == nil {
+			notFound()
+			return
+		}
+		var bytes []byte
+		if c := d.Config.Caches; c != nil && c.ImageMem != nil {
+			if v, ok := c.ImageMem.Get(served.CacheKey); ok {
+				bytes = v.([]byte)
 			}
 		}
-		var imageSize *string
-		if v := query.Get("imageSize"); v != "" {
-			imageSize = &v
+		if bytes == nil && !d.Config.ExternalCacheOnly {
+			if entry, err := services.ReadCache(served.CachePath, 0); err == nil {
+				bytes = entry.Bytes
+			}
 		}
-
-		bytes, contentType, err := appimg.ServeImage(d.serveParams(r.Context(), idTypeStr, idValue, kind, &s, nil, imageSize))
-		if err != nil {
-			writeServeError(w, err)
+		if bytes == nil {
+			notFound()
 			return
 		}
 
 		// CDN-cached for a long time; the settings hash is the cache key, so
 		// the CDN edge sees at most one entry per hash per image.
 		w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
-		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Type", served.ContentType)
 		w.Write(bytes)
 	}
 }

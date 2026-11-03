@@ -149,6 +149,17 @@ func main() {
 	if !cfg.ExternalCacheOnly {
 		os.MkdirAll(cfg.CacheDir, 0755)
 	}
+	// Background startup housekeeping: finish deletes of cache dirs staged
+	// by a clear that the previous run didn't complete, and drop temp files
+	// left by a crash mid-write.
+	go func() {
+		if err := services.CleanupStagedDirs(cfg.CacheDir); err != nil {
+			slog.Warn("cleanup of staged cache dirs failed", "error", err)
+		}
+		if n := services.SweepTempFiles(cfg.CacheDir); n > 0 {
+			slog.Info("removed leftover cache temp files", "count", n)
+		}
+	}()
 
 	if err := image.LoadFont("assets/fonts/Inter-Bold.ttf"); err != nil {
 		slog.Warn("failed to load font, image previews will not render", "error", err)

@@ -38,6 +38,46 @@ type HashRegistry struct {
 
 	mu    sync.RWMutex
 	store map[string]hashEntry
+
+	// served maps a /c/ URL (CDNServedKey) to the cache entry the
+	// authenticated route rendered for it. /c/ serves only from this index —
+	// it never resolves ids, fetches ratings or renders, so a settings hash
+	// (deterministic, computable for the defaults) can't be used to make
+	// the server do upstream work without an API key.
+	served *MemCache
+}
+
+// CDNServed is the cache entry a /c/ URL maps to.
+type CDNServed struct {
+	CacheKey    string
+	CachePath   string
+	ContentType string
+}
+
+// CDNServedKey identifies one /c/ URL: settings hash, id, kind and the
+// ?imageSize the redirect carries (not part of the settings hash).
+func CDNServedKey(hash, idType, kind, idValue, imageSize string) string {
+	return hash + "|" + idType + "|" + kind + "|" + idValue + "|" + imageSize
+}
+
+// RecordServed remembers which cache entry a /c/ URL serves. Nil-safe.
+func (r *HashRegistry) RecordServed(key string, s CDNServed) {
+	if r == nil || r.served == nil {
+		return
+	}
+	r.served.Set(key, s, 1)
+}
+
+// LookupServed returns the cache entry recorded for a /c/ URL.
+func (r *HashRegistry) LookupServed(key string) (CDNServed, bool) {
+	if r == nil || r.served == nil {
+		return CDNServed{}, false
+	}
+	v, ok := r.served.Get(key)
+	if !ok {
+		return CDNServed{}, false
+	}
+	return v.(CDNServed), true
 }
 
 type hashEntry struct {
@@ -51,6 +91,9 @@ func NewHashRegistry(ttl time.Duration) *HashRegistry {
 	return &HashRegistry{
 		ttl:   ttl,
 		store: make(map[string]hashEntry),
+		// A CDN re-fetches /c/ URLs after its own cache expires (a day), so
+		// the index outlives the settings-hash TTL. Bounded.
+		served: NewMemCache(0, 100_000, 48*time.Hour, 0),
 	}
 }
 
@@ -96,7 +139,11 @@ func (r *HashRegistry) Len() int {
 
 // SweepExpired removes all expired entries; call from a janitor goroutine.
 func (r *HashRegistry) SweepExpired() int {
-	if r == nil || r.ttl <= 0 {
+	if r == nil {
+		return 0
+	}
+	r.served.SweepExpired()
+	if r.ttl <= 0 {
 		return 0
 	}
 	now := time.Now()

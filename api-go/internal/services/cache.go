@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -294,4 +295,33 @@ func ComputeCDNMaxAge(releaseDate *string, minStale, maxAge uint64) uint64 {
 		return 365 * 24 * 3600
 	}
 	return stale
+}
+
+// SweepTempFiles removes WriteCache temp files (".tmp-*") older than an hour
+// anywhere under cacheDir — left behind only when the process died between
+// create and rename. Meant to run once in the background at startup.
+func SweepTempFiles(cacheDir string) int {
+	cutoff := time.Now().Add(-time.Hour)
+	removed := 0
+	filepath.WalkDir(cacheDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable entry: skip it, keep walking
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), purgePrefix) {
+				return filepath.SkipDir // being deleted already
+			}
+			return nil
+		}
+		if !strings.HasPrefix(d.Name(), ".tmp-") {
+			return nil
+		}
+		if info, err := d.Info(); err == nil && info.ModTime().Before(cutoff) {
+			if os.Remove(path) == nil {
+				removed++
+			}
+		}
+		return nil
+	})
+	return removed
 }

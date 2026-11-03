@@ -230,10 +230,13 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 	if v, ok := cache.Get(key); ok {
 		switch e := v.(type) {
 		case idEntry:
-			if time.Now().After(e.refreshAfter) {
-				refreshIDInBackground(cache, key, flightKey, idType, idValue, clients)
+			if time.Since(e.fetched) <= staleServeMax {
+				if time.Now().After(e.refreshAfter) {
+					refreshIDInBackground(cache, key, flightKey, idType, idValue, clients)
+				}
+				return e.resolved, nil
 			}
-			return e.resolved, nil
+			cache.Delete(key) // past the hard cap: resolve synchronously
 		case idMiss:
 			if time.Now().Before(e.until) {
 				return nil, e.err
@@ -245,7 +248,8 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 	return idFlight.do(ctx, flightKey, func(fctx context.Context) (*ResolvedID, error) {
 		resolved, err := ResolveIDCtx(fctx, idType, idValue, clients)
 		if err == nil {
-			cache.Set(key, idEntry{resolved: resolved, refreshAfter: time.Now().Add(idRefreshAfter)}, 1)
+			now := time.Now()
+			cache.Set(key, idEntry{resolved: resolved, refreshAfter: now.Add(idRefreshAfter), fetched: now}, 1)
 		} else if isIDNotFound(err) {
 			cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
 		}
@@ -261,7 +265,13 @@ var idRefreshAfter = time.Hour
 type idEntry struct {
 	resolved     *ResolvedID
 	refreshAfter time.Time
+	fetched      time.Time // last successful resolve; staleServeMax counts from here
 }
+
+// staleServeMax caps how long a value is served after its last successful
+// fetch while refreshes keep failing (MemCache.Set resets the cache's own
+// TTL on every re-store, so the cap is tracked in the entry).
+var staleServeMax = 24 * time.Hour
 
 var idRefreshing sync.Map // flight key -> struct{}
 
@@ -276,13 +286,25 @@ func refreshIDInBackground(cache *MemCache, key, flightKey string, idType IDType
 		defer idRefreshing.Delete(flightKey)
 		idFlight.do(context.Background(), flightKey, func(fctx context.Context) (*ResolvedID, error) {
 			resolved, err := ResolveIDCtx(fctx, idType, idValue, clients)
+			now := time.Now()
 			if err == nil {
-				cache.Set(key, idEntry{resolved: resolved, refreshAfter: time.Now().Add(idRefreshAfter)}, 1)
+				cache.Set(key, idEntry{resolved: resolved, refreshAfter: now.Add(idRefreshAfter), fetched: now}, 1)
 				return resolved, nil
 			}
+			if isIDNotFound(err) {
+				// A definitive answer: the id is gone or remapped upstream.
+				cache.Set(key, idMiss{err: err, until: now.Add(idNotFoundTTL)}, 1)
+				return nil, err
+			}
+			// Transient failure: keep the old resolution (retry soon), but
+			// only up to staleServeMax after its last successful fetch.
 			if v, ok := cache.Get(key); ok {
 				if e, ok := v.(idEntry); ok {
-					cache.Set(key, idEntry{resolved: e.resolved, refreshAfter: time.Now().Add(idNotFoundTTL)}, 1)
+					if now.Sub(e.fetched) <= staleServeMax {
+						cache.Set(key, idEntry{resolved: e.resolved, refreshAfter: now.Add(idNotFoundTTL), fetched: e.fetched}, 1)
+					} else {
+						cache.Delete(key)
+					}
 				}
 			}
 			return nil, err

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	appimg "openposterdb/internal/image"
@@ -41,6 +42,9 @@ func (cdnTmdbStub) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func newCDNFlowDeps(t *testing.T) (ImageDeps, string) {
 	t.Helper()
+	if err := appimg.LoadFont("../../assets/fonts/Inter-Bold.ttf"); err != nil {
+		t.Skipf("font asset not available: %v", err)
+	}
 	db := newHandlersTestDB(t)
 	raw, hash, prefix := services.GenerateAPIKey()
 	if _, err := services.CreateAPIKey(db, "test", hash, prefix, "", 1); err != nil {
@@ -117,5 +121,68 @@ func TestHandleIsValid_UnknownKeyRejected(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("key %q: got %d want %d (%s)", key, rec.Code, want, rec.Body.String())
 		}
+	}
+}
+
+// countingCDNStub counts every upstream request.
+type countingCDNStub struct{ calls *atomic.Int32 }
+
+func (c countingCDNStub) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.calls.Add(1)
+	return cdnTmdbStub{}.RoundTrip(r)
+}
+
+// A settings hash is deterministic (the default-settings hash can be computed
+// from the code) and leaks in Location headers. /c/ must never make the
+// server do upstream work for an id no authenticated request rendered.
+func TestCDNRoute_NoUpstreamWorkWithoutKey(t *testing.T) {
+	deps, apiKey := newCDNFlowDeps(t)
+	var calls atomic.Int32
+	deps.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: countingCDNStub{&calls}})
+	get := func() ImageDeps { return deps }
+	mux := http.NewServeMux()
+	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+apiKey+"/imdb/poster-default/tt0111161.jpg", nil))
+	loc := rec.Header().Get("Location")
+	hash := strings.Split(strings.TrimPrefix(loc, "/c/"), "/")[0]
+	before := calls.Load()
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/c/"+hash+"/imdb/poster-default/tt0068646.jpg", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unrendered id via /c/: got %d want 404", rec.Code)
+	}
+	if n := calls.Load() - before; n != 0 {
+		t.Fatalf("/c/ made %d upstream calls without an API key", n)
+	}
+}
+
+// /c/ serves exactly what the authenticated URL rendered, overrides included
+// (it used to re-render and drop ?ratings_limit).
+func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
+	deps, apiKey := newCDNFlowDeps(t)
+	get := func() ImageDeps { return deps }
+	mux := http.NewServeMux()
+	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	path := "/" + apiKey + "/imdb/poster-default/tt0111161.jpg?ratings_limit=0"
+
+	deps.Config.EnableCDNRedirects = false
+	direct := httptest.NewRecorder()
+	mux.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, path, nil))
+	if direct.Code != http.StatusOK {
+		t.Fatalf("direct: %d", direct.Code)
+	}
+
+	deps.Config.EnableCDNRedirects = true
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	cdn := httptest.NewRecorder()
+	mux.ServeHTTP(cdn, httptest.NewRequest(http.MethodGet, rec.Header().Get("Location"), nil))
+	if cdn.Code != http.StatusOK || !bytes.Equal(cdn.Body.Bytes(), direct.Body.Bytes()) {
+		t.Fatalf("/c/ must serve the authed render: code %d, equal=%v", cdn.Code, bytes.Equal(cdn.Body.Bytes(), direct.Body.Bytes()))
 	}
 }

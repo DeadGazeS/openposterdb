@@ -201,6 +201,7 @@ func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType
 var imageAccessFlushInterval = 60 * time.Second
 
 type accessRecorder struct {
+	flushMu   sync.Mutex // serializes flushes (the shutdown flush waits for a running one)
 	mu        sync.Mutex
 	pending   map[string]int64 // cache_key -> unix seconds of the latest serve
 	lastFlush atomic.Int64     // unix nanos
@@ -244,6 +245,8 @@ func FlushImageAccess(db *sql.DB) {
 }
 
 func (r *accessRecorder) flush(db *sql.DB) {
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	r.lastFlush.Store(time.Now().UnixNano())
 	r.mu.Lock()
 	batch := r.pending
@@ -255,7 +258,15 @@ func (r *accessRecorder) flush(db *sql.DB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := writeImageAccess(ctx, db, batch); err != nil {
-		slog.Warn("image access flush failed", "keys", len(batch), "error", err)
+		slog.Warn("image access flush failed; will retry", "keys", len(batch), "error", err)
+		// Put the batch back for the next flush, keeping newer touches.
+		r.mu.Lock()
+		for k, at := range batch {
+			if cur, ok := r.pending[k]; !ok || at > cur {
+				r.pending[k] = at
+			}
+		}
+		r.mu.Unlock()
 	}
 }
 

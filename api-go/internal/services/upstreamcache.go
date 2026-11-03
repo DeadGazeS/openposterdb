@@ -31,6 +31,10 @@ func upstreamGet(c *MemCache, key string) (any, bool) {
 	return e.v, true
 }
 
-func upstreamSet(c *MemCache, key string, v any) {
-	c.Set(key, upstreamEntry{v: v, gen: upstreamGen.Load()}, 1)
+// upstreamGenNow is read before a fetch starts and passed to upstreamSet, so
+// a fetch that began before ClearUpstreamCaches stores an already-stale entry.
+func upstreamGenNow() uint64 { return upstreamGen.Load() }
+
+func upstreamSet(c *MemCache, key string, gen uint64, v any) {
+	c.Set(key, upstreamEntry{v: v, gen: gen}, 1)
 }

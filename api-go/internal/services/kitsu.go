@@ -120,11 +120,12 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 			c.cache.Delete(key)
 		}
 	}
+	gen := upstreamGenNow()
 	anime, mappings, err := c.fetchAnime(ctx, idOrSlug)
 	if err == nil {
-		upstreamSet(c.cache, key, kitsuAnimeEntry{anime: anime, mappings: mappings})
+		upstreamSet(c.cache, key, gen, kitsuAnimeEntry{anime: anime, mappings: mappings})
 	} else if isIDNotFound(err) {
-		upstreamSet(c.cache, key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)})
+		upstreamSet(c.cache, key, gen, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)})
 	}
 	return anime, mappings, err
 }
@@ -333,9 +334,10 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 			return copyUint64(v.(*uint64))
 		}
 	}
+	gen := upstreamGenNow()
 	id, definitive := c.fetchAnimeIDByMAL(ctx, malID)
 	if definitive && c.cache != nil {
-		upstreamSet(c.cache, key, id)
+		upstreamSet(c.cache, key, gen, id)
 	}
 	return copyUint64(id)
 }

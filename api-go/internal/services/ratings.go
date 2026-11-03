@@ -550,6 +550,7 @@ var emptyRatingsTTL = 2 * time.Minute
 type ratingsEntry struct {
 	badges       []RatingBadge // empty = no ratings (or every provider failed)
 	refreshAfter time.Time
+	fetched      time.Time // last non-empty fetch; staleServeMax counts from here
 }
 
 var (
@@ -576,6 +577,18 @@ func ratingsCacheKey(q RatingsQuery) string {
 // ratingsRefreshAfter are served while a background refresh runs. Only the
 // badge list is cached; the auxiliary responses are unused by all callers.
 func FetchRatingsCachedCtx(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
+	return fetchRatingsCached(ctx, cache, clients, q, true)
+}
+
+// FetchRatingsFreshCtx is FetchRatingsCachedCtx without stale-while-
+// revalidate: an entry past its refresh age is refetched synchronously. For
+// background image refreshes, which would otherwise re-render with the very
+// badges they are meant to replace.
+func FetchRatingsFreshCtx(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
+	return fetchRatingsCached(ctx, cache, clients, q, false)
+}
+
+func fetchRatingsCached(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery, allowStale bool) []RatingBadge {
 	if cache == nil {
 		return FetchRatingsCtx(ctx, clients, q).Badges
 	}
@@ -585,7 +598,7 @@ func FetchRatingsCachedCtx(ctx context.Context, cache *MemCache, clients Ratings
 		if time.Now().Before(e.refreshAfter) {
 			return e.badges
 		}
-		if len(e.badges) > 0 {
+		if allowStale && len(e.badges) > 0 && time.Since(e.fetched) <= staleServeMax {
 			if _, running := ratingsRefreshing.LoadOrStore(flightKey, struct{}{}); !running {
 				go func() {
 					defer ratingsRefreshing.Delete(flightKey)
@@ -613,14 +626,16 @@ func refreshRatings(ctx context.Context, cache *MemCache, clients RatingsClients
 	badges := FetchRatingsCtx(ctx, clients, q).Badges
 	now := time.Now()
 	if len(badges) == 0 {
-		if prev, ok := cachedRatings(cache, key); ok && len(prev.badges) > 0 {
-			cache.Set(key, ratingsEntry{badges: prev.badges, refreshAfter: now.Add(emptyRatingsTTL)}, int64(len(prev.badges))*100+64)
+		// Keep the previous badges through an outage — but only up to
+		// staleServeMax after they were last fetched successfully.
+		if prev, ok := cachedRatings(cache, key); ok && len(prev.badges) > 0 && now.Sub(prev.fetched) <= staleServeMax {
+			cache.Set(key, ratingsEntry{badges: prev.badges, refreshAfter: now.Add(emptyRatingsTTL), fetched: prev.fetched}, int64(len(prev.badges))*100+64)
 			return prev.badges
 		}
 		cache.Set(key, ratingsEntry{refreshAfter: now.Add(emptyRatingsTTL)}, 64)
 		return nil
 	}
-	cache.Set(key, ratingsEntry{badges: badges, refreshAfter: now.Add(ratingsRefreshAfter)}, int64(len(badges))*100+64)
+	cache.Set(key, ratingsEntry{badges: badges, refreshAfter: now.Add(ratingsRefreshAfter), fetched: now}, int64(len(badges))*100+64)
 	return badges
 }
 

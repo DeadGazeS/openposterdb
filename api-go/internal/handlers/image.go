@@ -158,10 +158,26 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 
 		// CDN redirect: when enabled, register the effective settings under a
 		// hash and 302 to /c/{hash}/... so a CDN edge can deduplicate across
-		// users. Free-key requests skip the redirect (the free key is public
-		// and the hash registry is small; we don't want to leak free settings).
+		// users. The image is rendered (or served from cache) here first and
+		// its cache entry recorded: /c/ only serves what an authenticated
+		// request produced, never rendering or calling upstreams itself.
+		// Free-key requests skip the redirect (the free key is public and the
+		// hash registry is small; we don't want to leak free settings).
 		if d.Config.EnableCDNRedirects && apiKey != freeAPIKey && d.CDNHashes != nil {
 			if hash := d.CDNHashes.Register(settings); hash != "" {
+				var served services.CDNServed
+				params := d.serveParams(r.Context(), idTypeStr, idValue, kind, settings, query.RatingsLimit, query.ImageSize)
+				params.Served = &served
+				if _, _, err := image.ServeImage(params); err != nil {
+					writeServeError(w, err)
+					return
+				}
+				size := ""
+				if query.ImageSize != nil {
+					size = *query.ImageSize
+				}
+				d.CDNHashes.RecordServed(services.CDNServedKey(hash, idTypeStr, kind, idValue, size), served)
+
 				ext := ".jpg"
 				if kind == "logo" {
 					ext = ".png"
@@ -169,8 +185,8 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 				target := "/c/" + hash + "/" + idTypeStr + "/" + imageKind + "/" + idValue + ext
 				// imageSize is a request parameter, not a render setting, so
 				// it is not part of the hash — carry it on the redirect.
-				if query.ImageSize != nil && *query.ImageSize != "" {
-					target += "?imageSize=" + url.QueryEscape(*query.ImageSize)
+				if size != "" {
+					target += "?imageSize=" + url.QueryEscape(size)
 				}
 				w.Header().Set("Location", target)
 				w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=3600")
