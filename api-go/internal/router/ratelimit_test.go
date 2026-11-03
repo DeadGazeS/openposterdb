@@ -135,6 +135,19 @@ func TestClientIP(t *testing.T) {
 	if got := ip("10.0.0.5:5555", "9.9.9.9, 173.245.48.10"); got != "9.9.9.9" {
 		t.Errorf("custom: got %q want 9.9.9.9", got)
 	}
+	// "private,cloudflare": visitor → Cloudflare → nginx on the same host,
+	// with nginx appending the Cloudflare edge ($proxy_add_x_forwarded_for).
+	cf, err := config.ParseTrustedProxies("private,cloudflare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustedProxies = cf
+	if got := ip("172.18.0.3:5555", "6.6.6.6, 9.9.9.9, 162.158.10.20"); got != "9.9.9.9" {
+		t.Errorf("cloudflare keyword: got %q want the visitor 9.9.9.9", got)
+	}
+	if got := ip("172.18.0.3:5555", "9.9.9.9, 2606:4700::1"); got != "9.9.9.9" {
+		t.Errorf("cloudflare keyword (IPv6 edge): got %q", got)
+	}
 	trustedProxies = config.DefaultTrustedProxies()
 
 	if _, err := config.ParseTrustedProxies("10.0.0.0/33"); err == nil {

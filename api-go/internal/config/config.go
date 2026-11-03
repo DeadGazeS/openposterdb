@@ -227,8 +227,9 @@ func DefaultTrustedProxies() []netip.Prefix {
 
 // ParseTrustedProxies parses TRUSTED_PROXIES: "" or "private" = the default
 // ranges, "none" = trust no proxy (always use the connection address),
-// otherwise a comma list of IPs/CIDRs, where "private" may be included to
-// keep the defaults (e.g. "private,173.245.48.0/20" for Cloudflare).
+// otherwise a comma list of IPs/CIDRs and the keywords "private" (the
+// defaults) and "cloudflare" (Cloudflare's edge ranges), e.g.
+// "private,cloudflare" for Cloudflare → a reverse proxy on the same host.
 func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 	v = strings.TrimSpace(v)
 	switch strings.ToLower(v) {
@@ -244,6 +245,8 @@ func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 		case part == "":
 		case strings.EqualFold(part, "private"):
 			out = append(out, DefaultTrustedProxies()...)
+		case strings.EqualFold(part, "cloudflare"):
+			out = append(out, CloudflareProxies()...)
 		case strings.Contains(part, "/"):
 			p, err := netip.ParsePrefix(part)
 			if err != nil {
@@ -259,4 +262,26 @@ func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 		}
 	}
 	return out, nil
+}
+
+// cloudflareRanges are Cloudflare's published edge ranges
+// (https://www.cloudflare.com/ips-v4 and /ips-v6, checked 2026-11-03).
+// Cloudflare changes them rarely; update this list when it does.
+var cloudflareRanges = []string{
+	"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+	"141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+	"197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+	"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+	"2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+	"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+}
+
+// CloudflareProxies returns Cloudflare's edge ranges (TRUSTED_PROXIES
+// keyword "cloudflare").
+func CloudflareProxies() []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(cloudflareRanges))
+	for _, c := range cloudflareRanges {
+		out = append(out, netip.MustParsePrefix(c))
+	}
+	return out
 }
