@@ -1058,4 +1058,34 @@ describe('ImageListView', () => {
     // imageFn NOT called — Info button must not propagate to the row click.
     expect(mocks.imageFn).not.toHaveBeenCalled()
   })
+
+  // A preview response arriving after the user moved on to another image must
+  // not replace the newer preview, and its blob URL must be revoked.
+  it('ignores a late preview response for a superseded row and revokes URLs', async () => {
+    const mocks = makeMocks()
+    mocks.listFn.mockResolvedValue({ ok: true, json: () => Promise.resolve(sampleResponse) })
+    let resolveFirst: (v: unknown) => void = () => {}
+    mocks.imageFn
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r }))
+      .mockResolvedValueOnce({ ok: true, blob: () => Promise.resolve(new Blob(['second'])) })
+    let n = 0
+    const created: string[] = []
+    const revoke = vi.fn()
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => { const u = `blob:${++n}`; created.push(u); return u }), revokeObjectURL: revoke })
+
+    const wrapper = mountView(mocks)
+    await flushPromises()
+    const rows = wrapper.findAll('tbody tr.cursor-pointer')
+    await rows[0]!.trigger('click') // first preview: still loading
+    await rows[1]!.trigger('click') // second preview wins
+    await flushPromises()
+    resolveFirst({ ok: true, blob: () => Promise.resolve(new Blob(['first'])) })
+    await flushPromises()
+
+    expect(created).toEqual(['blob:1']) // the late first response never became a URL
+    expect(wrapper.find('img').attributes('src')).toBe('blob:1')
+    wrapper.unmount()
+    expect(revoke).toHaveBeenCalledWith('blob:1')
+    vi.unstubAllGlobals()
+  })
 })

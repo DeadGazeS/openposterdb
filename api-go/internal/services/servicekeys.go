@@ -330,36 +330,27 @@ func (m *ServiceKeyManager) Reload() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.EnvTMDB {
-		m.Keys.tmdb = nil
-		if v := m.loadFromDB("tmdb"); v != nil {
-			m.Keys.tmdb = *v
-		}
+	m.reloadOne(&m.Keys.tmdb, m.EnvTMDB, "tmdb")
+	m.reloadOne(&m.Keys.mdblist, m.EnvMDBList, "mdblist")
+	m.reloadOne(&m.Keys.omdb, m.EnvOMDB, "omdb")
+	m.reloadOne(&m.Keys.fanart, m.EnvFanart, "fanart")
+	m.reloadOne(&m.Keys.trakt, m.EnvTrakt, "trakt")
+}
+
+// reloadOne replaces one service's cached keys with the stored ones (nil when
+// unset). On a read/decrypt error the cached keys are kept: wiping them on a
+// transient DB error (e.g. busy during an import) used to drop every
+// provider key from memory until the next restart.
+func (m *ServiceKeyManager) reloadOne(dst *[]string, envLocked bool, service string) {
+	if envLocked {
+		return
 	}
-	if !m.EnvMDBList {
-		m.Keys.mdblist = nil
-		if v := m.loadFromDB("mdblist"); v != nil {
-			m.Keys.mdblist = *v
-		}
+	keys, err := m.loadKeys(service)
+	if err != nil {
+		slog.Warn("service key reload failed; keeping the cached keys", "service", service, "error", err)
+		return
 	}
-	if !m.EnvOMDB {
-		m.Keys.omdb = nil
-		if v := m.loadFromDB("omdb"); v != nil {
-			m.Keys.omdb = *v
-		}
-	}
-	if !m.EnvFanart {
-		m.Keys.fanart = nil
-		if v := m.loadFromDB("fanart"); v != nil {
-			m.Keys.fanart = *v
-		}
-	}
-	if !m.EnvTrakt {
-		m.Keys.trakt = nil
-		if v := m.loadFromDB("trakt"); v != nil {
-			m.Keys.trakt = *v
-		}
-	}
+	*dst = keys
 }
 
 // decryptStored picks the right path for a stored ciphertext. v2 envelopes
@@ -395,13 +386,26 @@ func (m *ServiceKeyManager) decryptStored(encrypted, service string) ([]byte, er
 }
 
 func (m *ServiceKeyManager) loadFromDB(service string) *[]string {
-	encrypted, err := GetGlobalSetting(m.DB, "service_key_"+service)
-	if err != nil || encrypted == "" {
+	keys, err := m.loadKeys(service)
+	if err != nil || len(keys) == 0 {
 		return nil
+	}
+	return &keys
+}
+
+// loadKeys returns the stored keys for a service: (nil, nil) when none are
+// stored, an error when the row can't be read or decrypted.
+func (m *ServiceKeyManager) loadKeys(service string) ([]string, error) {
+	encrypted, err := GetGlobalSetting(m.DB, "service_key_"+service)
+	if err != nil {
+		return nil, err
+	}
+	if encrypted == "" {
+		return nil, nil
 	}
 	plain, err := m.decryptStored(encrypted, service)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var keys []string
 	for k := range strings.SplitSeq(string(plain), ",") {
@@ -410,10 +414,7 @@ func (m *ServiceKeyManager) loadFromDB(service string) *[]string {
 			keys = append(keys, k)
 		}
 	}
-	if len(keys) == 0 {
-		return nil
-	}
-	return &keys
+	return keys, nil
 }
 
 func (m *ServiceKeyManager) TMDBKey() string {

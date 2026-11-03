@@ -726,3 +726,32 @@ func UnmarshalRatingBadges(sources string) []RatingBadge {
 	}
 	return badges
 }
+
+// InvalidateTitleRatings drops the cached ratings of the title an id
+// resolves to (title purge). The ratings cache is keyed by TMDB/IMDb id, not
+// by the request id, so the resolution is read from the ID cache; when that
+// has already expired the ratings simply refresh on their own schedule.
+func InvalidateTitleRatings(ids, ratings *MemCache, idType, idValue string) {
+	if ids == nil || ratings == nil {
+		return
+	}
+	v, ok := ids.Get(idType + "/" + idValue)
+	if !ok {
+		return
+	}
+	e, ok := v.(idEntry)
+	if !ok || e.resolved == nil {
+		return
+	}
+	for _, r := range []*ResolvedID{e.resolved, e.resolved.RatingsTarget} {
+		if r == nil {
+			continue
+		}
+		for _, mt := range []string{"movie", "tv"} {
+			ratings.Delete(ratingsCacheKey(RatingsQuery{ResolvedTMDbID: r.TMDbID, MediaType: mt, IMDbID: r.IMDbID}))
+		}
+		if ep := r.Episode; ep != nil {
+			ratings.Delete(ratingsCacheKey(RatingsQuery{MediaType: "episode", EpisodeShowTMDbID: ep.ShowTMDbID, EpisodeSeason: ep.SeasonNumber, EpisodeEpisode: ep.EpisodeNumber}))
+		}
+	}
+}

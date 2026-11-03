@@ -231,8 +231,12 @@ func apiKeySettingsFieldValues(s *APIKeySettings) []any {
 }
 
 func GetAPIKeySettingsCtx(ctx context.Context, db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
+	return getAPIKeySettings(ctx, db, apiKeyID)
+}
+
+func getAPIKeySettings(ctx context.Context, q dbtx, apiKeyID int64) (*APIKeySettings, error) {
 	var s APIKeySettings
-	err := db.QueryRowContext(ctx, selectAPIKeySettingsSQL, apiKeyID).Scan(apiKeySettingsFieldPtrs(&s)...)
+	err := q.QueryRowContext(ctx, selectAPIKeySettingsSQL, apiKeyID).Scan(apiKeySettingsFieldPtrs(&s)...)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -245,7 +249,11 @@ func GetAPIKeySettings(db *sql.DB, apiKeyID int64) (*APIKeySettings, error) {
 
 func UpsertAPIKeySettingsCtx(ctx context.Context, db *sql.DB, s *APIKeySettings) error {
 	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
-	_, err := db.ExecContext(ctx, upsertAPIKeySettingsSQL, apiKeySettingsFieldValues(s)...)
+	return upsertAPIKeySettings(ctx, db, s)
+}
+
+func upsertAPIKeySettings(ctx context.Context, q dbtx, s *APIKeySettings) error {
+	_, err := q.ExecContext(ctx, upsertAPIKeySettingsSQL, apiKeySettingsFieldValues(s)...)
 	return err
 }
 

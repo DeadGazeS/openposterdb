@@ -91,3 +91,46 @@ func TestAniListLookupIMDB_TransientErrorNotCached(t *testing.T) {
 		t.Fatalf("after recovery imdb = %v (the failure was cached)", id)
 	}
 }
+
+type statusStub struct {
+	calls  atomic.Int32
+	status int
+	body   string
+}
+
+func (s *statusStub) RoundTrip(*http.Request) (*http.Response, error) {
+	s.calls.Add(1)
+	return &http.Response{StatusCode: s.status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(s.body))}, nil
+}
+
+// AniList answers an unknown idMal with HTTP 404 (checked live). That must be
+// a not-found (404 for the request, cached briefly), not a server error that
+// is retried against AniList on every request.
+func TestAniListMediaByMAL_HTTP404IsNotFound(t *testing.T) {
+	stub := &statusStub{status: 404, body: `{"errors":[{"message":"Not Found.","status":404}],"data":{"Media":null}}`}
+	c := NewAniListClient(&http.Client{Transport: stub})
+	for i := 0; i < 3; i++ {
+		_, err := c.MediaByMALCtx(t.Context(), 999999999)
+		if !isIDNotFound(err) {
+			t.Fatalf("want IDNotFound, got %v", err)
+		}
+	}
+	if n := stub.calls.Load(); n != 1 {
+		t.Fatalf("AniList calls = %d, want 1 (not-found cached)", n)
+	}
+}
+
+// A non-404 GraphQL error (e.g. rate limit) is transient: not cached as
+// not-found.
+func TestAniListMediaByMAL_OtherGraphQLErrorNotCached(t *testing.T) {
+	stub := &statusStub{status: 200, body: `{"errors":[{"message":"Too Many Requests.","status":429}],"data":{"Media":null}}`}
+	c := NewAniListClient(&http.Client{Transport: stub})
+	for i := 0; i < 2; i++ {
+		if _, err := c.MediaByMALCtx(t.Context(), 1); err == nil || isIDNotFound(err) {
+			t.Fatalf("want a transient error, got %v", err)
+		}
+	}
+	if n := stub.calls.Load(); n != 2 {
+		t.Fatalf("AniList calls = %d, want 2 (transient errors not cached)", n)
+	}
+}

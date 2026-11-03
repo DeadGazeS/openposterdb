@@ -413,3 +413,31 @@ func TestUpdateKeys_RemovedKey_ClearsFromDB(t *testing.T) {
 		t.Errorf("TMDBKey after empty update: got %q, want \"\"", got)
 	}
 }
+
+// A transient DB error during Reload keeps the cached keys (it used to wipe
+// every provider key from memory until restart); a removed key still clears.
+func TestReload_KeepsKeysOnReadError(t *testing.T) {
+	db := newServiceKeysTestDB(t)
+	mgr := newServiceKeysManager(t, db, "init-secret", "", nil, "", "", "")
+	tmdbVal := "tmdb-key"
+	if err := mgr.UpdateKeys(&ServiceKeysUpdate{TMDB: &tmdbVal}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE global_settings RENAME TO gs_away`); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Reload()
+	if got := mgr.TMDBKey(); got != tmdbVal {
+		t.Fatalf("after a failed reload TMDBKey = %q, want the cached %q", got, tmdbVal)
+	}
+	if _, err := db.Exec(`ALTER TABLE gs_away RENAME TO global_settings`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM global_settings WHERE key = 'service_key_tmdb'`); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Reload()
+	if got := mgr.TMDBKey(); got != "" {
+		t.Fatalf("a deleted key must clear on reload, got %q", got)
+	}
+}

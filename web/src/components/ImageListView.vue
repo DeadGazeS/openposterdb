@@ -147,33 +147,45 @@ const previewKey = ref('')
 const previewUrl = ref<string | null>(null)
 const previewLoading = ref(false)
 
+// Every preview URL goes through setPreviewUrl (revokes the previous blob
+// URL), and previewSeq discards responses for a preview that was closed or
+// replaced meanwhile — a late response used to overwrite the newer preview
+// and leak its object URL.
+let previewSeq = 0
+function setPreviewUrl(url: string | null) {
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  previewUrl.value = url
+}
+
 async function openPreview(cacheKey: string) {
+  const seq = ++previewSeq
   previewKey.value = cacheKey
   previewOpen.value = true
   previewLoading.value = true
-  previewUrl.value = null
+  setPreviewUrl(null)
 
   try {
     const res = await props.imageFn(cacheKey)
-    if (res.ok) {
-      const blob = await res.blob()
-      previewUrl.value = URL.createObjectURL(blob)
-    }
+    if (seq !== previewSeq || !res.ok) return
+    const blob = await res.blob()
+    if (seq !== previewSeq) return
+    setPreviewUrl(URL.createObjectURL(blob))
+  } catch {
+    // network error: the dialog shows no image
   } finally {
-    previewLoading.value = false
+    if (seq === previewSeq) previewLoading.value = false
   }
 }
 
 function closePreview() {
+  previewSeq++
   previewOpen.value = false
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
-    previewUrl.value = null
-  }
+  setPreviewUrl(null)
 }
 
 onUnmounted(() => {
-  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  previewSeq++
+  setPreviewUrl(null)
 })
 
 const fetchModalOpen = ref(false)
@@ -203,10 +215,11 @@ async function fetchImage() {
     const blob = await res.blob()
     fetchIdValue.value = ''
     fetchModalOpen.value = false
+    previewSeq++ // supersede any preview still loading
     previewKey.value = fetchedKey
     previewOpen.value = true
     previewLoading.value = false
-    previewUrl.value = URL.createObjectURL(blob)
+    setPreviewUrl(URL.createObjectURL(blob))
     refetch()
   } catch (e) {
     fetchError.value = e instanceof Error ? e.message : 'Fetch failed'

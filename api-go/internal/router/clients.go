@@ -47,6 +47,7 @@ func (s *AppState) previewConfig() *handlers.PreviewConfig {
 		Kitsu:             s.Kitsu,
 		AniList:           s.AniList,
 		KitsuIMDbMapper:   s.KitsuIMDbMapper,
+		Caches:            s.Caches,
 	}
 }
 

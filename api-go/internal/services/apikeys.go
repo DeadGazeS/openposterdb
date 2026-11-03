@@ -34,8 +34,12 @@ func DecryptAPIKey(encrypted string, secretsKey []byte) (string, error) {
 
 func CreateAPIKeyCtx(ctx context.Context, db *sql.DB, name, keyHash, keyPrefix, encryptedKey string, createdBy int64) (int64, error) {
 	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
+	return createAPIKey(ctx, db, name, keyHash, keyPrefix, encryptedKey, createdBy)
+}
+
+func createAPIKey(ctx context.Context, q dbtx, name, keyHash, keyPrefix, encryptedKey string, createdBy int64) (int64, error) {
 	now := nowUTC()
-	result, err := db.ExecContext(ctx,
+	result, err := q.ExecContext(ctx,
 		"INSERT INTO api_keys (name, key_hash, key_prefix, encrypted_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
 		name, keyHash, keyPrefix, encryptedKey, createdBy, now,
 	)
@@ -106,8 +110,12 @@ func FindAPIKeyByID(db *sql.DB, id int64) (*APIKey, error) {
 // FindAPIKeyByName returns the API key with the given name, or nil. Used by the
 // settings importer to update an existing key instead of recreating it.
 func FindAPIKeyByNameCtx(ctx context.Context, db *sql.DB, name string) (*APIKey, error) {
+	return findAPIKeyByName(ctx, db, name)
+}
+
+func findAPIKeyByName(ctx context.Context, q dbtx, name string) (*APIKey, error) {
 	var k APIKey
-	err := db.QueryRowContext(ctx,
+	err := q.QueryRowContext(ctx,
 		"SELECT "+apiKeySelectColumns+" FROM api_keys WHERE name = ?",
 		name,
 	).Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.EncryptedKey, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt)
@@ -125,7 +133,7 @@ func FindAPIKeyByName(db *sql.DB, name string) (*APIKey, error) {
 }
 
 func ListAPIKeysCtx(ctx context.Context, db *sql.DB) ([]APIKey, error) {
-	rows, err := db.QueryContext(ctx, "SELECT "+apiKeySelectColumns+" FROM api_keys")
+	rows, err := db.QueryContext(ctx, "SELECT "+apiKeySelectColumns+" FROM api_keys ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +147,7 @@ func ListAPIKeysCtx(ctx context.Context, db *sql.DB) ([]APIKey, error) {
 		}
 		keys = append(keys, k)
 	}
-	return keys, nil
+	return keys, rows.Err()
 }
 
 func ListAPIKeys(db *sql.DB) ([]APIKey, error) {

@@ -61,16 +61,22 @@ func SetGlobalSettingsBatchCtx(ctx context.Context, db *sql.DB, settings map[str
 		return err
 	}
 	defer tx.Rollback()
+	if err := setGlobalSettings(ctx, tx, settings); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+func setGlobalSettings(ctx context.Context, q dbtx, settings map[string]string) error {
 	for key, value := range settings {
-		if _, err := tx.ExecContext(ctx,
+		if _, err := q.ExecContext(ctx,
 			"INSERT INTO global_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
 			key, value, value,
 		); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func SetGlobalSettingsBatch(db *sql.DB, settings map[string]string) error {
@@ -125,3 +131,11 @@ func PruneStaleColorSettings(db *sql.DB, globals, batch map[string]string) error
 }
 
 // --- Per-key settings ---
+
+// dbtx is satisfied by *sql.DB and *sql.Tx, so the settings importer can run
+// the same queries inside one transaction.
+type dbtx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}

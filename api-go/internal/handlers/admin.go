@@ -60,11 +60,24 @@ func HandleStats(db *sql.DB, cacheDir string, caches *services.MemCacheSet) http
 			return
 		}
 
-		posterCount, _ := services.CountImageMetaCtx(r.Context(), db, "p")
-		logoCount, _ := services.CountImageMetaCtx(r.Context(), db, "l")
-		backdropCount, _ := services.CountImageMetaCtx(r.Context(), db, "b")
-		episodeCount, _ := services.CountImageMetaCtx(r.Context(), db, "e")
-		apiKeyCount, _ := services.CountAPIKeysCtx(r.Context(), db)
+		// A failed count used to show as 0 on the dashboard.
+		var countErr error
+		count := func(n int64, err error) int64 {
+			if err != nil && countErr == nil {
+				countErr = err
+			}
+			return n
+		}
+		posterCount := count(services.CountImageMetaCtx(r.Context(), db, "p"))
+		logoCount := count(services.CountImageMetaCtx(r.Context(), db, "l"))
+		backdropCount := count(services.CountImageMetaCtx(r.Context(), db, "b"))
+		episodeCount := count(services.CountImageMetaCtx(r.Context(), db, "e"))
+		apiKeyCount := count(services.CountAPIKeysCtx(r.Context(), db))
+		if countErr != nil {
+			slog.Warn("stats count failed", "error", countErr)
+			httpx.WriteError(w, 500, "Failed to read stats")
+			return
+		}
 
 		var memCacheEntries, idCacheEntries, ratingsCacheEntries int64
 		var imageMemCacheMB float64
@@ -194,6 +207,9 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 
 		page := httpx.ParseIntParam(r, "page", 1)
 		pageSize := httpx.ParseIntParam(r, "page_size", 50)
+		if pageSize > 200 {
+			pageSize = 200 // unbounded, page_size=1e9 returned the whole table
+		}
 		sortBy := r.URL.Query().Get("sort_by")
 		sortDir := r.URL.Query().Get("sort_dir")
 
@@ -219,15 +235,25 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 			return
 		}
 
+		var errs []string
 		var dirsCleared int64 = 0
 		if !externalCacheOnly {
-			staged, _ := services.StageCacheForClear(cacheDir)
+			staged, err := services.StageCacheForClear(cacheDir)
+			if err != nil {
+				errs = append(errs, "cache dirs: "+err.Error())
+			}
 			dirsCleared = int64(len(staged))
 			go services.RemoveStagedDirs(staged)
 		}
 
-		metaDeleted, _ := services.DeleteAllImageMetaCtx(r.Context(), db)
-		ratingsDeleted, _ := services.DeleteAllAvailableRatingsCtx(r.Context(), db)
+		metaDeleted, err := services.DeleteAllImageMetaCtx(r.Context(), db)
+		if err != nil {
+			errs = append(errs, "image metadata: "+err.Error())
+		}
+		ratingsDeleted, err := services.DeleteAllAvailableRatingsCtx(r.Context(), db)
+		if err != nil {
+			errs = append(errs, "available ratings: "+err.Error())
+		}
 
 		// Drop every in-memory entry so a purge is immediately visible.
 		if caches != nil {
@@ -245,8 +271,7 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 		// Kitsu/AniList lookups), so the next render re-fetches everything.
 		services.ClearUpstreamCaches()
 
-		httpx.WriteJSON(w, 200, map[string]any{
-			"ok":                  true,
+		writePurgeResult(w, errs, map[string]any{
 			"external_cache_only": externalCacheOnly,
 			"dirs_cleared":        dirsCleared,
 			"meta_deleted":        metaDeleted,

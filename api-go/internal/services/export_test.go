@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strings"
@@ -587,5 +588,38 @@ func TestExportImportAPIKey_CarriesHashAcrossSecretsKey(t *testing.T) {
 	}
 	if _, err := DecryptAPIKey(*restored.EncryptedKey, targetKey); err == nil {
 		t.Error("cross-SECRETS_KEY: DecryptAPIKey under target key should fail (expected)")
+	}
+}
+
+// A failure part-way through an import rolls everything back (it used to
+// leave a half-applied import and lose already-regenerated keys).
+func TestApplyImport_FailureRollsBack(t *testing.T) {
+	db := newExportTestDB(t)
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	ctx := context.Background()
+	if _, err := CreateAPIKeyCtx(ctx, db, "existing", "dup-hash", "dup-pref", "", 1); err != nil {
+		t.Fatal(err)
+	}
+	p := &ExportPayload{
+		Version:  MinExportVersion,
+		Settings: map[string]string{"lang": "fr"},
+		APIKeys: []ExportedAPIKey{
+			{Name: "fresh"}, // regenerated
+			{Name: "clash", KeyHash: strP("dup-hash"), KeyPrefix: strP("p")}, // UNIQUE violation
+		},
+	}
+	res, err := ApplyImportPayloadCtx(ctx, db, nil, p)
+	if err == nil {
+		t.Fatal("want an error from the duplicate key_hash")
+	}
+	if res.Committed || len(res.RegeneratedKeys) != 0 {
+		t.Fatalf("a rolled-back import must report nothing applied: %+v", res)
+	}
+	if v, _ := GetGlobalSettingCtx(ctx, db, "lang"); v == "fr" {
+		t.Fatal("global settings from the failed import were kept")
+	}
+	if k, _ := FindAPIKeyByNameCtx(ctx, db, "fresh"); k != nil {
+		t.Fatal("api key from the failed import was kept")
 	}
 }

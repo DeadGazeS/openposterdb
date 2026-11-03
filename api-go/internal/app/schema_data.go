@@ -487,4 +487,27 @@ var Migrations = []Migration{
 		SQL:           "ALTER TABLE image_meta ADD COLUMN title TEXT",
 		ExpectedError: "duplicate column",
 	},
+	// Admin image list: one index per allowlisted sort (with the cache_key
+	// tiebreaker, scannable in either direction) — the default sort
+	// (last_accessed) used to scan and temp-sort every row of the kind.
+	{
+		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_accessed ON image_meta(image_type, last_accessed, cache_key)",
+		ExpectedError: "already exists",
+	},
+	{
+		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_updated ON image_meta(image_type, updated_at, cache_key)",
+		ExpectedError: "already exists",
+	},
+	{
+		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_release ON image_meta(image_type, release_date, cache_key)",
+		ExpectedError: "already exists",
+	},
+	{
+		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_created_key ON image_meta(image_type, created_at, cache_key)",
+		ExpectedError: "already exists",
+	},
+	{
+		SQL:           "DROP INDEX IF EXISTS idx_image_meta_type_created", // superseded (no tiebreaker column)
+		ExpectedError: "no such index",
+	},
 }

@@ -185,6 +185,9 @@ type ImportResult struct {
 	RestoredSettings int              `json:"restored_settings"`
 	RestoredKeys     int              `json:"restored_keys"`
 	RegeneratedKeys  []RegeneratedKey `json:"regenerated_keys"`
+	// Committed reports whether settings and API keys were written (a later
+	// service-key failure then still returns them).
+	Committed bool `json:"committed"`
 }
 
 // GenerateAPIKey creates a new random API key and returns its raw value, hash,
@@ -275,6 +278,18 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 		return result, nil
 	}
 
+	// Global settings and API keys are written in one transaction: a failure
+	// part-way (e.g. a carried-over key_hash hitting the UNIQUE constraint)
+	// used to leave a half-applied import — and drop keys already
+	// regenerated, whose raw values exist only in the result. Service keys
+	// go through the ServiceKeyManager (own writes + reload) after commit.
+	defer bumpSettingsGen(db) // invalidate the settings cache (settingscache.go)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	defer tx.Rollback()
+
 	if len(p.Settings) > 0 {
 		batch := make(map[string]string, len(p.Settings))
 		for k, v := range p.Settings {
@@ -283,45 +298,16 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 			}
 			batch[k] = v
 		}
-		if err := SetGlobalSettingsBatchCtx(ctx, db, batch); err != nil {
-			return result, err
+		if err := setGlobalSettings(ctx, tx, batch); err != nil {
+			return ImportResult{}, err
 		}
 		result.RestoredSettings = len(batch)
 	}
 
-	if len(p.ServiceKeys) > 0 && keys != nil {
-		update := &ServiceKeysUpdate{}
-		if v, ok := p.ServiceKeys["tmdb"]; ok {
-			update.TMDB = &v
-		}
-		if v, ok := p.ServiceKeys["mdblist"]; ok {
-			update.MDBList = &v
-		}
-		if v, ok := p.ServiceKeys["omdb"]; ok {
-			update.OMDB = &v
-		}
-		if v, ok := p.ServiceKeys["fanart"]; ok {
-			update.Fanart = &v
-		}
-		if v, ok := p.ServiceKeys["trakt"]; ok {
-			update.Trakt = &v
-		}
-		if err := keys.UpdateKeys(update); err != nil {
-			return result, err
-		}
-		// Reload from DB so the in-memory cache mirrors everything that's
-		// persisted, not just the keys in this payload. Without this,
-		// newly-imported keys were visible in the admin UI (which reads
-		// the DB directly) but the rating-fetch hot path kept serving
-		// the stale empty set from the cache until container restart.
-		keys.Reload()
-		result.RestoredKeys = len(p.ServiceKeys)
-	}
-
 	for _, ek := range p.APIKeys {
-		existing, err := FindAPIKeyByNameCtx(ctx, db, ek.Name)
+		existing, err := findAPIKeyByName(ctx, tx, ek.Name)
 		if err != nil {
-			return result, err
+			return ImportResult{}, err
 		}
 		var id int64
 		if existing != nil {
@@ -342,7 +328,7 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 			var raw, hash, prefix, encrypted string
 			recovered := false
 			if ek.EncryptedKey != nil && *ek.EncryptedKey != "" && keys != nil && keys.SecretsKey != nil {
-				if decrypted, decErr := DecryptAPIKey(*ek.EncryptedKey, keys.SecretsKey); decErr == nil {
+				if decrypted, decErr := DecryptAPIKey(*ek.EncryptedKey, keys.SecretsKey); decErr == nil && len(decrypted) >= 8 {
 					raw = decrypted
 					h := sha256.Sum256([]byte(raw))
 					hash = hex.EncodeToString(h[:])
@@ -382,9 +368,9 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 					result.RegeneratedKeys = append(result.RegeneratedKeys, RegeneratedKey{Name: ek.Name, Key: raw, KeyPrefix: prefix})
 				}
 			}
-			newID, err := CreateAPIKeyCtx(ctx, db, ek.Name, hash, prefix, encrypted, 1)
+			newID, err := createAPIKey(ctx, tx, ek.Name, hash, prefix, encrypted, 1)
 			if err != nil {
-				return result, err
+				return ImportResult{}, fmt.Errorf("import api key %q: %w", ek.Name, err)
 			}
 			id = newID
 		}
@@ -398,16 +384,52 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 			// only fields the import carries a non-zero/non-empty value for
 			// are overlaid; everything else preserves the stored value.
 			if p.Version < MinExportVersion {
-				if existingSettings, gerr := GetAPIKeySettingsCtx(ctx, db, id); gerr == nil && existingSettings != nil {
+				if existingSettings, gerr := getAPIKeySettings(ctx, tx, id); gerr == nil && existingSettings != nil {
 					slog.Warn("ApplyImportPayloadCtx: pre-fix export version detected, merging per-key settings onto existing row to avoid zero-fill",
 						"api_key_id", id, "name", ek.Name, "export_version", p.Version, "min_version", MinExportVersion)
 					ek.Settings = overlayAPIKeySettingsNonZero(existingSettings, ek.Settings)
 				}
 			}
-			if err := UpsertAPIKeySettingsCtx(ctx, db, ek.Settings); err != nil {
-				return result, err
+			if err := upsertAPIKeySettings(ctx, tx, ek.Settings); err != nil {
+				return ImportResult{}, fmt.Errorf("import settings for api key %q: %w", ek.Name, err)
 			}
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ImportResult{}, err
+	}
+	result.Committed = true
+
+	if len(p.ServiceKeys) > 0 && keys != nil {
+		update := &ServiceKeysUpdate{}
+		if v, ok := p.ServiceKeys["tmdb"]; ok {
+			update.TMDB = &v
+		}
+		if v, ok := p.ServiceKeys["mdblist"]; ok {
+			update.MDBList = &v
+		}
+		if v, ok := p.ServiceKeys["omdb"]; ok {
+			update.OMDB = &v
+		}
+		if v, ok := p.ServiceKeys["fanart"]; ok {
+			update.Fanart = &v
+		}
+		if v, ok := p.ServiceKeys["trakt"]; ok {
+			update.Trakt = &v
+		}
+		if err := keys.UpdateKeys(update); err != nil {
+			// Settings and API keys are committed; report the service-key
+			// failure together with what was applied.
+			return result, fmt.Errorf("settings imported, but service keys failed: %w", err)
+		}
+		// Reload from DB so the in-memory cache mirrors everything that's
+		// persisted, not just the keys in this payload. Without this,
+		// newly-imported keys were visible in the admin UI (which reads
+		// the DB directly) but the rating-fetch hot path kept serving
+		// the stale empty set from the cache until container restart.
+		keys.Reload()
+		result.RestoredKeys = len(p.ServiceKeys)
 	}
 
 	return result, nil

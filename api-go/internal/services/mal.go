@@ -171,8 +171,14 @@ func (c *AniListClient) fetchMediaByMAL(ctx context.Context, malID uint64) (*Ani
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, apperr.NewOther(fmt.Sprintf("AniList rate-limited (429) for MAL id %d", malID))
 	}
+	// AniList answers an unknown idMal with HTTP 404 and a JSON error body
+	// (verified 2026-11-03). That is a definitive "not found" (a 404 for the
+	// request, cached briefly), not a server error.
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, apperr.NewIDNotFound(fmt.Sprintf("AniList has no anime for MAL id %d", malID))
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, apperr.NewOther(fmt.Sprintf("AniList returned %d: %s", resp.StatusCode, string(body)))
+		return nil, apperr.NewOther(fmt.Sprintf("AniList returned %d for MAL id %d", resp.StatusCode, malID))
 	}
 
 	var raw anilistMediaResponse
@@ -184,7 +190,12 @@ func (c *AniListClient) fetchMediaByMAL(ctx context.Context, malID uint64) (*Ani
 	// for unknown MAL ids; check that before the data check so we don't surface
 	// a half-empty Media struct as if it were a hit.
 	if len(raw.Errors) > 0 {
-		return nil, apperr.NewIDNotFound(fmt.Sprintf("AniList MAL id %d: %s", malID, raw.Errors[0].Message))
+		// Only a 404 error means "no such anime"; anything else (rate limit,
+		// internal error) is transient and must not be cached as not-found.
+		if raw.Errors[0].Status == http.StatusNotFound {
+			return nil, apperr.NewIDNotFound(fmt.Sprintf("AniList MAL id %d: %s", malID, raw.Errors[0].Message))
+		}
+		return nil, apperr.NewOther(fmt.Sprintf("AniList MAL id %d: %s (status %d)", malID, raw.Errors[0].Message, raw.Errors[0].Status))
 	}
 
 	m := raw.Data.Media

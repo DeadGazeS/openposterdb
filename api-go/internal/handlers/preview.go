@@ -124,6 +124,9 @@ type PreviewConfig struct {
 	Kitsu             *services.KitsuClient
 	AniList           *services.AniListClient
 	KitsuIMDbMapper   *services.KitsuIMDbMapper
+	// Caches (IDs, Ratings) back the demo-ratings lookup, so a preview with
+	// nothing stored doesn't hit TMDB and every rating provider on each edit.
+	Caches *services.MemCacheSet
 }
 
 // demoArtworkBytes returns the base artwork for the demo title (IMDb
@@ -187,7 +190,11 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 }
 
 func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge {
-	resolved, err := services.ResolveIDCtx(p.ctx, services.IDTypeIMDB, idValue, services.IDClients{TMDB: p.cfg.TMDB})
+	var idCache, ratingsCache *services.MemCache
+	if p.cfg.Caches != nil {
+		idCache, ratingsCache = p.cfg.Caches.IDs, p.cfg.Caches.Ratings
+	}
+	resolved, err := services.ResolveIDCachedCtx(p.ctx, idCache, services.IDTypeIMDB, idValue, services.IDClients{TMDB: p.cfg.TMDB})
 	if err != nil {
 		return nil
 	}
@@ -209,13 +216,12 @@ func (p *PreviewHandler) fetchDemoRatings(idValue string) []services.RatingBadge
 		season = resolved.Episode.SeasonNumber
 		episode = resolved.Episode.EpisodeNumber
 	}
-	result := services.FetchRatingsCtx(
-		p.ctx,
+	return services.FetchRatingsCachedCtx(
+		p.ctx, ratingsCache,
 		services.RatingsClients{TMDB: p.cfg.TMDB, OMDB: p.cfg.OMDB, MDBList: p.cfg.MDBList, Trakt: p.cfg.Trakt},
 		services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
 			EpisodeShowTMDbID: showID, EpisodeSeason: season, EpisodeEpisode: episode},
 	)
-	return result.Badges
 }
 
 func NewPreviewHandler(ctx context.Context, db *sql.DB, cfg *PreviewConfig) *PreviewHandler {
@@ -569,16 +575,28 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			return
 		}
 
+		var errs []string
 		dirCleared := false
 		if !externalCacheOnly {
 			subdir := services.ImageSubdir(imageType)
 			if subdir != "" {
-				_, err := services.StageDirForClear(cacheDir, subdir)
-				dirCleared = err == nil
+				staged, err := services.StageDirForClear(cacheDir, subdir)
+				if err != nil {
+					errs = append(errs, "cache dir: "+err.Error())
+				} else {
+					dirCleared = true
+					// The staged dir used to be left on disk forever.
+					if staged != nil {
+						go services.RemoveStagedDirs([]string{*staged})
+					}
+				}
 			}
 		}
 
-		metaDeleted, _ := services.DeleteImageMetaByKindCtx(r.Context(), db, imageType)
+		metaDeleted, err := services.DeleteImageMetaByKindCtx(r.Context(), db, imageType)
+		if err != nil {
+			errs = append(errs, "image metadata: "+err.Error())
+		}
 
 		// The kind isn't recoverable from the mem cache keys cheaply, so a
 		// per-kind purge drops the whole image mem cache (rare admin action).
@@ -586,13 +604,26 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			caches.ImageMem.Clear()
 		}
 
-		httpx.WriteJSON(w, 200, map[string]any{
-			"ok":                  true,
+		writePurgeResult(w, errs, map[string]any{
 			"external_cache_only": externalCacheOnly,
 			"dir_cleared":         dirCleared,
 			"meta_deleted":        metaDeleted,
 		})
 	}
+}
+
+// writePurgeResult answers a purge/clear: 200 {ok:true,...} when every step
+// succeeded, else 500 {ok:false, errors, ...} with whatever did get done (the
+// failures used to be swallowed behind ok:true).
+func writePurgeResult(w http.ResponseWriter, errs []string, body map[string]any) {
+	status := 200
+	body["ok"] = len(errs) == 0
+	if len(errs) > 0 {
+		status = 500
+		body["errors"] = errs
+		slog.Warn("cache purge partially failed", "errors", errs)
+	}
+	httpx.WriteJSON(w, status, body)
 }
 
 func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue string, externalCacheOnly bool, caches *services.MemCacheSet) http.HandlerFunc {
@@ -604,37 +635,53 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 
 		scope := r.URL.Query().Get("scope")
 
+		var errs []string
+		note := func(what string, err error) {
+			if err != nil {
+				errs = append(errs, what+": "+err.Error())
+			}
+		}
 		var filesDeleted int64 = 0
 		if !externalCacheOnly {
 			subdir := services.ImageSubdir(imageType)
 			if subdir != "" {
+				var err error
 				if scope == "variant" {
 					ext := "jpg"
 					if imageType == "l" {
 						ext = "png"
 					}
-					filesDeleted, _ = services.PurgeVariantFile(cacheDir, subdir, idType, idValue, ext)
+					filesDeleted, err = services.PurgeVariantFile(cacheDir, subdir, idType, idValue, ext)
 				} else {
-					filesDeleted, _ = services.PurgeTitleFiles(cacheDir, subdir, idType, idValue)
+					filesDeleted, err = services.PurgeTitleFiles(cacheDir, subdir, idType, idValue)
 				}
+				note("cache files", err)
 			}
 		}
 
 		var metaDeleted int64 = 0
+		var err error
 		if scope == "variant" {
-			metaDeleted, _ = services.DeleteImageMetaExactCtx(r.Context(), db, imageType, idType+"/"+idValue)
+			metaDeleted, err = services.DeleteImageMetaExactCtx(r.Context(), db, imageType, idType+"/"+idValue)
 		} else {
-			metaDeleted, _ = services.DeleteImageMetaForTitleCtx(r.Context(), db, imageType, idType, idValue)
+			metaDeleted, err = services.DeleteImageMetaForTitleCtx(r.Context(), db, imageType, idType, idValue)
 		}
+		note("image metadata", err)
 
 		idKey := idType + "/" + idValue
 		if scope != "variant" {
-			services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
+			_, err := services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
+			note("available ratings", err)
 		}
 
 		// Invalidate the matching in-memory entries so the purge is visible
-		// immediately (image mem keys are "idType/cacheValue").
+		// immediately (image mem keys are "idType/cacheValue"). The title's
+		// ratings are keyed by TMDB/IMDb id, found via the ID cache — so they
+		// go first, before the ID entries.
 		if caches != nil {
+			if scope != "variant" {
+				services.InvalidateTitleRatings(caches.IDs, caches.Ratings, idType, idValue)
+			}
 			if caches.ImageMem != nil {
 				caches.ImageMem.DeletePrefix(idType + "/" + idValue)
 			}
@@ -643,8 +690,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			}
 		}
 
-		httpx.WriteJSON(w, 200, map[string]any{
-			"ok":                  true,
+		writePurgeResult(w, errs, map[string]any{
 			"external_cache_only": externalCacheOnly,
 			"files_deleted":       filesDeleted,
 			"meta_deleted":        metaDeleted,

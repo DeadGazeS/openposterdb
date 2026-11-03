@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"openposterdb/internal/httpx"
@@ -97,7 +98,15 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 
 		result, err := services.ApplyImportPayloadCtx(r.Context(), db, keys, payload)
 		if err != nil {
-			httpx.WriteError(w, 500, "Failed to import settings")
+			slog.Warn("settings import failed", "error", err)
+			if result.Committed {
+				// Settings and API keys were committed but a later step
+				// failed: return what was applied — regenerated key values
+				// exist only here.
+				httpx.WriteJSON(w, 500, map[string]any{"error": "Settings imported, but service keys failed", "result": result})
+				return
+			}
+			httpx.WriteError(w, 500, "Failed to import settings (nothing was changed)")
 			return
 		}
 

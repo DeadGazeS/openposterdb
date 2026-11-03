@@ -357,9 +357,14 @@ func DeleteImageMetaExact(db *sql.DB, imageType, cacheKey string) (int64, error)
 func DeleteImageMetaForTitleCtx(ctx context.Context, db *sql.DB, imageType, idType, idValue string) (int64, error) {
 	prefix := idType + "/" + idValue
 
+	// A byte range on the primary key instead of LIKE: SQLite's LIKE is
+	// case-insensitive (no index use, so it scanned every row of the kind)
+	// and treats "_" in an id as a wildcard. TitleFileMatch below still
+	// filters out keys that merely share the prefix. "+image_type" keeps the
+	// planner on the primary-key range instead of scanning the whole kind.
 	rows, err := db.QueryContext(ctx,
-		"SELECT cache_key FROM image_meta WHERE image_type = ? AND cache_key LIKE ?",
-		imageType, prefix+"%",
+		"SELECT cache_key FROM image_meta WHERE +image_type = ? AND cache_key >= ? AND cache_key < ?",
+		imageType, prefix, prefixUpperBound(prefix),
 	)
 	if err != nil {
 		return 0, err
@@ -401,4 +406,17 @@ func DeleteImageMetaForTitleCtx(ctx context.Context, db *sql.DB, imageType, idTy
 
 func DeleteImageMetaForTitle(db *sql.DB, imageType, idType, idValue string) (int64, error) {
 	return DeleteImageMetaForTitleCtx(context.Background(), db, imageType, idType, idValue)
+}
+
+// prefixUpperBound returns the smallest string greater than every string
+// starting with prefix (for `>= prefix AND < bound` range scans).
+func prefixUpperBound(prefix string) string {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] < 0xff {
+			b[i]++
+			return string(b[:i+1])
+		}
+	}
+	return string(b) + "\xff"
 }
