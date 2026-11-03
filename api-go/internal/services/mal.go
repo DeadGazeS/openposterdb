@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	apperr "openposterdb/internal/errors"
@@ -26,13 +25,16 @@ import (
 // poster/cover URLs (AniList coverImage.extraLarge + bannerImage) so the
 // image pipeline doesn't need a TMDB id for anime not covered there.
 type AniListClient struct {
-	HTTP      *http.Client
-	cacheMu   sync.RWMutex
-	imdbByMAL map[uint64]string // MAL→IMDb lookup cache. "" = negative cache (known missing), missing key = not yet looked up.
+	HTTP *http.Client
+	// media caches MediaByMALCtx results (hits, and "not found" for
+	// idNotFoundTTL); errors are never cached. LookupIMDBByMAL derives from
+	// it. Bounded with a TTL — the old MAL→IMDb map grew forever and stored
+	// a transient AniList error as a permanent "no IMDb link". nil disables.
+	media *MemCache
 }
 
 func NewAniListClient(httpClient *http.Client) *AniListClient {
-	return &AniListClient{HTTP: httpClient, imdbByMAL: map[uint64]string{}}
+	return &AniListClient{HTTP: httpClient, media: NewMemCache(0, 10_000, animeLookupTTL, 0)}
 }
 
 const anilistGraphQLEndpoint = "https://graphql.anilist.co"
@@ -116,6 +118,31 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 	if c == nil || c.HTTP == nil {
 		return nil, apperr.NewOther("AniList client not configured")
 	}
+	if c.media == nil {
+		return c.fetchMediaByMAL(ctx, malID)
+	}
+	key := strconv.FormatUint(malID, 10)
+	if v, ok := c.media.Get(key); ok {
+		switch e := v.(type) {
+		case *AniListMedia: // shared: callers only read it
+			return e, nil
+		case idMiss:
+			if time.Now().Before(e.until) {
+				return nil, e.err
+			}
+			c.media.Delete(key)
+		}
+	}
+	media, err := c.fetchMediaByMAL(ctx, malID)
+	if err == nil {
+		c.media.Set(key, media, 1)
+	} else if isIDNotFound(err) {
+		c.media.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
+	}
+	return media, err
+}
+
+func (c *AniListClient) fetchMediaByMAL(ctx context.Context, malID uint64) (*AniListMedia, error) {
 
 	query := fmt.Sprintf(`{ Media(idMal: %d, type: ANIME) { id idMal title { romaji english } coverImage { extraLarge } bannerImage format startDate { year month day } externalLinks { url site } } }`, malID)
 	payload, err := json.Marshal(map[string]string{"query": query})
@@ -208,9 +235,9 @@ func ParseMALID(s string) (uint64, error) {
 
 // LookupIMDBByMAL returns the IMDb id ("tt..." prefix) for the given MAL
 // anime id, or nil if AniList doesn't carry the cross-reference. Backed
-// by a process-local cache (positive + negative) so repeat lookups for the
-// same MAL id — including the "no IMDB listed" outcome — never hit
-// AniList twice.
+// by the MediaByMALCtx cache (hits and not-found, TTL-bounded), so repeat
+// lookups for the same MAL id — including "no IMDB listed" — don't hit
+// AniList again within the TTL; a transient failure is retried next time.
 //
 // Coverage is limited: verified 2026-08-15 that 0/6 popular anime
 // (Cowboy Bebop, One Piece, Attack on Titan, FMA Brotherhood, Death Note,
@@ -222,27 +249,10 @@ func (c *AniListClient) LookupIMDBByMAL(ctx context.Context, malID uint64) *stri
 		return nil
 	}
 
-	// Cache fast path. The cache key is the MAL id; presence of "" means
-	// "we already asked AniList and got back no IMDB link" — the negative
-	// cache avoids re-hitting AniList for every request on the same anime.
-	c.cacheMu.RLock()
-	if v, ok := c.imdbByMAL[malID]; ok {
-		c.cacheMu.RUnlock()
-		if v == "" {
-			return nil
-		}
-		return &v
-	}
-	c.cacheMu.RUnlock()
-
-	// Slow path: ask AniList. Use the existing MediaByMALCtx which now
-	// fetches externalLinks as part of the same query.
+	// MediaByMALCtx is cached (hits + not-found); a transient error is not,
+	// so the next request asks AniList again.
 	media, err := c.MediaByMALCtx(ctx, malID)
 	if err != nil || media == nil {
-		// Cache the negative result so we don't retry on every request.
-		c.cacheMu.Lock()
-		c.imdbByMAL[malID] = ""
-		c.cacheMu.Unlock()
 		return nil
 	}
 
@@ -255,11 +265,6 @@ func (c *AniListClient) LookupIMDBByMAL(ctx context.Context, malID uint64) *stri
 			}
 		}
 	}
-
-	// Cache both positive and negative results. Empty string = negative.
-	c.cacheMu.Lock()
-	c.imdbByMAL[malID] = imdbID
-	c.cacheMu.Unlock()
 
 	if imdbID == "" {
 		return nil

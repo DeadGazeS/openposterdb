@@ -27,10 +27,17 @@ const kitsuUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTM
 // rate limiter at the HTTP layer.
 type KitsuClient struct {
 	HTTP *http.Client
+	// cache holds definitive lookups (anime by id/slug, MAL→Kitsu mapping):
+	// the anime-artwork and ratings cross-ref paths run them on every
+	// kitsu:/mal: request, before the image cache check. nil disables it.
+	cache *MemCache
 }
 
+// animeLookupTTL bounds how long a Kitsu/AniList lookup is reused.
+const animeLookupTTL = 30 * time.Minute
+
 func NewKitsuClient(httpClient *http.Client) *KitsuClient {
-	return &KitsuClient{HTTP: httpClient}
+	return &KitsuClient{HTTP: httpClient, cache: NewMemCache(0, 10_000, animeLookupTTL, 0)}
 }
 
 // KitsuAnime is the slimmed projection of the JSON:API anime resource that
@@ -98,6 +105,36 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 	if c == nil || c.HTTP == nil {
 		return nil, nil, apperr.NewOther("Kitsu client not configured")
 	}
+	if c.cache == nil {
+		return c.fetchAnime(ctx, idOrSlug)
+	}
+	key := "anime:" + idOrSlug
+	if v, ok := c.cache.Get(key); ok {
+		switch e := v.(type) {
+		case kitsuAnimeEntry: // shared: callers only read it
+			return e.anime, e.mappings, nil
+		case idMiss:
+			if time.Now().Before(e.until) {
+				return nil, nil, e.err
+			}
+			c.cache.Delete(key)
+		}
+	}
+	anime, mappings, err := c.fetchAnime(ctx, idOrSlug)
+	if err == nil {
+		c.cache.Set(key, kitsuAnimeEntry{anime: anime, mappings: mappings}, 1)
+	} else if isIDNotFound(err) {
+		c.cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
+	}
+	return anime, mappings, err
+}
+
+type kitsuAnimeEntry struct {
+	anime    *KitsuAnime
+	mappings []KitsuMapping
+}
+
+func (c *KitsuClient) fetchAnime(ctx context.Context, idOrSlug string) (*KitsuAnime, []KitsuMapping, error) {
 
 	// Pick the endpoint based on shape. Numeric → /anime/{id} (fast, single
 	// object response). Non-numeric → /anime?filter[slug]=... (list response).
@@ -284,12 +321,35 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 // with include=item, data[0].relationships.item.data = {type:"anime",
 // id:"3936"} for MAL 5114. Without include=item Kitsu returns only
 // relationships.item.links (no data), so the include is required.
-// Not cached here: it only runs on an image render miss, and rendered
-// images + ratings are cached downstream.
+// It runs on every mal: request (before the image cache check), so
+// definitive answers — mapped or "no mapping" — are cached; failures are not.
 func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64 {
 	if c == nil || c.HTTP == nil || malID == 0 {
 		return nil
 	}
+	key := "malmap:" + strconv.FormatUint(malID, 10)
+	if c.cache != nil {
+		if v, ok := c.cache.Get(key); ok {
+			return copyUint64(v.(*uint64))
+		}
+	}
+	id, definitive := c.fetchAnimeIDByMAL(ctx, malID)
+	if definitive && c.cache != nil {
+		c.cache.Set(key, id, 1)
+	}
+	return copyUint64(id)
+}
+
+func copyUint64(v *uint64) *uint64 {
+	if v == nil {
+		return nil
+	}
+	x := *v
+	return &x
+}
+
+// fetchAnimeIDByMAL asks Kitsu; definitive is false when the call failed.
+func (c *KitsuClient) fetchAnimeIDByMAL(ctx context.Context, malID uint64) (id *uint64, definitive bool) {
 	url := fmt.Sprintf("%s/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=%d&include=item", kitsuAPIBase, malID)
 
 	start := time.Now()
@@ -305,14 +365,14 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 	logSlow("Kitsu", time.Since(start).Milliseconds())
 	if err != nil {
 		slog.Warn("kitsu mal→kitsu mapping lookup failed", "mal_id", malID, "error", err)
-		return nil
+		return nil, false
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("kitsu mal→kitsu mapping lookup non-200", "mal_id", malID, "status", resp.StatusCode)
-		return nil
+		return nil, false
 	}
 
 	var parsed struct {
@@ -329,7 +389,7 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		slog.Warn("kitsu mal→kitsu mapping decode failed", "mal_id", malID, "error", err)
-		return nil
+		return nil, false
 	}
 	for _, d := range parsed.Data {
 		item := d.Relationships.Item.Data
@@ -337,7 +397,7 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 			continue
 		}
 		if id, err := strconv.ParseUint(item.ID, 10, 64); err == nil && id > 0 {
-			return &id
+			return &id, true
 		}
 	}
 	// Not an error for titles Kitsu doesn't map; Warn only when rows came
@@ -345,7 +405,7 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 	if len(parsed.Data) > 0 {
 		slog.Warn("kitsu mal→kitsu mapping has no anime linkage", "mal_id", malID, "rows", len(parsed.Data))
 	}
-	return nil
+	return nil, true
 }
 
 // MALIDForMapping pulls the MAL anime id from a mappings list, or returns
