@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 func CountImageMetaCtx(ctx context.Context, db *sql.DB, imageType string) (int64, error) {
@@ -187,30 +191,91 @@ func UpsertImageMeta(db *sql.DB, cacheKey string, releaseDate *string, imageType
 	return UpsertImageMetaCtx(context.Background(), db, cacheKey, releaseDate, imageType, titleKey, title)
 }
 
-// TouchImageAccess bumps image_meta.last_accessed for the given cache_key,
-// throttled to once per 60 seconds per key. A non-existent cache_key is a no-op
-// (the row is only created by UpsertImageMeta on the cache-miss/regen path;
-// this helper exists to record the serve event without forcing a write).
+// Image access tracking. Serving a cached image used to cost a SELECT (plus
+// an UPDATE at most once a minute per key) on the request path. Touches are
+// now recorded in memory and written in one transaction at most once per
+// imageAccessFlushInterval (triggered by a later touch), plus on shutdown via
+// FlushImageAccess. last_accessed therefore lags by up to the interval — the
+// same resolution the old per-key throttle had.
+
+var imageAccessFlushInterval = 60 * time.Second
+
+type accessRecorder struct {
+	mu        sync.Mutex
+	pending   map[string]int64 // cache_key -> unix seconds of the latest serve
+	lastFlush atomic.Int64     // unix nanos
+	flushing  atomic.Bool
+}
+
+var accessRecorders sync.Map // *sql.DB -> *accessRecorder
+
+func accessRecorderFor(db *sql.DB) *accessRecorder {
+	if r, ok := accessRecorders.Load(db); ok {
+		return r.(*accessRecorder)
+	}
+	r := &accessRecorder{pending: make(map[string]int64)}
+	r.lastFlush.Store(time.Now().UnixNano())
+	actual, _ := accessRecorders.LoadOrStore(db, r)
+	return actual.(*accessRecorder)
+}
+
+// TouchImageAccessCtx records that cacheKey was just served. It never touches
+// the database on the calling goroutine; a missing image_meta row is simply
+// not updated at flush time. Always returns nil (kept for call-site shape).
 func TouchImageAccessCtx(ctx context.Context, db *sql.DB, cacheKey string) error {
-	var lastAccessed int64
-	err := db.QueryRowContext(ctx, "SELECT last_accessed FROM image_meta WHERE cache_key = ?", cacheKey).Scan(&lastAccessed)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("touch image access: select: %w", err)
-	}
-
-	now := nowUnix()
-	if now-lastAccessed < 60 {
-		return nil
-	}
-
-	_, err = db.ExecContext(ctx, "UPDATE image_meta SET last_accessed = ? WHERE cache_key = ?", now, cacheKey)
-	if err != nil {
-		return fmt.Errorf("touch image access: update: %w", err)
+	r := accessRecorderFor(db)
+	r.mu.Lock()
+	r.pending[cacheKey] = nowUnix()
+	r.mu.Unlock()
+	if time.Since(time.Unix(0, r.lastFlush.Load())) >= imageAccessFlushInterval && r.flushing.CompareAndSwap(false, true) {
+		go func() {
+			defer r.flushing.Store(false)
+			r.flush(db)
+		}()
 	}
 	return nil
+}
+
+// FlushImageAccess writes all pending access times now (shutdown, tests).
+func FlushImageAccess(db *sql.DB) {
+	if r, ok := accessRecorders.Load(db); ok {
+		r.(*accessRecorder).flush(db)
+	}
+}
+
+func (r *accessRecorder) flush(db *sql.DB) {
+	r.lastFlush.Store(time.Now().UnixNano())
+	r.mu.Lock()
+	batch := r.pending
+	r.pending = make(map[string]int64, len(batch))
+	r.mu.Unlock()
+	if len(batch) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := writeImageAccess(ctx, db, batch); err != nil {
+		slog.Warn("image access flush failed", "keys", len(batch), "error", err)
+	}
+}
+
+func writeImageAccess(ctx context.Context, db *sql.DB, batch map[string]int64) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, "UPDATE image_meta SET last_accessed = ? WHERE cache_key = ? AND last_accessed < ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for key, at := range batch {
+		if _, err := stmt.ExecContext(ctx, at, key, at); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func TouchImageAccess(db *sql.DB, cacheKey string) error {

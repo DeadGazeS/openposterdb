@@ -215,6 +215,9 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+	// After the server stops accepting requests: persist batched image access
+	// times (services.TouchImageAccessCtx).
+	services.FlushImageAccess(db)
 
 	slog.Info("server stopped")
 }

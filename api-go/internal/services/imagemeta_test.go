@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -86,6 +87,10 @@ func TestTouchImageAccess_FiresAfter60s(t *testing.T) {
 		t.Fatalf("TouchImageAccess: %v", err)
 	}
 	after := nowUnix()
+	if got := readLastAccessed(t, db, "k1"); got != stale {
+		t.Fatalf("touch must not write on the request path: got %d, want %d", got, stale)
+	}
+	FlushImageAccess(db)
 
 	got := readLastAccessed(t, db, "k1")
 	if got < before || got > after {
@@ -99,6 +104,34 @@ func TestTouchImageAccess_NoRow(t *testing.T) {
 
 	if err := TouchImageAccess(db, "nonexistent"); err != nil {
 		t.Errorf("TouchImageAccess on missing key should be a no-op, got: %v", err)
+	}
+	FlushImageAccess(db) // a missing row is simply not updated
+}
+
+// Touches are written in one batch once the interval has elapsed, triggered
+// by a later touch, without blocking the caller.
+func TestTouchImageAccess_BatchedFlush(t *testing.T) {
+	db := newImageMetaTestDB(t)
+	defer db.Close()
+	db.SetMaxOpenConns(1) // :memory: is per connection; the flush runs on another goroutine
+	old := imageAccessFlushInterval
+	imageAccessFlushInterval = 0
+	defer func() { imageAccessFlushInterval = old }()
+
+	seedImageMetaRow(t, db, "a", "poster", nil, 1, 1, 1)
+	seedImageMetaRow(t, db, "b", "poster", nil, 1, 1, 1)
+	TouchImageAccess(db, "a")
+	TouchImageAccess(db, "b")
+	deadline := time.Now().Add(3 * time.Second)
+	for readLastAccessed(t, db, "a") == 1 || readLastAccessed(t, db, "b") == 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("background flush never wrote the touches")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r := accessRecorderFor(db)
+	for r.flushing.Load() {
+		time.Sleep(time.Millisecond)
 	}
 }
 
