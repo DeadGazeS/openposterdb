@@ -12,22 +12,44 @@ import (
 	"openposterdb/internal/services"
 )
 
-// HandleExportSettings returns a JSON settings backup. Query params
-// include_service_keys and include_api_keys control which secrets are included.
-// passphrase (optional) wraps the payload in an encrypted envelope so the
-// backup file is inert without the user-supplied passphrase.
+// HandleExportSettings returns a JSON settings backup.
+//
+// POST (used by the SPA) takes {include_service_keys, include_api_keys,
+// passphrase} as a JSON body. GET with the same query params remains for
+// plain exports, but never accepts a passphrase in the URL (URLs end up in
+// proxy/CDN access logs). An export that includes the external provider keys
+// must be passphrase-encrypted — otherwise the file holds them in plaintext.
 func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		var opts struct {
+			IncludeServiceKeys bool   `json:"include_service_keys"`
+			IncludeAPIKeys     bool   `json:"include_api_keys"`
+			Passphrase         string `json:"passphrase"`
+		}
+		switch r.Method {
+		case http.MethodPost:
+			if err := httpx.DecodeJSON(r, &opts); err != nil {
+				httpx.WriteError(w, 400, "invalid request body")
+				return
+			}
+		case http.MethodGet:
+			q := r.URL.Query()
+			if q.Has("passphrase") {
+				httpx.WriteError(w, 400, "send the passphrase in a POST body, not the URL")
+				return
+			}
+			opts.IncludeServiceKeys = q.Get("include_service_keys") == "1" || q.Get("include_service_keys") == "true"
+			opts.IncludeAPIKeys = q.Get("include_api_keys") == "1" || q.Get("include_api_keys") == "true"
+		default:
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
-		q := r.URL.Query()
-		includeServiceKeys := q.Get("include_service_keys") == "1" || q.Get("include_service_keys") == "true"
-		includeAPIKeys := q.Get("include_api_keys") == "1" || q.Get("include_api_keys") == "true"
-		passphrase := q.Get("passphrase")
+		if opts.IncludeServiceKeys && opts.Passphrase == "" {
+			httpx.WriteError(w, 400, "a passphrase is required when the export includes the external API keys")
+			return
+		}
 
-		payload, err := services.BuildExportPayloadCtx(r.Context(), db, keys, includeServiceKeys, includeAPIKeys)
+		payload, err := services.BuildExportPayloadCtx(r.Context(), db, keys, opts.IncludeServiceKeys, opts.IncludeAPIKeys)
 		if err != nil {
 			httpx.WriteError(w, 500, "Failed to export settings")
 			return
@@ -35,10 +57,12 @@ func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", `attachment; filename="openposterdb-settings.json"`)
-		if passphrase != "" {
-			enc, encErr := services.EncryptPayload(payload, passphrase)
+		w.Header().Set("Cache-Control", "no-store")
+		if opts.Passphrase != "" {
+			enc, encErr := services.EncryptPayload(payload, opts.Passphrase)
 			if encErr != nil {
-				httpx.WriteError(w, 500, "Failed to encrypt export: "+encErr.Error())
+				slog.Warn("export encryption failed", "error", encErr)
+				httpx.WriteError(w, 500, "Failed to encrypt export")
 				return
 			}
 			httpx.WriteJSON(w, 200, enc)

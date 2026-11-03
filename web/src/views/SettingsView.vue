@@ -650,7 +650,9 @@ async function onImportFile(e: Event) {
                 </span>
               </label>
               <div class="space-y-1">
-                <Label for="export-passphrase" class="text-sm">Encrypt export (optional)</Label>
+                <Label for="export-passphrase" class="text-sm">
+                  {{ exportServiceKeys ? 'Passphrase (required with external API keys)' : 'Encrypt export (optional)' }}
+                </Label>
                 <Input
                   id="export-passphrase"
                   v-model="exportPassphrase"
@@ -662,6 +664,7 @@ async function onImportFile(e: Event) {
                 <p class="text-xs text-muted-foreground">
                   When set, the export file is encrypted with a passphrase-derived
                   key (PBKDF2 + AES-256-GCM). The passphrase is required to import.
+                  External API keys are only exported encrypted.
                 </p>
               </div>
               <p v-if="exportError" class="text-sm text-destructive">{{ exportError }}</p>
@@ -670,7 +673,7 @@ async function onImportFile(e: Event) {
               <DialogClose as-child>
                 <Button variant="outline" size="sm">Cancel</Button>
               </DialogClose>
-              <Button size="sm" :disabled="exportLoading" @click="runExport">
+              <Button size="sm" :disabled="exportLoading || (exportServiceKeys && !exportPassphrase)" @click="runExport">
                 <Loader2 v-if="exportLoading" class="size-4 animate-spin mr-1" />
                 Export
               </Button>
