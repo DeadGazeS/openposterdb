@@ -1,6 +1,7 @@
 package router
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,19 @@ func (r *Router) registerOpenAPIRoute() {
 }
 
 func (r *Router) registerAuthRoutes() {
+	// Per-IP limit on the credential endpoints (login/setup/key-login): they
+	// were unthrottled, allowing unlimited password guessing.
+	authLimiter := newRateLimiter(r.state.Config.RateLimitAuthRPM)
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		for range ticker.C {
+			authLimiter.SweepIdle()
+		}
+	}()
+	authRateLimit := RateLimit(authLimiter)
+	throttled := func(pattern string, h http.HandlerFunc) {
+		r.mux.Handle(pattern, authRateLimit(h))
+	}
 	s := r.state
 
 	r.mux.HandleFunc("/api/auth/status", func(w http.ResponseWriter, req *http.Request) {
@@ -60,7 +74,7 @@ func (r *Router) registerAuthRoutes() {
 		httpx.WriteJSON(w, status, resp)
 	})
 
-	r.mux.HandleFunc("/api/auth/setup", func(w http.ResponseWriter, req *http.Request) {
+	throttled("/api/auth/setup", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
@@ -78,7 +92,7 @@ func (r *Router) registerAuthRoutes() {
 		httpx.WriteJSON(w, status, resp)
 	})
 
-	r.mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, req *http.Request) {
+	throttled("/api/auth/login", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
@@ -113,24 +127,34 @@ func (r *Router) registerAuthRoutes() {
 		httpx.WriteJSON(w, status, resp)
 	})
 
-	r.mux.HandleFunc("/api/auth/logout", func(w http.ResponseWriter, req *http.Request) {
+	// Logout. The refresh cookie is path-scoped to /api/auth/refresh, so the
+	// browser only sends it to paths under that prefix: the SPA logs out via
+	// /api/auth/refresh/logout, which revokes exactly this refresh token.
+	// Both endpoints also accept the bearer access token and then revoke all
+	// of that user's refresh tokens, and both clear the cookie on its own
+	// path (clearing it on "/" left the real cookie in place).
+	logout := func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
-		cookie, _ := req.Cookie("token")
-		if cookie != nil {
-			claims, err := handlers.ParseJWT(cookie.Value, r.jwtSecret())
-			if err == nil && claims.Username != "" {
+		if c, _ := req.Cookie("refresh_token"); c != nil && c.Value != "" {
+			if err := services.DeleteRefreshTokenByHashCtx(req.Context(), s.DB, handlers.HashRefreshToken(c.Value)); err != nil {
+				slog.Warn("logout: revoking refresh token failed", "error", err)
+			}
+		}
+		if token, ok := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer "); ok {
+			if claims, err := handlers.ParseJWT(token, r.jwtSecret()); err == nil && claims.Username != "" {
 				handlers.LogoutHandler(req.Context(), s.DB, claims.Username)
 			}
 		}
-		http.SetCookie(w, &http.Cookie{Name: "token", Value: "", Path: "/", MaxAge: -1})
-		http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: "", Path: "/", MaxAge: -1})
+		http.SetCookie(w, handlers.ClearRefreshCookie(s.SecureCookies))
 		httpx.WriteJSON(w, 200, map[string]bool{"success": true})
-	})
+	}
+	r.mux.HandleFunc("/api/auth/logout", logout)
+	r.mux.HandleFunc("/api/auth/refresh/logout", logout)
 
-	r.mux.HandleFunc("/api/auth/key-login", func(w http.ResponseWriter, req *http.Request) {
+	throttled("/api/auth/key-login", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return

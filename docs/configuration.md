@@ -53,6 +53,7 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 |---|---|---|
 | `RATE_LIMIT_RPM` | `60` | Per-key requests-per-minute cap on the admin routes (all `/api/admin/*` + per-key `/api/key/me/*`). |
 | `RATE_LIMIT_CDN_RPM` | `240` | Per-key requests-per-minute cap on the CDN redirect endpoint (`/c/...`). Higher default than the admin cap because the CDN edge retries on transient failures. |
+| `RATE_LIMIT_AUTH_RPM` | `10` | Per-IP requests-per-minute cap on the credential endpoints (`/api/auth/login`, `/api/auth/setup`, `/api/auth/key-login`). `0` disables it. |
 
 ## Logging
 

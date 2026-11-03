@@ -222,12 +222,16 @@ func RefreshHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCoo
 		return 401, nil, nil
 	}
 
+	// Consume first: only one of several concurrent refreshes with the same
+	// token wins (the old order issued a pair for each, then deleted).
+	if consumed, err := services.ConsumeRefreshTokenCtx(ctx, db, stored.ID); err != nil || !consumed {
+		return 401, nil, nil
+	}
+
 	accessToken, rawRefresh, err := IssueTokenPairCtx(ctx, db, jwtSecret, stored.UserID, username)
 	if err != nil {
 		return 500, nil, nil
 	}
-
-	services.DeleteRefreshTokenCtx(ctx, db, stored.ID)
 
 	return 200, map[string]string{"token": accessToken}, []*http.Cookie{
 		RefreshCookie(rawRefresh, refreshTokenMaxAgeSecs, secureCookies),
@@ -264,4 +268,11 @@ func KeyLoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, apiKey s
 		"name":       k.Name,
 		"key_prefix": k.KeyPrefix,
 	}
+}
+
+// ClearRefreshCookie expires the refresh cookie. Path must match the one it
+// was set with (RefreshCookie), or the browser keeps it.
+func ClearRefreshCookie(secure bool) *http.Cookie {
+	c := RefreshCookie("", -1, secure)
+	return c
 }

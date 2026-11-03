@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -144,7 +145,7 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+	hash := argon2IDKey([]byte(password), salt)
 	return fmt.Sprintf("%x:%x", salt, hash), nil
 }
 
@@ -164,6 +165,17 @@ func VerifyPassword(password, storedHash string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
-	return hex.EncodeToString(hash) == hex.EncodeToString(expectedHash), nil
+	hash := argon2IDKey([]byte(password), salt)
+	return subtle.ConstantTimeCompare(hash, expectedHash) == 1, nil
+}
+
+// passwordHashSlots caps concurrent argon2id runs: each allocates 64 MiB, so
+// a burst of parallel logins (login is unauthenticated) could otherwise
+// exhaust memory. Extra callers wait for a slot.
+var passwordHashSlots = make(chan struct{}, 4)
+
+func argon2IDKey(password, salt []byte) []byte {
+	passwordHashSlots <- struct{}{}
+	defer func() { <-passwordHashSlots }()
+	return argon2.IDKey(password, salt, 1, 64*1024, 4, 32)
 }

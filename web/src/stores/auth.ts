@@ -95,15 +95,36 @@ export const useAuthStore = defineStore('auth', () => {
     sessionStorage.removeItem('apiKeyToken')
   }
 
-  async function refresh(): Promise<boolean> {
-    const res = await authApi.refresh()
-    if (!res.ok) return false
-    const data = await res.json()
-    setToken(data.token)
-    return true
+  // One refresh at a time: several requests hitting 401 together each used to
+  // start their own refresh with the same cookie; the server rotates it on
+  // the first, so the others failed and logged the user out.
+  let refreshInFlight: Promise<boolean> | null = null
+
+  function refresh(): Promise<boolean> {
+    if (!refreshInFlight) {
+      refreshInFlight = (async () => {
+        try {
+          const res = await authApi.refresh()
+          if (!res.ok) return false
+          const data = await res.json()
+          setToken(data.token)
+          return true
+        } catch {
+          return false
+        } finally {
+          refreshInFlight = null
+        }
+      })()
+    }
+    return refreshInFlight
   }
 
   function logout() {
+    // Revoke the refresh token server-side (it stayed valid for 7 days after
+    // a local-only logout). Best effort: local state is cleared regardless.
+    if (token.value) {
+      authApi.logout().catch(() => {})
+    }
     clearToken()
     logoutApiKey()
     setupRequired.value = null

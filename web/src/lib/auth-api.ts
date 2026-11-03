@@ -23,6 +23,9 @@ export const authApi = {
   login: (username: string, password: string): Promise<Response> =>
     authFetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   refresh: (): Promise<Response> => authFetch('/api/auth/refresh', { method: 'POST' }),
+  // Under the refresh cookie's path (/api/auth/refresh) so the browser sends
+  // the cookie; the server revokes that refresh token and clears the cookie.
+  logout: (): Promise<Response> => authFetch('/api/auth/refresh/logout', { method: 'POST' }),
   keyLogin: (apiKey: string): Promise<Response> =>
     authFetch('/api/auth/key-login', { method: 'POST', body: JSON.stringify({ api_key: apiKey }) }),
 }

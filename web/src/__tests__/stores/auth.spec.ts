@@ -471,4 +471,37 @@ describe('auth store - API key session', () => {
     const auth = useAuthStore()
     expect(auth.apiKeyToken).toBe('persisted-jwt')
   })
+
+  // Concurrent 401s share one refresh (each used to send its own; the server
+  // rotated on the first and the rest logged the user out).
+  it('concurrent refresh calls share one request', async () => {
+    let resolve: (v: unknown) => void = () => {}
+    const fetchMock = vi.fn().mockImplementation(() => new Promise((r) => { resolve = r }))
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    const calls = [auth.refresh(), auth.refresh(), auth.refresh()]
+    resolve({ ok: true, status: 200, json: () => Promise.resolve({ token: 'new-token' }) })
+    expect(await Promise.all(calls)).toEqual([true, true, true])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(auth.token).toBe('new-token')
+    // a later refresh starts a new request
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ token: 't2' }) })
+    await auth.refresh()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  // Logout revokes the refresh token server-side via the cookie-path endpoint.
+  it('logout calls the server logout endpoint', async () => {
+    const fetchMock = mockFetchSuccess({ token: 'tok' })
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    await auth.login('admin', 'pw')
+    fetchMock.mockClear()
+    auth.logout()
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/refresh/logout'),
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    )
+    expect(auth.token).toBeNull()
+  })
 })

@@ -80,3 +80,21 @@ func DeleteExpiredRefreshTokens(db *sql.DB) (int64, error) {
 }
 
 // --- API key CRUD ---
+
+// ConsumeRefreshTokenCtx deletes a refresh token and reports whether this
+// call removed it. Rotation consumes the old token *before* issuing a new
+// pair, so two concurrent refreshes with the same token can't both succeed.
+func ConsumeRefreshTokenCtx(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	res, err := db.ExecContext(ctx, "DELETE FROM refresh_tokens WHERE id = ?", id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// DeleteRefreshTokenByHashCtx revokes one refresh token (logout).
+func DeleteRefreshTokenByHashCtx(ctx context.Context, db *sql.DB, tokenHash string) error {
+	_, err := db.ExecContext(ctx, "DELETE FROM refresh_tokens WHERE token_hash = ?", tokenHash)
+	return err
+}

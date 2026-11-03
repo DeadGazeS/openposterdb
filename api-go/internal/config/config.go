@@ -29,6 +29,7 @@ type Config struct {
 	CORSOrigin          string
 	RateLimitRPM        uint64
 	RateLimitCDNRPM     uint64
+	RateLimitAuthRPM    uint64
 	ExternalCacheOnly   bool
 	EnableCDNRedirects  bool
 	FreeKeyEnabled      *bool
@@ -65,6 +66,7 @@ func FromEnv() (*Config, error) {
 		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
 		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
 		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
+		RateLimitAuthRPM:    envUint64OrDefault("RATE_LIMIT_AUTH_RPM", 10),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
