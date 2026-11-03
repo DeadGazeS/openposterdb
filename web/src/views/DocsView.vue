@@ -46,6 +46,7 @@ onMounted(async () => {
       forceDarkModeState: 'light',
       hideDarkModeToggle: true,
       defaultOpenAllTags: true,
+      withDefaultFonts: false,
     }" />
   </div>
 </template>

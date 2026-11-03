@@ -45,12 +45,14 @@ describe('auth store', () => {
     vi.stubGlobal('sessionStorage', sessionStorageStub)
   })
 
-  it('token is set via login and stored in localStorage', async () => {
+  // The admin token stays in memory only (localStorage is readable by any
+  // injected script).
+  it('token is set via login and kept out of localStorage', async () => {
     vi.stubGlobal('fetch', mockFetchSuccess({ token: 'abc123' }))
     const auth = useAuthStore()
     await auth.login('user', 'pass')
     expect(auth.token).toBe('abc123')
-    expect(localStorageStub.setItem).toHaveBeenCalledWith('token', 'abc123')
+    expect(localStorageStub.setItem).not.toHaveBeenCalledWith('token', expect.anything())
   })
 
   it('logout clears token from localStorage and sets null', async () => {
@@ -223,10 +225,22 @@ describe('auth store', () => {
     expect(auth.setupRequired).toBeNull()
   })
 
-  it('initializes token from localStorage', () => {
+  it('ignores and removes a token older versions left in localStorage', () => {
     localStorageMock['token'] = 'persisted-token'
     const auth = useAuthStore()
-    expect(auth.token).toBe('persisted-token')
+    expect(auth.token).toBeNull()
+    expect(localStorageMock['token']).toBeUndefined()
+  })
+
+  it('restoreSession gets a token from the refresh cookie once per load', async () => {
+    const fetchMock = mockFetchSuccess({ token: 'restored' })
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    expect(await auth.restoreSession()).toBe(true)
+    expect(await auth.restoreSession()).toBe(true)
+    expect(auth.token).toBe('restored')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/auth/refresh'), expect.anything())
   })
 
   it('isAdminSession is true only with admin token', async () => {

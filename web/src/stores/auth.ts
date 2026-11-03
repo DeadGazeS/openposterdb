@@ -4,7 +4,15 @@ import { authApi } from '@/lib/auth-api'
 import type { FreeKeyDefaults } from '@/lib/settings'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(localStorage.getItem('token'))
+  // The admin access token lives in memory only (it used to sit in
+  // localStorage, readable by any injected script). A reload restores the
+  // session through the HttpOnly refresh cookie — see restoreSession.
+  const token = ref<string | null>(null)
+  try {
+    localStorage.removeItem('token') // drop the copy older versions stored
+  } catch {
+    // storage unavailable
+  }
   const setupRequired = ref<boolean | null>(null)
   const freeApiKeyEnabled = ref(false)
   const disablePublicPages = ref(false)
@@ -43,12 +51,20 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setToken(t: string) {
     token.value = t
-    localStorage.setItem('token', t)
   }
 
   function clearToken() {
     token.value = null
-    localStorage.removeItem('token')
+  }
+
+  // restoreSession runs once per page load: with no token in memory it asks
+  // the server for one using the refresh cookie (if the browser has one).
+  let sessionRestore: Promise<boolean> | null = null
+  function restoreSession(): Promise<boolean> {
+    if (!sessionRestore) {
+      sessionRestore = token.value ? Promise.resolve(true) : refresh()
+    }
+    return sessionRestore
   }
 
   async function checkSetupRequired(): Promise<boolean> {
@@ -148,6 +164,7 @@ export const useAuthStore = defineStore('auth', () => {
     loginWithApiKey,
     logoutApiKey,
     refresh,
+    restoreSession,
     logout,
   }
 })

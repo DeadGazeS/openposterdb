@@ -4,6 +4,9 @@ import { IMAGE_LIST_KINDS, IMAGE_LIST_TITLES } from '@/lib/api'
 
 export async function routeGuard(to: RouteLocationNormalized) {
   const auth = useAuthStore()
+  // The admin token is kept in memory only: on the first navigation after a
+  // page load, restore it from the refresh cookie before deciding anything.
+  await auth.restoreSession()
 
   // Only check setup status when navigating to setup or login (avoids an API
   // call on every navigation). The result is cached in the auth store after the

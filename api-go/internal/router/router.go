@@ -131,6 +131,7 @@ func (r *Router) serveStatic(w http.ResponseWriter, req *http.Request) {
 	// (curl --path-as-is) otherwise reached os.Stat outside staticDir, and
 	// the 404-vs-index.html difference revealed which host files exist.
 	path := pathpkg.Clean("/" + req.URL.Path)
+	w.Header().Set("Content-Security-Policy", spaCSP)
 	if path != "/" {
 		if fi, err := os.Stat(filepath.Join(r.staticDir, filepath.FromSlash(path))); err == nil && !fi.IsDir() {
 			switch {
@@ -147,3 +148,12 @@ func (r *Router) serveStatic(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, req, filepath.Join(r.staticDir, "index.html"))
 }
+
+// spaCSP is the Content-Security-Policy for the web UI: scripts only from
+// this origin (no inline/eval), so an injected script can't run and read the
+// admin session. Inline styles are allowed (Vue/the UI kit set style
+// attributes); images may be blob:/data: (rendered previews); the only
+// third-party request is the GitHub release check in the sidebar.
+const spaCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.github.com; " +
+	"worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
