@@ -29,7 +29,14 @@ func OpenDatabase(dbPath string) (*sql.DB, error) {
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=cache_size(-8000)" +
-		"&_pragma=foreign_keys(ON)"
+		"&_pragma=foreign_keys(ON)" +
+		// BEGIN IMMEDIATE: a deferred transaction that reads and then writes
+		// (CreateFirstAdminUserCtx) fails at once with SQLITE_BUSY "database
+		// is locked" when another connection wrote in between — busy_timeout
+		// can't help, the snapshot is already stale. Taking the write lock at
+		// BEGIN makes it wait (busy_timeout) instead. Every transaction here
+		// writes, so nothing loses concurrency by it.
+		"&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
