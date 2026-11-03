@@ -506,6 +506,12 @@ var Migrations = []Migration{
 		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_created_key ON image_meta(image_type, created_at, cache_key)",
 		ExpectedError: "already exists",
 	},
+	// Refresh tokens are marked used on rotation (not deleted) so a replayed
+	// token can be detected (handlers.RefreshHandler).
+	{
+		SQL:           "ALTER TABLE refresh_tokens ADD COLUMN used_at INTEGER",
+		ExpectedError: "duplicate column",
+	},
 	{
 		SQL:           "DROP INDEX IF EXISTS idx_image_meta_type_created", // superseded (no tiebreaker column)
 		ExpectedError: "no such index",

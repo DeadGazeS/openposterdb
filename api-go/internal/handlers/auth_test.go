@@ -42,7 +42,8 @@ func authTestDB(t *testing.T) *sql.DB {
 			user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
 			token_hash TEXT NOT NULL UNIQUE,
 			expires_at TEXT NOT NULL,
-			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			used_at INTEGER
 		);
 		CREATE TABLE api_keys (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,16 +306,17 @@ func TestRefreshHandler_ValidToken_Rotates(t *testing.T) {
 		t.Errorf("refresh didn't rotate cookie (old=%q new=%+v)", oldCookie, newCookies)
 	}
 
-	// Post-condition: still exactly one refresh row, but a new hash.
+	// Post-condition: exactly one active refresh token, with a new hash (the
+	// old row is kept, marked used, for reuse detection).
 	var postCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM refresh_tokens").Scan(&postCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM refresh_tokens WHERE used_at IS NULL").Scan(&postCount); err != nil {
 		t.Fatal(err)
 	}
 	if postCount != 1 {
-		t.Errorf("post refresh_tokens: %d, want 1 (rotation should delete old + insert new)", postCount)
+		t.Errorf("active refresh_tokens after rotation: %d, want 1", postCount)
 	}
 	var storedHash string
-	if err := db.QueryRow("SELECT token_hash FROM refresh_tokens LIMIT 1").Scan(&storedHash); err != nil {
+	if err := db.QueryRow("SELECT token_hash FROM refresh_tokens WHERE used_at IS NULL LIMIT 1").Scan(&storedHash); err != nil {
 		t.Fatal(err)
 	}
 	if storedHash == HashRefreshToken(oldCookie) {

@@ -110,6 +110,11 @@ func IssueTokenPairCtx(ctx context.Context, db *sql.DB, jwtSecret []byte, userID
 	if _, err := services.CreateRefreshTokenCtx(ctx, db, userID, tokenHash, expiresAt); err != nil {
 		return "", "", err
 	}
+	// Used tokens are kept until expiry for reuse detection; prune expired
+	// rows here as well as at startup so the table stays small.
+	if _, err := services.DeleteExpiredRefreshTokensCtx(ctx, db); err != nil {
+		slog.Warn("pruning expired refresh tokens failed", "error", err)
+	}
 
 	return accessToken, rawRefresh, nil
 }
@@ -211,6 +216,20 @@ func RefreshHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCoo
 		return 401, nil, nil
 	}
 
+	// Reuse detection: a refresh token is only valid once. A second use
+	// within refreshReuseGrace is a benign race (two tabs refreshing
+	// together); later, it means the token was copied and replayed — revoke
+	// every session of that user so the copy dies with the original.
+	if stored.UsedAt != nil {
+		if time.Since(time.Unix(*stored.UsedAt, 0)) > refreshReuseGrace {
+			slog.Warn("refresh token reuse detected; revoking all sessions of the user", "user_id", stored.UserID)
+			if err := services.DeleteRefreshTokensForUserCtx(ctx, db, stored.UserID); err != nil {
+				slog.Error("revoking sessions after refresh token reuse failed", "user_id", stored.UserID, "error", err)
+			}
+		}
+		return 401, nil, nil
+	}
+
 	expiresAt, err := time.Parse("2006-01-02 15:04:05", stored.ExpiresAt)
 	if err != nil || time.Now().After(expiresAt) {
 		services.DeleteRefreshTokenCtx(ctx, db, stored.ID)
@@ -283,3 +302,7 @@ var jwtParseOptions = []jwt.ParserOption{
 	jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 	jwt.WithExpirationRequired(),
 }
+
+// refreshReuseGrace: a used refresh token presented again within this window
+// is treated as a concurrent-refresh race, not as theft.
+var refreshReuseGrace = 30 * time.Second

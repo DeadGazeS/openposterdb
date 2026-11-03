@@ -27,14 +27,15 @@ type RefreshToken struct {
 	TokenHash string
 	ExpiresAt string
 	CreatedAt string
+	UsedAt    *int64 // unix seconds; set when the token was rotated away
 }
 
 func FindRefreshTokenByHashCtx(ctx context.Context, db *sql.DB, tokenHash string) (*RefreshToken, error) {
 	var rt RefreshToken
 	err := db.QueryRowContext(ctx,
-		"SELECT id, user_id, token_hash, expires_at, created_at FROM refresh_tokens WHERE token_hash = ?",
+		"SELECT id, user_id, token_hash, expires_at, created_at, used_at FROM refresh_tokens WHERE token_hash = ?",
 		tokenHash,
-	).Scan(&rt.ID, &rt.UserID, &rt.TokenHash, &rt.ExpiresAt, &rt.CreatedAt)
+	).Scan(&rt.ID, &rt.UserID, &rt.TokenHash, &rt.ExpiresAt, &rt.CreatedAt, &rt.UsedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -81,11 +82,12 @@ func DeleteExpiredRefreshTokens(db *sql.DB) (int64, error) {
 
 // --- API key CRUD ---
 
-// ConsumeRefreshTokenCtx deletes a refresh token and reports whether this
-// call removed it. Rotation consumes the old token *before* issuing a new
-// pair, so two concurrent refreshes with the same token can't both succeed.
+// ConsumeRefreshTokenCtx marks a refresh token used and reports whether this
+// call did it. Rotation consumes the old token *before* issuing a new pair,
+// so two concurrent refreshes with the same token can't both succeed; the
+// used row is kept (until expiry) so a later replay is recognised.
 func ConsumeRefreshTokenCtx(ctx context.Context, db *sql.DB, id int64) (bool, error) {
-	res, err := db.ExecContext(ctx, "DELETE FROM refresh_tokens WHERE id = ?", id)
+	res, err := db.ExecContext(ctx, "UPDATE refresh_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL", nowUnix(), id)
 	if err != nil {
 		return false, err
 	}

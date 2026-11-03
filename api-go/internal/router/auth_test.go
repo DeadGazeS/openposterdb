@@ -123,3 +123,51 @@ func TestLogin_Throttled(t *testing.T) {
 		t.Fatalf("codes = %v, want 429 after 3 attempts", codes)
 	}
 }
+
+// A refresh token replayed after rotation (outside the race grace window)
+// revokes every session of the user: the attacker's copy and the victim's
+// current token both stop working.
+func TestRefresh_ReuseRevokesAllSessions(t *testing.T) {
+	r := authTestRouter(t, 0)
+	stolen, _ := login(t, r)
+	rec := postWithCookie(r, "/api/auth/refresh", stolen)
+	if rec.Code != 200 {
+		t.Fatalf("first refresh: %d", rec.Code)
+	}
+	var current *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "refresh_token" {
+			current = c
+		}
+	}
+	// Age the rotation past the grace window.
+	if _, err := r.state.DB.Exec(`UPDATE refresh_tokens SET used_at = used_at - 3600 WHERE used_at IS NOT NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postWithCookie(r, "/api/auth/refresh", stolen); rec.Code != 401 {
+		t.Fatalf("replayed token: got %d want 401", rec.Code)
+	}
+	if rec := postWithCookie(r, "/api/auth/refresh", current); rec.Code != 401 {
+		t.Fatalf("after reuse the current session must be revoked too: got %d", rec.Code)
+	}
+}
+
+// A second use inside the grace window (two tabs refreshing together) is a
+// plain 401 and keeps the winner's session.
+func TestRefresh_ReuseWithinGraceKeepsSession(t *testing.T) {
+	r := authTestRouter(t, 0)
+	first, _ := login(t, r)
+	rec := postWithCookie(r, "/api/auth/refresh", first)
+	var current *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "refresh_token" {
+			current = c
+		}
+	}
+	if rec := postWithCookie(r, "/api/auth/refresh", first); rec.Code != 401 {
+		t.Fatalf("losing tab: got %d want 401", rec.Code)
+	}
+	if rec := postWithCookie(r, "/api/auth/refresh", current); rec.Code != 200 {
+		t.Fatalf("winning session must survive a benign race: got %d", rec.Code)
+	}
+}
