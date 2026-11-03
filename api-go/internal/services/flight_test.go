@@ -16,6 +16,7 @@ type omdbStub struct {
 	calls atomic.Int32
 	delay time.Duration
 	empty bool
+	fixed string // when set, the imdbRating returned for every id
 }
 
 func (s *omdbStub) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -24,7 +25,11 @@ func (s *omdbStub) RoundTrip(req *http.Request) (*http.Response, error) {
 	body := `{"Response":"False"}`
 	if !s.empty {
 		id := req.URL.Query().Get("i")
-		body = `{"imdbRating":"` + id[len(id)-1:] + `.0","Ratings":[]}`
+		v := id[len(id)-1:] + ".0"
+		if s.fixed != "" {
+			v = s.fixed
+		}
+		body = `{"imdbRating":"` + v + `","Ratings":[]}`
 	}
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 }

@@ -31,13 +31,13 @@ func NewFanartClient(keys []string, httpClient *http.Client) *FanartClient {
 // Errors are not cached. The returned value is shared: callers only read it.
 func (c *FanartClient) cachedImages(key string, fetch func() (*FanartImages, error)) (*FanartImages, error) {
 	if c.images != nil {
-		if v, ok := c.images.Get(key); ok {
+		if v, ok := upstreamGet(c.images, key); ok {
 			return v.(*FanartImages), nil
 		}
 	}
 	imgs, err := fetch()
 	if err == nil && imgs != nil && c.images != nil {
-		c.images.Set(key, imgs, 1)
+		upstreamSet(c.images, key, imgs)
 	}
 	return imgs, err
 }

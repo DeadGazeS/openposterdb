@@ -125,11 +125,15 @@ func main() {
 			int64(cfg.ImageMemCacheMB)*1024*1024, 0,
 			1*time.Hour, 30*time.Minute,
 		),
+		// Hard limit; resolutions older than services.idRefreshAfter (1h)
+		// are served while a background refresh runs.
 		IDs: services.NewMemCache(
-			0, 50_000, 1*time.Hour, 0,
+			0, 50_000, 24*time.Hour, 0,
 		),
+		// Hard limit; badges older than services.ratingsRefreshAfter (30 min)
+		// are served while a background refresh runs.
 		Ratings: services.NewMemCache(
-			0, 50_000, 30*time.Minute, 0,
+			0, 50_000, 24*time.Hour, 0,
 		),
 	}
 	// Mirror the Rust image_mem_cache: re-check release-date staleness of

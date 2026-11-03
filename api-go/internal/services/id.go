@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apperr "openposterdb/internal/errors"
@@ -225,10 +226,14 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 		return ResolveIDCtx(ctx, idType, idValue, clients)
 	}
 	key := idType.String() + "/" + idValue
+	flightKey := fmt.Sprintf("%p|%s", cache, key)
 	if v, ok := cache.Get(key); ok {
 		switch e := v.(type) {
-		case *ResolvedID:
-			return e, nil
+		case idEntry:
+			if time.Now().After(e.refreshAfter) {
+				refreshIDInBackground(cache, key, flightKey, idType, idValue, clients)
+			}
+			return e.resolved, nil
 		case idMiss:
 			if time.Now().Before(e.until) {
 				return nil, e.err
@@ -237,15 +242,52 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 		}
 	}
 	// Concurrent misses for the same id share one upstream lookup.
-	return idFlight.do(ctx, fmt.Sprintf("%p|%s", cache, key), func(fctx context.Context) (*ResolvedID, error) {
+	return idFlight.do(ctx, flightKey, func(fctx context.Context) (*ResolvedID, error) {
 		resolved, err := ResolveIDCtx(fctx, idType, idValue, clients)
 		if err == nil {
-			cache.Set(key, resolved, 1)
+			cache.Set(key, idEntry{resolved: resolved, refreshAfter: time.Now().Add(idRefreshAfter)}, 1)
 		} else if isIDNotFound(err) {
 			cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
 		}
 		return resolved, err
 	})
+}
+
+// idRefreshAfter is the age after which a cached resolution is refreshed in
+// the background (it is still served meanwhile); the cache's TTL is the hard
+// limit.
+var idRefreshAfter = time.Hour
+
+type idEntry struct {
+	resolved     *ResolvedID
+	refreshAfter time.Time
+}
+
+var idRefreshing sync.Map // flight key -> struct{}
+
+// refreshIDInBackground re-resolves an id whose cached entry is past its
+// refresh age. Only a success replaces the entry; a failure keeps the old
+// resolution (retried after a short delay rather than on every request).
+func refreshIDInBackground(cache *MemCache, key, flightKey string, idType IDType, idValue string, clients IDClients) {
+	if _, running := idRefreshing.LoadOrStore(flightKey, struct{}{}); running {
+		return
+	}
+	go func() {
+		defer idRefreshing.Delete(flightKey)
+		idFlight.do(context.Background(), flightKey, func(fctx context.Context) (*ResolvedID, error) {
+			resolved, err := ResolveIDCtx(fctx, idType, idValue, clients)
+			if err == nil {
+				cache.Set(key, idEntry{resolved: resolved, refreshAfter: time.Now().Add(idRefreshAfter)}, 1)
+				return resolved, nil
+			}
+			if v, ok := cache.Get(key); ok {
+				if e, ok := v.(idEntry); ok {
+					cache.Set(key, idEntry{resolved: e.resolved, refreshAfter: time.Now().Add(idNotFoundTTL)}, 1)
+				}
+			}
+			return nil, err
+		})
+	}()
 }
 
 var idFlight flightGroup[*ResolvedID]

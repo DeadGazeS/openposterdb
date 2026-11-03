@@ -137,7 +137,7 @@ func (c *TmdbClient) GetImagesCtx(ctx context.Context, mediaType string, tmdbID 
 	path := fmt.Sprintf("/%s/%d/images", mediaType, tmdbID)
 	key := path + "?" + includeLang
 	if c.images != nil {
-		if v, ok := c.images.Get(key); ok {
+		if v, ok := upstreamGet(c.images, key); ok {
 			return v.(*TmdbImagesResponse), nil // shared: callers only read it
 		}
 	}
@@ -146,7 +146,7 @@ func (c *TmdbClient) GetImagesCtx(ctx context.Context, mediaType string, tmdbID 
 		return nil, err
 	}
 	if c.images != nil {
-		c.images.Set(key, &result, 1)
+		upstreamSet(c.images, key, &result)
 	}
 	return &result, nil
 }

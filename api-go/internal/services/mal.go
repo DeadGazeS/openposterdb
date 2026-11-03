@@ -122,7 +122,7 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 		return c.fetchMediaByMAL(ctx, malID)
 	}
 	key := strconv.FormatUint(malID, 10)
-	if v, ok := c.media.Get(key); ok {
+	if v, ok := upstreamGet(c.media, key); ok {
 		switch e := v.(type) {
 		case *AniListMedia: // shared: callers only read it
 			return e, nil
@@ -135,9 +135,9 @@ func (c *AniListClient) MediaByMALCtx(ctx context.Context, malID uint64) (*AniLi
 	}
 	media, err := c.fetchMediaByMAL(ctx, malID)
 	if err == nil {
-		c.media.Set(key, media, 1)
+		upstreamSet(c.media, key, media)
 	} else if isIDNotFound(err) {
-		c.media.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
+		upstreamSet(c.media, key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)})
 	}
 	return media, err
 }

@@ -241,6 +241,9 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 				caches.Ratings.Clear()
 			}
 		}
+		// ...and the per-client upstream caches (TMDB/fanart image lists,
+		// Kitsu/AniList lookups), so the next render re-fetches everything.
+		services.ClearUpstreamCaches()
 
 		httpx.WriteJSON(w, 200, map[string]any{
 			"ok":                  true,

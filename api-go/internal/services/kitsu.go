@@ -109,7 +109,7 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 		return c.fetchAnime(ctx, idOrSlug)
 	}
 	key := "anime:" + idOrSlug
-	if v, ok := c.cache.Get(key); ok {
+	if v, ok := upstreamGet(c.cache, key); ok {
 		switch e := v.(type) {
 		case kitsuAnimeEntry: // shared: callers only read it
 			return e.anime, e.mappings, nil
@@ -122,9 +122,9 @@ func (c *KitsuClient) GetAnimeCtx(ctx context.Context, idOrSlug string) (*KitsuA
 	}
 	anime, mappings, err := c.fetchAnime(ctx, idOrSlug)
 	if err == nil {
-		c.cache.Set(key, kitsuAnimeEntry{anime: anime, mappings: mappings}, 1)
+		upstreamSet(c.cache, key, kitsuAnimeEntry{anime: anime, mappings: mappings})
 	} else if isIDNotFound(err) {
-		c.cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
+		upstreamSet(c.cache, key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)})
 	}
 	return anime, mappings, err
 }
@@ -329,13 +329,13 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 	}
 	key := "malmap:" + strconv.FormatUint(malID, 10)
 	if c.cache != nil {
-		if v, ok := c.cache.Get(key); ok {
+		if v, ok := upstreamGet(c.cache, key); ok {
 			return copyUint64(v.(*uint64))
 		}
 	}
 	id, definitive := c.fetchAnimeIDByMAL(ctx, malID)
 	if definitive && c.cache != nil {
-		c.cache.Set(key, id, 1)
+		upstreamSet(c.cache, key, id)
 	}
 	return copyUint64(id)
 }

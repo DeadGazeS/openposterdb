@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -533,15 +534,28 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 	return FetchRatingsResult{Mdblist: mdblistResp, OMDB: omdbResp, Badges: badges}
 }
 
+// ratingsRefreshAfter is the age after which cached badges are refreshed.
+// They are still served (stale-while-revalidate) while one background
+// refresh runs, so a cached image never waits on the rating providers to
+// build its cache key; the cache's own TTL is the hard limit.
+var ratingsRefreshAfter = 30 * time.Minute
+
 // emptyRatingsTTL is how long an empty badge list is cached. Provider errors
 // are swallowed, so "every provider failed" and "no ratings" look the same;
-// a short TTL keeps an upstream outage from pinning badge-less posters for the
-// whole ratings TTL.
+// a short TTL keeps an upstream outage from pinning badge-less posters. An
+// expired empty entry is refetched synchronously (there are no badges to
+// serve meanwhile).
 var emptyRatingsTTL = 2 * time.Minute
 
-type emptyRatings struct{ until time.Time }
+type ratingsEntry struct {
+	badges       []RatingBadge // empty = no ratings (or every provider failed)
+	refreshAfter time.Time
+}
 
-var ratingsFlight flightGroup[[]RatingBadge]
+var (
+	ratingsFlight     flightGroup[[]RatingBadge]
+	ratingsRefreshing sync.Map // flight key -> struct{}: one background refresh at a time
+)
 
 // ratingsCacheKey is "tmdbID/mediaType" or "showID/episode/SsEe" (matching
 // the Rust ratings_cache). Titles without a TMDB id (IMDb-only targets) are
@@ -558,46 +572,65 @@ func ratingsCacheKey(q RatingsQuery) string {
 
 // FetchRatingsCachedCtx fetches ratings and caches the resulting badges in the
 // given in-memory cache (see ratingsCacheKey). A nil cache bypasses caching.
-// Concurrent calls for the same title share one fetch. Only the badge list is
-// cached; the auxiliary responses are unused by all current callers.
+// Concurrent misses for the same title share one fetch; entries past
+// ratingsRefreshAfter are served while a background refresh runs. Only the
+// badge list is cached; the auxiliary responses are unused by all callers.
 func FetchRatingsCachedCtx(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
 	if cache == nil {
 		return FetchRatingsCtx(ctx, clients, q).Badges
 	}
 	key := ratingsCacheKey(q)
-	if badges, ok := cachedRatings(cache, key); ok {
-		return badges
+	flightKey := fmt.Sprintf("%p|%s", cache, key)
+	if e, ok := cachedRatings(cache, key); ok {
+		if time.Now().Before(e.refreshAfter) {
+			return e.badges
+		}
+		if len(e.badges) > 0 {
+			if _, running := ratingsRefreshing.LoadOrStore(flightKey, struct{}{}); !running {
+				go func() {
+					defer ratingsRefreshing.Delete(flightKey)
+					ratingsFlight.do(context.Background(), flightKey, func(fctx context.Context) ([]RatingBadge, error) {
+						return refreshRatings(fctx, cache, clients, q, key), nil
+					})
+				}()
+			}
+			return e.badges
+		}
 	}
-	badges, _ := ratingsFlight.do(ctx, fmt.Sprintf("%p|%s", cache, key), func(fctx context.Context) ([]RatingBadge, error) {
-		if badges, ok := cachedRatings(cache, key); ok {
-			return badges, nil
+	badges, _ := ratingsFlight.do(ctx, flightKey, func(fctx context.Context) ([]RatingBadge, error) {
+		if e, ok := cachedRatings(cache, key); ok && time.Now().Before(e.refreshAfter) {
+			return e.badges, nil
 		}
-		badges := FetchRatingsCtx(fctx, clients, q).Badges
-		if len(badges) == 0 {
-			cache.Set(key, emptyRatings{until: time.Now().Add(emptyRatingsTTL)}, 64)
-		} else {
-			cache.Set(key, badges, int64(len(badges))*100+64)
-		}
-		return badges, nil
+		return refreshRatings(fctx, cache, clients, q, key), nil
 	})
 	return badges
 }
 
-func cachedRatings(cache *MemCache, key string) ([]RatingBadge, bool) {
+// refreshRatings fetches and stores the badges. An empty result never
+// replaces cached badges (it is usually an outage): the old ones are kept and
+// retried after emptyRatingsTTL.
+func refreshRatings(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery, key string) []RatingBadge {
+	badges := FetchRatingsCtx(ctx, clients, q).Badges
+	now := time.Now()
+	if len(badges) == 0 {
+		if prev, ok := cachedRatings(cache, key); ok && len(prev.badges) > 0 {
+			cache.Set(key, ratingsEntry{badges: prev.badges, refreshAfter: now.Add(emptyRatingsTTL)}, int64(len(prev.badges))*100+64)
+			return prev.badges
+		}
+		cache.Set(key, ratingsEntry{refreshAfter: now.Add(emptyRatingsTTL)}, 64)
+		return nil
+	}
+	cache.Set(key, ratingsEntry{badges: badges, refreshAfter: now.Add(ratingsRefreshAfter)}, int64(len(badges))*100+64)
+	return badges
+}
+
+func cachedRatings(cache *MemCache, key string) (ratingsEntry, bool) {
 	v, ok := cache.Get(key)
 	if !ok {
-		return nil, false
+		return ratingsEntry{}, false
 	}
-	switch e := v.(type) {
-	case []RatingBadge:
-		return e, true
-	case emptyRatings:
-		if time.Now().Before(e.until) {
-			return nil, true
-		}
-		cache.Delete(key)
-	}
-	return nil, false
+	e, ok := v.(ratingsEntry)
+	return e, ok
 }
 
 func FetchRatingsCached(cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {

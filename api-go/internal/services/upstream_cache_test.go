@@ -79,3 +79,32 @@ func TestResolveIDCached_NegativeCacheOnlyNotFound(t *testing.T) {
 		t.Fatalf("transient error must not be cached: upstream calls = %d", n)
 	}
 }
+
+// "Clear cache" must also drop the per-client upstream caches (TMDB/fanart
+// image lists, Kitsu/AniList lookups) — the docs promise a clean re-fetch.
+func TestClearUpstreamCaches(t *testing.T) {
+	tr := &upstreamCounter{status: 200, body: `{"posters":[]}`}
+	c := NewTmdbClient("k", &http.Client{Transport: tr})
+	c.GetImagesCtx(t.Context(), "movie", 1, "en")
+	c.GetImagesCtx(t.Context(), "movie", 1, "en")
+	ClearUpstreamCaches()
+	c.GetImagesCtx(t.Context(), "movie", 1, "en")
+	if n := tr.calls.Load(); n != 2 {
+		t.Fatalf("TMDB calls = %d, want 2 (cached, then refetched after the clear)", n)
+	}
+
+	stub := &animeStub{kitsu: kitsuMappingBody, anilst: anilistMediaBody}
+	k := NewKitsuClient(&http.Client{Transport: stub})
+	a := NewAniListClient(&http.Client{Transport: stub})
+	f := NewFanartClient([]string{"k"}, &http.Client{Transport: &upstreamCounter{status: 200, body: `{}`}})
+	k.AnimeIDByMALCtx(t.Context(), 6702)
+	a.MediaByMALCtx(t.Context(), 6702)
+	f.GetMovieImagesCtx(t.Context(), 1)
+	ClearUpstreamCaches()
+	before := stub.calls.Load()
+	k.AnimeIDByMALCtx(t.Context(), 6702)
+	a.MediaByMALCtx(t.Context(), 6702)
+	if n := stub.calls.Load() - before; n != 2 {
+		t.Fatalf("Kitsu+AniList calls after clear = %d, want 2", n)
+	}
+}
