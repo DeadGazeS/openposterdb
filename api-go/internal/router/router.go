@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,6 +43,9 @@ type AppState struct {
 }
 
 func New(state *AppState) *Router {
+	if state.Config != nil && state.Config.TrustedProxies != nil {
+		trustedProxies = *state.Config.TrustedProxies
+	}
 	r := &Router{
 		state: state,
 		mux:   http.NewServeMux(),
@@ -123,7 +127,10 @@ func (r *Router) lastUsed() handlers.KeyRecorder {
 // of a heuristically-cached page pointing at chunks that no longer exist.
 // Directories never produce an http.FileServer listing.
 func (r *Router) serveStatic(w http.ResponseWriter, req *http.Request) {
-	path := req.URL.Path
+	// Clean before touching the filesystem: a raw "/../../etc/passwd"
+	// (curl --path-as-is) otherwise reached os.Stat outside staticDir, and
+	// the 404-vs-index.html difference revealed which host files exist.
+	path := pathpkg.Clean("/" + req.URL.Path)
 	if path != "/" {
 		if fi, err := os.Stat(filepath.Join(r.staticDir, filepath.FromSlash(path))); err == nil && !fi.IsDir() {
 			switch {

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -30,19 +31,26 @@ type Config struct {
 	RateLimitRPM        uint64
 	RateLimitCDNRPM     uint64
 	RateLimitAuthRPM    uint64
-	ExternalCacheOnly   bool
-	EnableCDNRedirects  bool
-	FreeKeyEnabled      *bool
-	DisablePublicPages  bool
-	LogLevel            string
-	JWTSecret           []byte
-	SecretsKey          []byte
-	SecureCookies       bool
-	AdminUsername       string
-	AdminPassword       string
+	// TrustedProxies (TRUSTED_PROXIES) may set X-Forwarded-For; nil means
+	// the default (loopback + private ranges).
+	TrustedProxies     *[]netip.Prefix
+	ExternalCacheOnly  bool
+	EnableCDNRedirects bool
+	FreeKeyEnabled     *bool
+	DisablePublicPages bool
+	LogLevel           string
+	JWTSecret          []byte
+	SecretsKey         []byte
+	SecureCookies      bool
+	AdminUsername      string
+	AdminPassword      string
 }
 
 func FromEnv() (*Config, error) {
+	trusted, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		return nil, err
+	}
 	// Load .env into the process env if present. Already-set env vars take
 	// precedence (godotenv.Load does not overwrite); quotes/inline comments
 	// are handled by godotenv so the sanitizeValue workaround below is gone.
@@ -67,6 +75,7 @@ func FromEnv() (*Config, error) {
 		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
 		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
 		RateLimitAuthRPM:    envUint64OrDefault("RATE_LIMIT_AUTH_RPM", 10),
+		TrustedProxies:      &trusted,
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
@@ -204,4 +213,50 @@ func envUint8OrDefault(key string, def uint8) uint8 {
 func envBool(key string) bool {
 	v := os.Getenv(key)
 	return v == "true" || v == "1"
+}
+
+// DefaultTrustedProxies: loopback and private ranges (a reverse proxy on the
+// same host or Docker network).
+func DefaultTrustedProxies() []netip.Prefix {
+	var out []netip.Prefix
+	for _, c := range []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"} {
+		out = append(out, netip.MustParsePrefix(c))
+	}
+	return out
+}
+
+// ParseTrustedProxies parses TRUSTED_PROXIES: "" or "private" = the default
+// ranges, "none" = trust no proxy (always use the connection address),
+// otherwise a comma list of IPs/CIDRs, where "private" may be included to
+// keep the defaults (e.g. "private,173.245.48.0/20" for Cloudflare).
+func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
+	v = strings.TrimSpace(v)
+	switch strings.ToLower(v) {
+	case "", "private":
+		return DefaultTrustedProxies(), nil
+	case "none":
+		return []netip.Prefix{}, nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		switch {
+		case part == "":
+		case strings.EqualFold(part, "private"):
+			out = append(out, DefaultTrustedProxies()...)
+		case strings.Contains(part, "/"):
+			p, err := netip.ParsePrefix(part)
+			if err != nil {
+				return nil, fmt.Errorf("TRUSTED_PROXIES: %q: %w", part, err)
+			}
+			out = append(out, p.Masked())
+		default:
+			a, err := netip.ParseAddr(part)
+			if err != nil {
+				return nil, fmt.Errorf("TRUSTED_PROXIES: %q: %w", part, err)
+			}
+			out = append(out, netip.PrefixFrom(a, a.BitLen()))
+		}
+	}
+	return out, nil
 }

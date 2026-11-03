@@ -3,6 +3,7 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
+	"openposterdb/internal/config"
 	"testing"
 )
 
@@ -88,23 +89,64 @@ func TestRateLimit_DisabledOnZero(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	r := httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "1.2.3.4:5555"
-	if got := clientIP(r); got != "1.2.3.4" {
-		t.Errorf("RemoteAddr only: got %q want 1.2.3.4", got)
+	ip := func(remote string, xff ...string) string {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		for _, v := range xff {
+			r.Header.Add("X-Forwarded-For", v)
+		}
+		return clientIP(r)
+	}
+	// Default: only loopback/private peers may set X-Forwarded-For.
+	trustedProxies = config.DefaultTrustedProxies()
+	if got := ip("1.2.3.4:5555"); got != "1.2.3.4" {
+		t.Errorf("no XFF: got %q", got)
+	}
+	if got := ip("1.2.3.4:5555", "9.9.9.9"); got != "1.2.3.4" {
+		t.Errorf("a public peer must not choose its identity via XFF: got %q", got)
+	}
+	if got := ip("172.18.0.2:5555", "9.9.9.9"); got != "9.9.9.9" {
+		t.Errorf("trusted proxy: got %q want 9.9.9.9", got)
+	}
+	// Behind a proxy, the client-supplied left part is ignored: the rightmost
+	// untrusted hop is the client.
+	if got := ip("127.0.0.1:5555", "6.6.6.6, 9.9.9.9"); got != "9.9.9.9" {
+		t.Errorf("spoofed chain: got %q want 9.9.9.9", got)
+	}
+	if got := ip("10.0.0.5:5555", "9.9.9.9, 10.0.0.7", "  "); got != "9.9.9.9" {
+		t.Errorf("trusted hops skipped: got %q want 9.9.9.9", got)
+	}
+	if got := ip("10.0.0.5:5555", "not-an-ip"); got != "10.0.0.5" {
+		t.Errorf("malformed XFF falls back to the peer: got %q", got)
 	}
 
-	r = httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "1.2.3.4:5555"
-	r.Header.Set("X-Forwarded-For", "9.9.9.9, 10.0.0.1")
-	if got := clientIP(r); got != "9.9.9.9" {
-		t.Errorf("XFF first hop: got %q want 9.9.9.9", got)
+	// TRUSTED_PROXIES=none: always the connection address.
+	none, _ := config.ParseTrustedProxies("none")
+	trustedProxies = none
+	if got := ip("172.18.0.2:5555", "9.9.9.9"); got != "172.18.0.2" {
+		t.Errorf("none: got %q", got)
 	}
+	// Custom list (e.g. Cloudflare ranges in front of Caddy).
+	custom, err := config.ParseTrustedProxies("private, 173.245.48.0/20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustedProxies = custom
+	if got := ip("10.0.0.5:5555", "9.9.9.9, 173.245.48.10"); got != "9.9.9.9" {
+		t.Errorf("custom: got %q want 9.9.9.9", got)
+	}
+	trustedProxies = config.DefaultTrustedProxies()
 
-	r = httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "1.2.3.4:5555"
-	r.Header.Set("X-Forwarded-For", "  9.9.9.9  ")
-	if got := clientIP(r); got != "9.9.9.9" {
-		t.Errorf("XFF with whitespace: got %q want 9.9.9.9", got)
+	if _, err := config.ParseTrustedProxies("10.0.0.0/33"); err == nil {
+		t.Error("invalid CIDR must be rejected")
+	}
+}
+
+// New IPs beyond the cap share one bucket instead of growing the map.
+func TestRateLimiter_EntryCap(t *testing.T) {
+	rl := newRateLimiter(60)
+	rl.count.Store(maxLimiterEntries)
+	if rl.limiter("203.0.113.9") != rl.overflow {
+		t.Fatal("past the cap a new IP must get the shared overflow bucket")
 	}
 }

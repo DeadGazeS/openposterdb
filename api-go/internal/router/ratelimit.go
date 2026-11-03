@@ -3,12 +3,15 @@ package router
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"openposterdb/internal/config"
 )
 
 // rlEntry pairs a token-bucket limiter with the last time it was touched.
@@ -24,11 +27,22 @@ type rlEntry struct {
 type rateLimiter struct {
 	perMinute   uint64
 	limiters    sync.Map // map[string]*rlEntry
+	count       atomic.Int64
 	idleTimeout time.Duration
+	overflow    *rate.Limiter // shared bucket once maxLimiterEntries is reached
 }
 
+// maxLimiterEntries bounds the per-IP map; beyond it new IPs share one
+// bucket until idle entries are swept.
+const maxLimiterEntries = 100_000
+
 func newRateLimiter(perMinute uint64) *rateLimiter {
-	return &rateLimiter{perMinute: perMinute, idleTimeout: 5 * time.Minute}
+	burst := max(int(perMinute), 1)
+	return &rateLimiter{
+		perMinute:   perMinute,
+		idleTimeout: 5 * time.Minute,
+		overflow:    rate.NewLimiter(rate.Limit(float64(perMinute)/60.0), burst),
+	}
 }
 
 // limiter returns (creating on first sight) the per-IP token bucket. The
@@ -48,9 +62,15 @@ func (r *rateLimiter) limiter(ip string) *rate.Limiter {
 	if burst < 1 {
 		burst = 1
 	}
+	if r.count.Load() >= maxLimiterEntries {
+		return r.overflow
+	}
 	e := &rlEntry{lim: rate.NewLimiter(rate.Limit(perSec), burst)}
 	e.lastSeen.Store(now)
-	actual, _ := r.limiters.LoadOrStore(ip, e)
+	actual, loaded := r.limiters.LoadOrStore(ip, e)
+	if !loaded {
+		r.count.Add(1)
+	}
 	ae := actual.(*rlEntry)
 	ae.lastSeen.Store(now)
 	return ae.lim
@@ -65,6 +85,7 @@ func (r *rateLimiter) SweepIdle() int {
 		e := value.(*rlEntry)
 		if e.lastSeen.Load() < cutoff {
 			r.limiters.Delete(key)
+			r.count.Add(-1)
 			removed++
 		}
 		return true
@@ -72,20 +93,49 @@ func (r *rateLimiter) SweepIdle() int {
 	return removed
 }
 
-// clientIP extracts the best-effort client IP from the request. It honours
-// X-Forwarded-For's first comma-separated entry (when present) — deployments
-// behind a trusted reverse proxy can pass the real client. Otherwise it
-// falls back to RemoteAddr's host portion.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+// trustedProxies are the peers allowed to tell us the client's address via
+// X-Forwarded-For (TRUSTED_PROXIES; default: loopback + private ranges, i.e.
+// a reverse proxy on the same host or Docker network). Set by New.
+var trustedProxies = config.DefaultTrustedProxies()
+
+func isTrustedProxy(a netip.Addr) bool {
+	a = a.Unmap()
+	for _, p := range trustedProxies {
+		if p.Contains(a) {
+			return true
 		}
-		return strings.TrimSpace(xff)
 	}
+	return false
+}
+
+// clientIP returns the address rate limits are keyed on. X-Forwarded-For is
+// only honoured when the connection comes from a trusted proxy, and then
+// walked from the right, skipping trusted hops: the first untrusted entry is
+// the client. The leftmost entries are whatever the client sent, so taking
+// the first one (as before) let anyone pick a fresh identity per request.
+func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !isTrustedProxy(peer) {
+		return host
+	}
+	xff := r.Header.Values("X-Forwarded-For")
+	hops := strings.Split(strings.Join(xff, ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := strings.TrimSpace(hops[i])
+		if hop == "" {
+			continue
+		}
+		a, err := netip.ParseAddr(hop)
+		if err != nil {
+			return host // malformed chain: fall back to the proxy itself
+		}
+		if !isTrustedProxy(a) {
+			return a.Unmap().String()
+		}
 	}
 	return host
 }

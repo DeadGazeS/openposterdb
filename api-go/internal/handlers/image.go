@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	stderrors "errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -256,10 +258,13 @@ func (d ImageDeps) serveParams(ctx context.Context, idType, idValue, kind string
 	}
 }
 
+// writeServeError answers a failed image request. 4xx messages are passed
+// through; 5xx details (upstream response bodies, panics) stay in the log and
+// the client gets a generic message.
 func writeServeError(w http.ResponseWriter, err error) {
-	if appErr, ok := err.(*errors.AppError); ok {
-		httpx.WriteError(w, appErr.Status, appErr.Message)
-		return
+	var appErr *errors.AppError
+	if !stderrors.As(err, &appErr) || appErr.Status >= 500 {
+		slog.Warn("image request failed", "error", err)
 	}
-	httpx.WriteError(w, 500, err.Error())
+	httpx.WriteAppError(w, err)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1015,6 +1016,9 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 // retry: Kitsu's posterImage and AniList's coverImage are static CDN URLs and
 // the caller (renderArtwork) logs and falls through to TMDB/Fanart on a miss.
 func fetchDirectImageBytesCtx(ctx context.Context, httpClient *http.Client, url string) ([]byte, error) {
+	if !allowedDirectArtworkURL(url) {
+		return nil, fmt.Errorf("direct artwork URL not allowed: %s", url)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -1288,4 +1292,25 @@ func badgeSourceString(badges []services.RatingBadge) string {
 		keys[i] = b.Source.Key
 	}
 	return strings.Join(keys, ",")
+}
+
+// directArtworkHosts are the CDNs Kitsu and AniList serve artwork from. The
+// direct-artwork URLs come from those providers' API responses and were
+// fetched as-is; restricting them to https on these domains keeps a bad or
+// compromised upstream response from making the server fetch arbitrary
+// (e.g. internal) URLs. A miss is logged and the render falls back to TMDB.
+var directArtworkHosts = []string{"kitsu.app", "kitsu.io", "anilist.co", "anili.st"}
+
+func allowedDirectArtworkURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, d := range directArtworkHosts {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
 }

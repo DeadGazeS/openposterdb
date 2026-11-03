@@ -63,7 +63,7 @@ func HashRefreshToken(token string) string {
 func ParseJWT(tokenString string, secret []byte) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (any, error) {
 		return secret, nil
-	})
+	}, jwtParseOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func ParseJWT(tokenString string, secret []byte) (*Claims, error) {
 func ParseAPIKeyJWT(tokenString string, secret []byte) (*APIKeyClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &APIKeyClaims{}, func(t *jwt.Token) (any, error) {
 		return secret, nil
-	})
+	}, jwtParseOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -275,4 +275,11 @@ func KeyLoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, apiKey s
 func ClearRefreshCookie(secure bool) *http.Cookie {
 	c := RefreshCookie("", -1, secure)
 	return c
+}
+
+// jwtParseOptions pins the signing method to HS256 (tokens are only ever
+// issued with it) and requires an expiry claim.
+var jwtParseOptions = []jwt.ParserOption{
+	jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+	jwt.WithExpirationRequired(),
 }
