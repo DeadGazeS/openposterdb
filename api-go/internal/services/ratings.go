@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 type RatingSource struct {
@@ -532,25 +533,71 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 	return FetchRatingsResult{Mdblist: mdblistResp, OMDB: omdbResp, Badges: badges}
 }
 
-// FetchRatingsCached fetches ratings and caches the resulting badges in the
-// given in-memory cache (key "tmdbID/mediaType" or "showID/episode/SsEe",
-// matching the Rust ratings_cache). A nil cache bypasses caching. Only the
-// badge list is cached; the auxiliary responses are refetched on a hit but are
-// unused by all current callers.
-func FetchRatingsCachedCtx(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
-	if cache != nil {
-		key := fmt.Sprintf("%d/%s", q.ResolvedTMDbID, q.MediaType)
-		if q.MediaType == "episode" {
-			key = fmt.Sprintf("%d/episode/S%dE%d", q.EpisodeShowTMDbID, q.EpisodeSeason, q.EpisodeEpisode)
-		}
-		if v, ok := cache.Get(key); ok {
-			return v.([]RatingBadge)
-		}
-		result := FetchRatingsCtx(ctx, clients, q)
-		cache.Set(key, result.Badges, int64(len(result.Badges))*100+64)
-		return result.Badges
+// emptyRatingsTTL is how long an empty badge list is cached. Provider errors
+// are swallowed, so "every provider failed" and "no ratings" look the same;
+// a short TTL keeps an upstream outage from pinning badge-less posters for the
+// whole ratings TTL.
+var emptyRatingsTTL = 2 * time.Minute
+
+type emptyRatings struct{ until time.Time }
+
+var ratingsFlight flightGroup[[]RatingBadge]
+
+// ratingsCacheKey is "tmdbID/mediaType" or "showID/episode/SsEe" (matching
+// the Rust ratings_cache). Titles without a TMDB id (IMDb-only targets) are
+// keyed by IMDb id — they all used to share "0/movie".
+func ratingsCacheKey(q RatingsQuery) string {
+	if q.MediaType == "episode" {
+		return fmt.Sprintf("%d/episode/S%dE%d", q.EpisodeShowTMDbID, q.EpisodeSeason, q.EpisodeEpisode)
 	}
-	return FetchRatingsCtx(ctx, clients, q).Badges
+	if q.ResolvedTMDbID == 0 && q.IMDbID != nil && *q.IMDbID != "" {
+		return "imdb:" + *q.IMDbID + "/" + q.MediaType
+	}
+	return fmt.Sprintf("%d/%s", q.ResolvedTMDbID, q.MediaType)
+}
+
+// FetchRatingsCachedCtx fetches ratings and caches the resulting badges in the
+// given in-memory cache (see ratingsCacheKey). A nil cache bypasses caching.
+// Concurrent calls for the same title share one fetch. Only the badge list is
+// cached; the auxiliary responses are unused by all current callers.
+func FetchRatingsCachedCtx(ctx context.Context, cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {
+	if cache == nil {
+		return FetchRatingsCtx(ctx, clients, q).Badges
+	}
+	key := ratingsCacheKey(q)
+	if badges, ok := cachedRatings(cache, key); ok {
+		return badges
+	}
+	badges, _ := ratingsFlight.do(ctx, fmt.Sprintf("%p|%s", cache, key), func(fctx context.Context) ([]RatingBadge, error) {
+		if badges, ok := cachedRatings(cache, key); ok {
+			return badges, nil
+		}
+		badges := FetchRatingsCtx(fctx, clients, q).Badges
+		if len(badges) == 0 {
+			cache.Set(key, emptyRatings{until: time.Now().Add(emptyRatingsTTL)}, 64)
+		} else {
+			cache.Set(key, badges, int64(len(badges))*100+64)
+		}
+		return badges, nil
+	})
+	return badges
+}
+
+func cachedRatings(cache *MemCache, key string) ([]RatingBadge, bool) {
+	v, ok := cache.Get(key)
+	if !ok {
+		return nil, false
+	}
+	switch e := v.(type) {
+	case []RatingBadge:
+		return e, true
+	case emptyRatings:
+		if time.Now().Before(e.until) {
+			return nil, true
+		}
+		cache.Delete(key)
+	}
+	return nil, false
 }
 
 func FetchRatingsCached(cache *MemCache, clients RatingsClients, q RatingsQuery) []RatingBadge {

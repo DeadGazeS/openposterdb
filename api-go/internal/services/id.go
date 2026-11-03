@@ -236,14 +236,19 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 			cache.Delete(key)
 		}
 	}
-	resolved, err := ResolveIDCtx(ctx, idType, idValue, clients)
-	if err == nil {
-		cache.Set(key, resolved, 1)
-	} else if isIDNotFound(err) {
-		cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
-	}
-	return resolved, err
+	// Concurrent misses for the same id share one upstream lookup.
+	return idFlight.do(ctx, fmt.Sprintf("%p|%s", cache, key), func(fctx context.Context) (*ResolvedID, error) {
+		resolved, err := ResolveIDCtx(fctx, idType, idValue, clients)
+		if err == nil {
+			cache.Set(key, resolved, 1)
+		} else if isIDNotFound(err) {
+			cache.Set(key, idMiss{err: err, until: time.Now().Add(idNotFoundTTL)}, 1)
+		}
+		return resolved, err
+	})
 }
+
+var idFlight flightGroup[*ResolvedID]
 
 func isIDNotFound(err error) bool {
 	var appErr *apperr.AppError
