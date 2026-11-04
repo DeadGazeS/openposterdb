@@ -20,7 +20,13 @@ test.describe('dashboard', () => {
     await expect(cards.filter({ hasText: 'Memory Cache Entries' })).toBeVisible()
     await expect(cards.filter({ hasText: 'ID Cache Entries' })).toBeVisible()
     await expect(cards.filter({ hasText: 'Ratings Cache Entries' })).toBeVisible()
-    await expect(cards.filter({ hasText: 'Image Cache (MB)' })).toBeVisible()
+    await expect(cards.filter({ hasText: 'Image Memory Cache (MB)' })).toBeVisible()
+    await expect(cards.filter({ hasText: 'Image Disk Cache (MB)' })).toBeVisible()
+    await expect(cards.filter({ hasText: 'Disk Cache Files' })).toBeVisible()
+    for (const label of ['Database (MB)', 'Uptime', 'Image Requests', 'Memory Cache Hit Rate']) {
+      await expect(cards.filter({ hasText: label })).toBeVisible()
+    }
+    await expect(cards).toHaveCount(12)
   })
 
   test('refresh button fetches new data', async ({ page }) => {

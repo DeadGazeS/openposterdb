@@ -226,7 +226,7 @@ func (r *Router) registerKeyRoutes() {
 func (r *Router) registerAdminRoutes() {
 	s := r.state
 
-	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret())(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Caches)))
+	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret())(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
 
 	// Per-admin-user UI preferences (sidebar disclaimer state etc.).
 	r.mux.Handle("/api/admin/prefs", handlers.RequireAuth(r.jwtSecret())(handlers.HandleUserPrefs(s.DB)))

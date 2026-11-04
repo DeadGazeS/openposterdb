@@ -88,7 +88,9 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 		}
 		var bytes []byte
 		if c := d.Config.Caches; c != nil && c.ImageMem != nil {
-			if v, ok := c.ImageMem.Get(served.CacheKey); ok {
+			// Peek: this request was already counted (and refreshed the LRU)
+			// on the authed image route that redirected here.
+			if v, ok := c.ImageMem.Peek(served.CacheKey); ok {
 				bytes = v.([]byte)
 			}
 		}

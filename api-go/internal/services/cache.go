@@ -1,12 +1,15 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -145,6 +148,7 @@ func TitleFileMatch(cacheValue, idValue string) bool {
 
 // PurgeTitleFiles removes all rendered files for a logical title.
 func PurgeTitleFiles(cacheDir, imageType, idType, idValue string) (int64, error) {
+	defer notePurge()
 	if err := ValidateIDValue(idType); err != nil {
 		return 0, err
 	}
@@ -181,6 +185,7 @@ func PurgeTitleFiles(cacheDir, imageType, idType, idValue string) (int64, error)
 
 // PurgeVariantFile removes a single rendered variant.
 func PurgeVariantFile(cacheDir, imageType, idType, cacheValue, ext string) (int64, error) {
+	defer notePurge()
 	path, err := TypedCachePath(cacheDir, imageType, idType, cacheValue, ext)
 	if err != nil {
 		return 0, err
@@ -197,6 +202,7 @@ func PurgeVariantFile(cacheDir, imageType, idType, cacheValue, ext string) (int6
 const purgePrefix = ".purging."
 
 func StageDirForClear(cacheDir, subdir string) (*string, error) {
+	defer notePurge()
 	dir := filepath.Join(cacheDir, subdir)
 	tmp := filepath.Join(cacheDir, fmt.Sprintf("%s%s.%d", purgePrefix, subdir, time.Now().UnixNano()))
 
@@ -324,4 +330,90 @@ func SweepTempFiles(cacheDir string) int {
 		return nil
 	})
 	return removed
+}
+
+// DiskUsage is the size of the rendered-image disk cache.
+type DiskUsage struct {
+	Bytes int64
+	Files int64
+}
+
+// CacheDiskUsage returns the total size and number of the files under
+// cacheDir (the rendered-image disk cache). A missing directory counts as
+// empty; unreadable entries are skipped. Stops early when ctx is done.
+func CacheDiskUsage(ctx context.Context, cacheDir string) (DiskUsage, error) {
+	var u DiskUsage
+	err := filepath.WalkDir(cacheDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if path == cacheDir && os.IsNotExist(err) {
+				return filepath.SkipAll
+			}
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), purgePrefix) {
+				return filepath.SkipDir // staged by a clear, being deleted
+			}
+			return nil
+		}
+		if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".tmp-") {
+			if info, err := d.Info(); err == nil {
+				u.Bytes += info.Size()
+				u.Files++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return DiskUsage{}, err
+	}
+	return u, nil
+}
+
+// diskUsageReuse is how long CachedDiskUsage reuses a measurement. The
+// dashboard refetches on every window focus; walking a large cache each
+// time is wasted I/O. New renders show up within this window; purges
+// (cachePurgeGen) show up immediately.
+const diskUsageReuse = 30 * time.Second
+
+var (
+	cachePurgeGen atomic.Uint64
+	diskUsageMu   sync.Mutex // held for the walk: concurrent callers share one
+	diskUsageLast struct {
+		dir   string
+		gen   uint64
+		at    time.Time
+		usage DiskUsage
+	}
+)
+
+// notePurge invalidates the reused disk usage after files were removed.
+func notePurge() { cachePurgeGen.Add(1) }
+
+// ResetDiskUsageCache forgets the reused measurement (tests).
+func ResetDiskUsageCache() {
+	diskUsageMu.Lock()
+	diskUsageLast.at = time.Time{}
+	diskUsageMu.Unlock()
+}
+
+// CachedDiskUsage is CacheDiskUsage, reusing a recent measurement of the
+// same dir unless a purge happened since.
+func CachedDiskUsage(ctx context.Context, cacheDir string) (DiskUsage, error) {
+	diskUsageMu.Lock()
+	defer diskUsageMu.Unlock()
+	gen := cachePurgeGen.Load()
+	l := &diskUsageLast
+	if l.dir == cacheDir && l.gen == gen && !l.at.IsZero() && time.Since(l.at) < diskUsageReuse {
+		return l.usage, nil
+	}
+	u, err := CacheDiskUsage(ctx, cacheDir)
+	if err != nil {
+		return DiskUsage{}, err
+	}
+	l.dir, l.gen, l.at, l.usage = cacheDir, gen, time.Now(), u
+	return u, nil
 }

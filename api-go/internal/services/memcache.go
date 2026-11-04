@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +31,10 @@ type MemCache struct {
 	entries         map[string]*memEntry
 	lru             *list.List // front = most recently used
 	totalBytes      int64
+
+	// Lookup counters since process start (dashboard hit rate). Atomic so
+	// reading them never takes the cache lock; Clear leaves them alone.
+	hits, misses atomic.Int64
 }
 
 // NewMemCache creates a cache. ttl is the entry lifetime from insertion;
@@ -77,13 +82,16 @@ func (c *MemCache) get(key string) (any, bool, bool) {
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
 	if !ok {
+		c.misses.Add(1)
 		return nil, false, false
 	}
 	now := time.Now()
 	if c.expired(e, now) {
 		c.remove(e)
+		c.misses.Add(1)
 		return nil, false, false
 	}
+	c.hits.Add(1)
 	e.lastUsed = now
 	c.lru.MoveToFront(e.elem)
 	due := c.revalidateAfter > 0 && now.Sub(e.lastChecked) >= c.revalidateAfter
@@ -218,6 +226,23 @@ func (c *MemCache) Clear() {
 }
 
 // Len returns the number of cached entries.
+// Peek returns a live entry without updating its LRU position or the
+// hit/miss counters (for lookups whose request was already counted).
+func (c *MemCache) Peek(key string) (any, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok || c.expired(e, time.Now()) {
+		return nil, false
+	}
+	return e.value, true
+}
+
+// HitsMisses returns the Get/GetDue hit and miss counts since start.
+func (c *MemCache) HitsMisses() (hits, misses int64) {
+	return c.hits.Load(), c.misses.Load()
+}
+
 func (c *MemCache) Len() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()

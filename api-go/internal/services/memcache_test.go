@@ -230,3 +230,46 @@ func BenchmarkMemCacheSet50k(b *testing.B) {
 		c.Set(strconv.Itoa(i%60_000), i, 1)
 	}
 }
+
+// Hit/miss counters back the dashboard's "Image Requests" and "Memory Cache
+// Hit Rate" tiles; an expired entry counts as a miss, and Clear (a purge)
+// leaves the since-restart counters alone.
+func TestMemCacheHitMissCounters(t *testing.T) {
+	c := NewMemCache(0, 0, time.Hour, 0)
+	c.Set("a", 1, 1)
+	c.Get("a")
+	c.GetDue("a")
+	c.Get("missing")
+	if h, m := c.HitsMisses(); h != 2 || m != 1 {
+		t.Fatalf("hits/misses = %d/%d, want 2/1", h, m)
+	}
+
+	exp := NewMemCache(0, 0, time.Nanosecond, 0)
+	exp.Set("a", 1, 1)
+	time.Sleep(time.Millisecond)
+	exp.Get("a")
+	if h, m := exp.HitsMisses(); h != 0 || m != 1 {
+		t.Fatalf("expired: hits/misses = %d/%d, want 0/1", h, m)
+	}
+
+	c.Clear()
+	if h, m := c.HitsMisses(); h != 2 || m != 1 {
+		t.Fatalf("after Clear: %d/%d, want 2/1", h, m)
+	}
+}
+
+// Peek reads without touching the hit/miss counters (the CDN route, whose
+// request was already counted on the authed image route).
+func TestMemCachePeekDoesNotCount(t *testing.T) {
+	c := NewMemCache(0, 0, time.Hour, 0)
+	c.Set("a", 1, 1)
+	if v, ok := c.Peek("a"); !ok || v != 1 {
+		t.Fatalf("Peek = %v, %v", v, ok)
+	}
+	if _, ok := c.Peek("missing"); ok {
+		t.Fatal("Peek found a missing key")
+	}
+	if h, m := c.HitsMisses(); h != 0 || m != 0 {
+		t.Fatalf("Peek counted: %d/%d", h, m)
+	}
+}
