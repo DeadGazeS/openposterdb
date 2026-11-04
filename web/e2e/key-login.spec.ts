@@ -37,8 +37,8 @@ test.describe('API key login flow', () => {
     await page.fill('#apikey', apiKey)
     await page.click('button[type="submit"]')
 
-    await expect(page).toHaveURL(/\/key-settings/)
-    await expect(page.locator('h1')).toContainText('Image Settings')
+    await expect(page).toHaveURL(/\/individual-image-settings/)
+    await expect(page.getByTestId('page-title')).toContainText('Image Settings')
     await expect(page.locator('text=e2e-test-key')).toBeVisible()
   })
 
@@ -86,11 +86,11 @@ test.describe('API key login flow', () => {
     await page.click('text=Sign in with API key instead')
     await page.fill('#apikey', apiKey)
     await page.click('button[type="submit"]')
-    await expect(page).toHaveURL(/\/key-settings/)
+    await expect(page).toHaveURL(/\/individual-image-settings/)
 
     // Try to navigate to admin area
     await page.goto('/admin')
-    await expect(page).toHaveURL(/\/key-settings/)
+    await expect(page).toHaveURL(/\/individual-image-settings/)
   })
 
   test('logout from key-settings redirects to login', async ({ page, request }) => {
@@ -100,7 +100,7 @@ test.describe('API key login flow', () => {
     await page.click('text=Sign in with API key instead')
     await page.fill('#apikey', apiKey)
     await page.click('button[type="submit"]')
-    await expect(page).toHaveURL(/\/key-settings/)
+    await expect(page).toHaveURL(/\/individual-image-settings/)
 
     await page.click('button:has-text("Logout")')
     await expect(page).toHaveURL(/\/login/)

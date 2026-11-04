@@ -24,7 +24,7 @@ useIdleLogout()
       <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4 pr-6">
         <SidebarTrigger class="-ml-1" />
         <Separator orientation="vertical" class="mr-2 !h-4" />
-        <span class="text-sm font-medium">{{ route.meta.title || route.name }}</span>
+        <span class="text-sm font-medium" data-testid="page-title">{{ route.meta.title || route.name }}</span>
         <Button v-if="auth.disablePublicPages" as-child variant="outline" size="sm" class="ml-auto">
           <router-link to="/docs">
             <BookOpen class="h-4 w-4" />

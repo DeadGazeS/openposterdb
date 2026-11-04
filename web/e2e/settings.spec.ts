@@ -24,22 +24,22 @@ test.describe('settings', () => {
 
     // Navigate to the Settings group (expand the sidebar collapsible)
     await page.click('text=Settings')
-    await page.getByRole('link', { name: 'General', exact: true }).click()
-    await expect(page).toHaveURL(/\/admin\/settings\/general/)
+    await page.getByRole('link', { name: 'API', exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/settings\/api/)
   })
 
   /** The settings form lives on the Image section. */
   async function goToImage(page: Page) {
-    await page.getByRole('link', { name: 'Image', exact: true }).click()
+    await page.getByRole('link', { name: 'Global Image Settings', exact: true }).click()
     await expect(page).toHaveURL(/\/admin\/settings\/image/)
   }
 
   test('settings page loads with heading', async ({ page }) => {
-    await expect(page.locator('h1')).toContainText('General')
+    await expect(page.getByTestId('page-title')).toContainText('API')
 
     // The Image section holds the actual settings form.
     await goToImage(page)
-    await expect(page.locator('h1')).toContainText('Image')
+    await expect(page.getByTestId('page-title')).toContainText('Image')
     await expect(page.locator('text=Global Image Settings')).toBeVisible()
   })
 
@@ -81,7 +81,7 @@ test.describe('settings', () => {
 
     // Reload page
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Image')
+    await expect(page.getByTestId('page-title')).toContainText('Image')
 
     // Fanart and textless should be checked
     await expect(page.getByTestId('fanart-checkbox')).toBeChecked()
@@ -139,7 +139,7 @@ test.describe('settings', () => {
 
     // Reload
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Image')
+    await expect(page.getByTestId('page-title')).toContainText('Image')
     await page.getByTestId('form-tab-poster').click()
 
     // The layout should be preserved
@@ -171,7 +171,7 @@ test.describe('settings', () => {
     expect(captured.payload?.ratings_exclude).toBe('rt')
 
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Image')
+    await expect(page.getByTestId('page-title')).toContainText('Image')
     await page.getByTestId('form-tab-ratings').click()
 
     // Exclusion should be preserved across reload
@@ -183,10 +183,10 @@ test.describe('settings', () => {
     await page.click('text=Dashboard')
     await expect(page).toHaveURL(/\/admin$/)
 
-    // Navigate back via sidebar (expand the Settings group, then pick General)
+    // Navigate back via sidebar (expand the Settings group, then pick API)
     await page.click('text=Settings')
-    await page.getByRole('link', { name: 'General', exact: true }).click()
-    await expect(page).toHaveURL(/\/admin\/settings\/general/)
+    await page.getByRole('link', { name: 'API', exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/settings\/api/)
   })
 
   test('preview section is visible', async ({ page }) => {
@@ -243,7 +243,7 @@ test.describe('settings', () => {
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Image')
+    await expect(page.getByTestId('page-title')).toContainText('Image')
     await page.getByTestId('form-tab-poster').click()
 
     await expect(page.getByTestId('poster-label-style-select')).toContainText('Text')

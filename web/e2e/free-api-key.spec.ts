@@ -59,8 +59,8 @@ async function loginAndGoToSettings(page: Page, request: APIRequestContext) {
   await expect(page).toHaveURL(/\/admin/)
 
   await page.click('text=Settings')
-  await page.click('text=General')
-  await expect(page).toHaveURL(/\/admin\/settings\/general/)
+  await page.getByRole('link', { name: 'API', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/settings\/api/)
 }
 
 test.describe('free API key', () => {
@@ -102,7 +102,7 @@ test.describe('free API key', () => {
 
     // UI state has settled — reload and verify the flag persisted.
     await page.reload()
-    await expect(page.locator('h1')).toContainText('General')
+    await expect(page.getByTestId('page-title')).toContainText('API')
     await expect(page.locator('button[role="switch"]')).toHaveAttribute('aria-checked', 'true')
   })
 

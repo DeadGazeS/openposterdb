@@ -31,8 +31,10 @@ test.describe('admin endpoints require authentication', () => {
     expect(res.status()).toBe(401)
   })
 
-  test('POST /api/auth/logout returns 401 without auth', async ({ request }) => {
+  // Logout is idempotent: without a session there is nothing to revoke, and
+  // the refresh cookie is cleared either way.
+  test('POST /api/auth/logout succeeds without auth (nothing to revoke)', async ({ request }) => {
     const res = await request.post('/api/auth/logout')
-    expect(res.status()).toBe(401)
+    expect(res.status()).toBe(200)
   })
 })

@@ -33,7 +33,7 @@ test.describe('key settings (self-service)', () => {
     await page.click('text=Sign in with API key instead')
     await page.fill('#apikey', apiKey)
     await page.click('button[type="submit"]')
-    await expect(page).toHaveURL(/\/key-settings/)
+    await expect(page).toHaveURL(/\/individual-image-settings/)
 
     return apiKey
   }
@@ -45,7 +45,7 @@ test.describe('key settings (self-service)', () => {
 
     await loginWithApiKey(page, request)
 
-    await expect(page.locator('h1')).toContainText('Image Settings')
+    await expect(page.getByTestId('page-title')).toContainText('Image Settings')
     await expect(page.locator('text=settings-test-key')).toBeVisible()
 
     // Settings form should be present with fanart checkbox
@@ -81,7 +81,7 @@ test.describe('key settings (self-service)', () => {
 
     // Reload
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Image Settings')
+    await expect(page.getByTestId('page-title')).toContainText('Image Settings')
 
     // Settings should persist
     await expect(page.getByTestId('fanart-checkbox')).toBeChecked()
@@ -175,7 +175,7 @@ test.describe('key settings (self-service)', () => {
 
     // Reload and verify persistence
     await page.reload()
-    await expect(page.locator('h1')).toContainText('Image Settings')
+    await expect(page.getByTestId('page-title')).toContainText('Image Settings')
     await page.getByTestId('form-tab-poster').click()
 
     await expect(page.getByTestId('poster-label-style-select')).toContainText('Text')
