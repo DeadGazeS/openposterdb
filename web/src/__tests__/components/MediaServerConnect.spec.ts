@@ -97,4 +97,14 @@ describe('MediaServerConnect', () => {
       `${window.location.origin}/${RAW_KEY}/imdb/poster-default/{imdb_id}.jpg`,
     )
   })
+
+  // The Plex provider is an external hosted service: the UI must say that the
+  // API key in those URLs is shared with it.
+  it('discloses that the Plex URLs send the API key to an external service', () => {
+    const wrapper = mountConnect()
+    const notice = wrapper.find('[data-testid="plex-third-party-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('plex.openposterdb.com')
+    expect(notice.text()).toContain('API key')
+  })
 })

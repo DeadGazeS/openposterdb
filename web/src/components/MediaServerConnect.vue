@@ -166,7 +166,11 @@ const plexExampleUrl = computed(() => `${PLEX_BASE}/${effectiveKey.value}/movie~
     <div class="space-y-2">
       <h5 class="font-semibold">Plex</h5>
       <p class="text-xs text-muted-foreground">
-        Hosted Custom Metadata Provider (PMS 1.43+) at Plex's own fixed domain — <strong>not</strong> your instance's base URL above.
+        Hosted Custom Metadata Provider (PMS 1.43+) at a fixed domain — <strong>not</strong> your instance's base URL above.
+      </p>
+      <p class="text-xs text-muted-foreground" data-testid="plex-third-party-notice">
+        <strong>Note:</strong> these URLs point to <code>plex.openposterdb.com</code>, a hosted service outside your
+        own instance. Your API key is part of the URL, so using it shares the key with that service.
       </p>
       <Table>
         <TableHeader>
