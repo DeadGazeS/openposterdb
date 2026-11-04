@@ -225,7 +225,6 @@ func (c *MemCache) Clear() {
 	c.totalBytes = 0
 }
 
-// Len returns the number of cached entries.
 // Peek returns a live entry without updating its LRU position or the
 // hit/miss counters (for lookups whose request was already counted).
 func (c *MemCache) Peek(key string) (any, bool) {
@@ -243,6 +242,7 @@ func (c *MemCache) HitsMisses() (hits, misses int64) {
 	return c.hits.Load(), c.misses.Load()
 }
 
+// Len returns the number of cached entries.
 func (c *MemCache) Len() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()

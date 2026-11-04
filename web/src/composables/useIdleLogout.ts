@@ -29,15 +29,20 @@ export function useIdleLogout() {
     }
   }
 
-  const events = ['click', 'keydown', 'touchstart'] as const
+  // Scrolling, the wheel and pointer movement count too: an admin reading a
+  // long list used to be logged out after three minutes. Capture phase, since
+  // scroll events on inner containers don't bubble to window. The handler
+  // only stores a timestamp, so frequent events cost next to nothing.
+  const events = ['click', 'keydown', 'touchstart', 'scroll', 'wheel', 'pointermove'] as const
+  const opts = { passive: true, capture: true }
 
   onMounted(() => {
-    for (const e of events) window.addEventListener(e, onActivity, { passive: true })
+    for (const e of events) window.addEventListener(e, onActivity, opts)
     interval = setInterval(checkIdle, CHECK_INTERVAL_MS)
   })
 
   onBeforeUnmount(() => {
-    for (const e of events) window.removeEventListener(e, onActivity)
+    for (const e of events) window.removeEventListener(e, onActivity, opts)
     if (interval) clearInterval(interval)
   })
 }

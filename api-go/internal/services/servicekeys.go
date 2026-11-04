@@ -650,6 +650,14 @@ func ValidateServiceKeyCtx(ctx context.Context, service, key string, httpClient 
 	if len(key) < 6 {
 		return fmt.Errorf("key is too short (%d chars)", len(key))
 	}
+	// Provider keys are tokens of letters, digits and - _ . ; anything else
+	// (spaces, control characters, URL syntax) is a paste error — and used
+	// to make the check request fail to build, which counted as "valid".
+	for _, r := range key {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return fmt.Errorf("key contains an invalid character (%q)", r)
+		}
+	}
 
 	switch service {
 	case "tmdb":
@@ -676,7 +684,7 @@ func ValidateServiceKey(service, key string, httpClient *http.Client) error {
 func checkProviderURLCtx(ctx context.Context, httpClient *http.Client, url, service string) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil
+		return fmt.Errorf("invalid key: %w", apperr.RedactURLSecrets(err))
 	}
 	req.Header.Set("User-Agent", UserAgent())
 	resp, err := httpClient.Do(req)
@@ -685,7 +693,7 @@ func checkProviderURLCtx(ctx context.Context, httpClient *http.Client, url, serv
 		return nil
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("invalid key (HTTP %d)", resp.StatusCode)
@@ -711,7 +719,7 @@ func checkTraktClientIDCtx(ctx context.Context, httpClient *http.Client, clientI
 		return nil
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("invalid Client ID (HTTP %d)", resp.StatusCode)

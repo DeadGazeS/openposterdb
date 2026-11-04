@@ -1,4 +1,4 @@
-.PHONY: build up down restart logs clean shell env pull
+.PHONY: build up up-fast down restart rebuild nuke logs clean shell env pull
 
 COMPOSE := docker compose
 FILES  := -f docker-compose.yml -f docker-compose.local.yml

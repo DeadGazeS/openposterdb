@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -27,9 +27,21 @@ function setSlot(side: 'top' | 'right' | 'bottom' | 'left', slot: SideSlot) {
   model.value = { ...model.value, [side]: slot }
 }
 
+// Unique per instance: several editors are mounted at once (one per kind
+// tab, plus per-key forms), and shared ids made labels focus another
+// editor's input.
+const uid = useId()
+
+// Counts are int fields server-side: an emptied box ('') or a stray value
+// used to be sent as-is and fail the whole save with a 400.
+function toCount(value: number | string): number {
+  const n = Math.round(Number(value))
+  return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : 0
+}
+
 function setField(side: 'top' | 'right' | 'bottom' | 'left', field: 'per_row' | 'rows' | 'start', value: number | string) {
   const cur = { ...model.value[side] }
-  ;(cur as Record<string, unknown>)[field] = value
+  ;(cur as Record<string, unknown>)[field] = field === 'start' ? value : toCount(value)
   setSlot(side, cur)
 }
 
@@ -70,9 +82,9 @@ function sideLabel(side: string): string {
           <p class="text-xs font-semibold">{{ sideLabel(side) }}</p>
           <div class="space-y-1.5">
             <div class="flex items-center justify-between gap-2">
-              <Label :for="`${side}-per-row`" class="text-xs text-muted-foreground">Badges per row</Label>
+              <Label :for="`${uid}-${side}-per-row`" class="text-xs text-muted-foreground">Badges per row</Label>
               <Input
-                :id="`${side}-per-row`"
+                :id="`${uid}-${side}-per-row`"
                 :model-value="slotValue(side).per_row"
                 type="number"
                 min="0"
@@ -83,9 +95,9 @@ function sideLabel(side: string): string {
               />
             </div>
             <div class="flex items-center justify-between gap-2">
-              <Label :for="`${side}-rows`" class="text-xs text-muted-foreground">Rows</Label>
+              <Label :for="`${uid}-${side}-rows`" class="text-xs text-muted-foreground">Rows</Label>
               <Input
-                :id="`${side}-rows`"
+                :id="`${uid}-${side}-rows`"
                 :model-value="slotValue(side).rows"
                 type="number"
                 min="0"
@@ -97,12 +109,12 @@ function sideLabel(side: string): string {
             </div>
           </div>
           <div class="space-y-1">
-            <Label :for="`${side}-start`" class="text-xs">{{ startLabel(side) }}</Label>
+            <Label :for="`${uid}-${side}-start`" class="text-xs">{{ startLabel(side) }}</Label>
             <Select
               :model-value="slotValue(side).start"
               @update:model-value="(v) => setField(side, 'start', String(v))"
             >
-              <SelectTrigger :id="`${side}-start`" size="sm" class="w-full" :data-testid="`${testPrefix}-${side}-start`">
+              <SelectTrigger :id="`${uid}-${side}-start`" size="sm" class="w-full" :data-testid="`${testPrefix}-${side}-start`">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

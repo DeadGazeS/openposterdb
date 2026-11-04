@@ -250,6 +250,9 @@ describe('SettingsView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Invalid language')
+    // A failed save keeps the edits (it used to revert every unsaved change
+    // across all tabs) so the user can fix the problem and save again.
+    expect((wrapper.find('[data-testid="fanart-checkbox"]').element as HTMLInputElement).checked).toBe(true)
     vi.useRealTimers()
   })
 
@@ -519,6 +522,48 @@ describe('SettingsView', () => {
 
     expect((slider.element as HTMLInputElement).value).toBe('120')
     expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(false)
+  })
+
+  // A failed save used to leave "saving" set forever (every later save was
+  // skipped), and a key added while another service saved was dropped when
+  // the refetch re-seeded the chips.
+  it('source API keys: a failed save does not block later saves; queued saves are kept', async () => {
+    const empty = { locked: false, has_key: false, masked: null }
+    mockAdminApi.getServiceKeys.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ tmdb: empty, mdblist: empty, fanart: empty, trakt: empty, omdb: empty }),
+    })
+    mockRoute.query = { tab: 'source-api-keys' }
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      $: { setupState: { serviceKeyDraft: Record<string, string>; commitServiceKeyDraft: (s: string) => void } }
+    }
+    const st = vm.$.setupState
+
+    mockAdminApi.updateServiceKeys.mockRejectedValueOnce(new Error('network down'))
+    st.serviceKeyDraft.tmdb = 'tmdbkey000001'
+    st.commitServiceKeyDraft('tmdb')
+    await flushPromises()
+
+    let release!: () => void
+    mockAdminApi.updateServiceKeys.mockImplementationOnce(
+      () => new Promise((r) => { release = () => r({ ok: true, json: () => Promise.resolve({}) }) }),
+    )
+    mockAdminApi.updateServiceKeys.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
+    st.serviceKeyDraft.tmdb = 'tmdbkey000002'
+    st.commitServiceKeyDraft('tmdb')
+    await flushPromises()
+    st.serviceKeyDraft.omdb = 'omdbkey000001'
+    st.commitServiceKeyDraft('omdb')
+    await flushPromises()
+    release()
+    await flushPromises()
+    await flushPromises()
+
+    const calls = mockAdminApi.updateServiceKeys.mock.calls.map((c) => c[0])
+    expect(calls).toContainEqual({ tmdb: 'tmdbkey000001,tmdbkey000002' })
+    expect(calls).toContainEqual({ omdb: 'omdbkey000001' })
   })
 
   // Source API keys arrive only as {id, masked}: the plaintext is fetched per

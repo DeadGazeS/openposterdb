@@ -137,3 +137,45 @@ func TestFreeKeyEnabled(t *testing.T) {
 		t.Error("expected FreeKeyEnabled to be true")
 	}
 }
+
+// Near-catch-all ranges trust (almost) everyone, just like /0.
+func TestParseTrustedProxies_RejectsHugeRanges(t *testing.T) {
+	for _, v := range []string{"0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/4", "::/0", "::/3"} {
+		if _, err := ParseTrustedProxies(v); err == nil {
+			t.Errorf("%s accepted", v)
+		}
+	}
+	for _, v := range []string{"10.0.0.0/8", "172.16.0.0/12", "fc00::/7", "203.0.113.7", "2001:db8::/32"} {
+		if _, err := ParseTrustedProxies(v); err != nil {
+			t.Errorf("%s rejected: %v", v, err)
+		}
+	}
+}
+
+// A bad TRUSTED_PROXIES set only in the dotenv file (bare-metal runs) used
+// to skip the startup check: it was validated before that file was loaded.
+func TestFromEnv_ValidatesTrustedProxiesFromDotEnv(t *testing.T) {
+	unsetEnv(t, "TRUSTED_PROXIES")
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/.env", []byte("TRUSTED_PROXIES=not-an-ip\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("invalid TRUSTED_PROXIES from the dotenv file accepted")
+	}
+}
+
+// IMAGE_QUALITY is a JPEG quality: values outside 1-100 are clamped.
+func TestFromEnv_ImageQualityClamped(t *testing.T) {
+	for in, want := range map[string]uint8{"0": 1, "250": 100, "70": 70} {
+		setEnv(t, "IMAGE_QUALITY", in)
+		cfg, err := FromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ImageQuality != want {
+			t.Errorf("IMAGE_QUALITY=%s: got %d, want %d", in, cfg.ImageQuality, want)
+		}
+	}
+}

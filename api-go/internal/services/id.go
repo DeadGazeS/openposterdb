@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -333,7 +334,7 @@ func resolveIMDBCtx(ctx context.Context, imdbID string, tmdb *TmdbClient) (*Reso
 	}
 
 	var result findResult
-	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", imdbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, "/find/"+neturl.PathEscape(imdbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
@@ -463,7 +464,7 @@ func resolveTVDBCtx(ctx context.Context, tvdbIDVal string, tmdb *TmdbClient) (*R
 	}
 
 	var result findResult
-	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", tvdbIDVal), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, "/find/"+neturl.PathEscape(tvdbIDVal), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
@@ -484,7 +485,9 @@ func resolveTVDBCtx(ctx context.Context, tvdbIDVal string, tmdb *TmdbClient) (*R
 			FirstAir   *string `json:"first_air_date"`
 			Name       *string `json:"name"`
 		}
-		tmdb.GetCtx(ctx, fmt.Sprintf("/tv/%d", tv.ID), map[string]string{"append_to_response": "external_ids"}, &details)
+		if err := tmdb.GetCtx(ctx, fmt.Sprintf("/tv/%d", tv.ID), map[string]string{"append_to_response": "external_ids"}, &details); err != nil {
+			return nil, err // not cached; a partial result would be
+		}
 
 		var imdb *string
 		if details.ExternalIDs != nil && details.ExternalIDs.IMDbID != nil {
@@ -510,7 +513,9 @@ func resolveTVDBCtx(ctx context.Context, tvdbIDVal string, tmdb *TmdbClient) (*R
 			ReleaseDate *string `json:"release_date"`
 			Title       *string `json:"title"`
 		}
-		tmdb.GetCtx(ctx, fmt.Sprintf("/movie/%d", movie.ID), nil, &details)
+		if err := tmdb.GetCtx(ctx, fmt.Sprintf("/movie/%d", movie.ID), nil, &details); err != nil {
+			return nil, err // not cached; a partial result would be
+		}
 
 		return &ResolvedID{
 			IMDbID:      details.IMDbID,
@@ -594,7 +599,7 @@ func resolveIMDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbC
 	}
 
 	var result findResult
-	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", seriesIMDbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, "/find/"+neturl.PathEscape(seriesIMDbID), map[string]string{"external_source": "imdb_id"}, &result); err != nil {
 		return nil, err
 	}
 
@@ -638,7 +643,7 @@ func resolveTVDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbC
 	}
 
 	var result findResult
-	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/find/%s", seriesTVDBID), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
+	if err := tmdb.GetCtx(ctx, "/find/"+neturl.PathEscape(seriesTVDBID), map[string]string{"external_source": "tvdb_id"}, &result); err != nil {
 		return nil, err
 	}
 

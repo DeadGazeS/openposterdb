@@ -89,6 +89,26 @@ func FindAPIKeyByHashCachedCtx(ctx context.Context, db *sql.DB, keyHash string) 
 	return copyAPIKey(k), nil
 }
 
+// APIKeyExistsCachedCtx reports whether the key with this id still exists,
+// through the same cache (shared map; "id:" keys can't collide with hex
+// hashes). Deleting a key bumps the generation, so it is seen immediately.
+func APIKeyExistsCachedCtx(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	c := settingsCacheFor(db)
+	gen := c.gen.Load()
+	ck := "id:" + strconv.FormatInt(id, 10)
+	if v, ok := c.keys.Get(ck); ok {
+		if e := v.(keyEntry); e.gen == gen {
+			return e.key != nil, nil
+		}
+	}
+	k, err := FindAPIKeyByIDCtx(ctx, db, id)
+	if err != nil {
+		return false, err
+	}
+	c.keys.Set(ck, keyEntry{key: k, gen: gen}, 1)
+	return k != nil, nil
+}
+
 func copyAPIKey(k *APIKey) *APIKey {
 	if k == nil {
 		return nil

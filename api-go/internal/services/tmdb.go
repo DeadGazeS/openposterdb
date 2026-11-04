@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -35,11 +36,12 @@ func NewTmdbClient(apiKey string, httpClient *http.Client) *TmdbClient {
 }
 
 func (c *TmdbClient) GetCtx(ctx context.Context, path string, params map[string]string, target any) error {
-	var url strings.Builder
-	url.WriteString(fmt.Sprintf("https://api.themoviedb.org/3%s?api_key=%s", path, c.APIKey))
+	q := neturl.Values{"api_key": {c.APIKey}}
 	for k, v := range params {
-		url.WriteString(fmt.Sprintf("&%s=%s", k, v))
+		q.Set(k, v) // escaped: a value can't add parameters
 	}
+	var url strings.Builder
+	url.WriteString("https://api.themoviedb.org/3" + path + "?" + q.Encode())
 
 	start := time.Now()
 	resp, err := httpGetCtx(ctx, c.HTTP, &TMDBAPIRetry, url.String())
@@ -49,12 +51,16 @@ func (c *TmdbClient) GetCtx(ctx context.Context, path string, params map[string]
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		// Unknown/deleted id: a not-found (cached briefly by the ID
+		// resolver), not a server error retried on every request.
+		return errors.NewIDNotFound(fmt.Sprintf("TMDB: %s not found", path))
+	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return errors.NewOther(fmt.Sprintf("TMDB API returned %d: %s", resp.StatusCode, string(body)))
+		return errors.NewOther(fmt.Sprintf("TMDB API returned %d: %s", resp.StatusCode, upstreamErrorSnippet(resp.Body)))
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxUpstreamJSON)).Decode(target); err != nil {
 		return errors.NewAPIError(err)
 	}
 	return nil

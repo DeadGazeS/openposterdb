@@ -4,13 +4,14 @@ OpenPosterDB is configured entirely through environment variables. When using Do
 
 ## API keys
 
-At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), and **one ratings source**. MDBList is recommended because a single key covers all nine rating sources.
+The server needs two secrets to start: **`JWT_SECRET`** and **`SECRETS_KEY`** (`make env` generates both). For useful output you also want a **TMDB key** (artwork) and **one ratings source**; MDBList is recommended because a single key covers all nine rating sources. Provider keys can also be entered in the admin UI (Settings → Source API Keys) instead of here.
 
 | Variable | Default | Description |
 |---|---|---|
 | `TMDB_API_KEY` | — | [TMDB](https://www.themoviedb.org/settings/api) API v3 key. Recommended for artwork; without it, posters/badges/logos/etc. fall back to Fanart.tv or MDBList image sources and some rating fetches are skipped |
-| `JWT_SECRET` | *required* | 32-byte hex string (`openssl rand -hex 32`) |
-| `MDBLIST_API_KEY` | — | [MDBList](https://mdblist.com/preferences/) key — preferred, covers all 9 rating sources (IMDb, RT Critics, RT Audience, Metacritic, Trakt, Letterboxd, MAL, MDBList score, Roger Ebert) |
+| `JWT_SECRET` | *required* | 32-byte hex string (`openssl rand -hex 32`); signs login sessions |
+| `SECRETS_KEY` | *required* | 32-byte hex string (`openssl rand -hex 32`); encrypts the stored API keys and provider keys. Keep it stable and back it up — changing it makes the stored keys unreadable (keys then have to be re-entered / regenerated) |
+| `MDBLIST_API_KEY` | — | [MDBList](https://mdblist.com/preferences/) key (or a comma-separated list of keys, used in turn) — preferred, covers all 9 rating sources (IMDb, RT Critics, RT Audience, Metacritic, Trakt, Letterboxd, MAL, MDBList score, Roger Ebert) |
 | `OMDB_API_KEY` | — | [OMDb](https://www.omdbapi.com/apikey.aspx) key (IMDb, RT Critics, Metacritic only). Also required for IMDB episode ratings |
 | `TRAKT_CLIENT_ID` | — | [Trakt](https://trakt.tv/oauth/applications) Client ID — Trakt community ratings for movies, shows, and episodes |
 | `FANART_API_KEY` | — | [Fanart.tv](https://fanart.tv/get-an-api-key/) key — enables Fanart.tv as an alternative or preferred image source for posters, logos, and backdrops |
@@ -22,7 +23,7 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 | `LISTEN_ADDR` | `0.0.0.0:3000` | Server bind address |
 | `CACHE_DIR` | `./cache` | Poster and metadata cache directory |
 | `DB_DIR` | `./db` | SQLite database directory |
-| `IMAGE_QUALITY` | `85` | JPEG output quality (1-100) |
+| `IMAGE_QUALITY` | `85` | JPEG output quality (1-100; values outside are clamped) |
 | `IMAGE_MEM_CACHE_MB` | `512` | In-memory cache size in MB |
 | `STATIC_DIR` | — | Directory of the built web UI (SPA) to serve; empty disables static serving |
 
@@ -51,10 +52,10 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 
 | Variable | Default | Description |
 |---|---|---|
-| `RATE_LIMIT_RPM` | `60` | Per-key requests-per-minute cap on the admin routes (all `/api/admin/*` + per-key `/api/key/me/*`). |
-| `RATE_LIMIT_CDN_RPM` | `240` | Per-key requests-per-minute cap on the CDN redirect endpoint (`/c/...`). Higher default than the admin cap because the CDN edge retries on transient failures. |
+| `RATE_LIMIT_RPM` | `60` | Per-IP requests-per-minute cap on the public image routes (`/{api_key}/...`, including the free key). `0` disables it. |
+| `RATE_LIMIT_CDN_RPM` | `240` | Per-IP requests-per-minute cap on the CDN endpoint (`/c/...`). Higher default because a CDN fetches from few IPs and retries on transient failures. `0` disables it. |
 | `RATE_LIMIT_AUTH_RPM` | `10` | Per-IP requests-per-minute cap on the credential endpoints (`/api/auth/login`, `/api/auth/setup`, `/api/auth/key-login`). `0` disables it. |
-| `TRUSTED_PROXIES` | `private` | Which peers may set `X-Forwarded-For` (used to key the per-IP rate limits). Usually set in the admin UI instead: **Settings → General → Config** (reverse proxy on this host, Cloudflare, other IPs/ranges, plus a readout of how the server sees your IP). When this variable is set it overrides the UI, which then shows it read-only. Syntax: `private` = loopback and private ranges; `none` = always use the connection address; `cloudflare` = Cloudflare's edge ranges; or a comma list of IPs/CIDRs and these keywords. If port 3000 is published directly to the internet, use `none` (with Docker Desktop or the userland proxy, outside clients can appear to come from a private address). Behind Cloudflare and a reverse proxy on the same host, use `private,cloudflare`. The Cloudflare ranges are built in; ticking Cloudflare in the UI checks cloudflare.com for a newer list (at most once a day; retried after 10 minutes if it fails) and applies and stores it automatically. |
+| `TRUSTED_PROXIES` | `private` | Which peers may set `X-Forwarded-For` (used to key the per-IP rate limits). Usually set in the admin UI instead: **Settings → General → Config** (reverse proxy on this host, Cloudflare, other IPs/ranges, plus a readout of how the server sees your IP). When this variable is set it overrides the UI, which then shows it read-only. Syntax: `private` = loopback and private ranges; `none` = always use the connection address; `cloudflare` = Cloudflare's edge ranges; or a comma list of IPs/CIDRs and these keywords. If port 3000 is published directly to the internet, use `none` (with Docker Desktop or the userland proxy, outside clients can appear to come from a private address). Behind Cloudflare and a reverse proxy on the same host, use `private,cloudflare`. The Cloudflare ranges are built in; ticking Cloudflare in the UI checks cloudflare.com for a newer list (at most once a day; retried after 10 minutes if it fails) and applies and stores it automatically. Ranges wider than /8 (IPv4) or /7 (IPv6) are rejected. Note: Cloudflare Workers (anyone's) also connect from Cloudflare's ranges and can set their own `X-Forwarded-For`, so with `cloudflare` trusted a Worker can pick which rate-limit bucket it lands in; this only affects rate limiting, never authentication. |
 
 ## Logging
 

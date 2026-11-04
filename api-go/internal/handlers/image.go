@@ -15,7 +15,11 @@ import (
 	"openposterdb/internal/services"
 )
 
-const freeAPIKey = "t0-free-rpdb"
+// FreeAPIKey is the public key (enabled in Settings); the router needs it to
+// route its URLs to the API when the SPA is served.
+const FreeAPIKey = "t0-free-rpdb"
+
+const freeAPIKey = FreeAPIKey
 
 func marshalLayoutResponse(l services.ImageLayout) string {
 	s, err := services.MarshalLayout(&l)
@@ -52,6 +56,8 @@ type ImageDeps struct {
 	AniList         *services.AniListClient
 	KitsuIMDbMapper *services.KitsuIMDbMapper
 	CDNHashes       *services.HashRegistry
+	// LastUsed records which keys serve images (admin "last used"); nil-safe.
+	LastUsed KeyRecorder
 }
 
 // HandleImage serves the public image endpoints. deps is a per-request
@@ -144,6 +150,7 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 				httpx.WriteError(w, 401, "invalid api key")
 				return
 			}
+			recordKey(d.LastUsed, k.ID)
 			s := services.EffectiveRenderSettingsCachedCtx(r.Context(), d.DB, k.ID)
 			settings = &s
 		}

@@ -298,8 +298,10 @@ async function confirmClearAll() {
     const n = body.meta_deleted ?? 0
     clearAllMessage.value = `Cleared ${n} cached ${n === 1 ? kindLabel.value : kindLabelPlural.value}.`
     clearAllOpen.value = false
-    page.value = 1
-    refetch()
+    // Changing the page changes the query key, which fetches page 1 by
+    // itself; refetch() right after re-fetched the old page first.
+    if (page.value !== 1) page.value = 1
+    else refetch()
   } catch (e) {
     clearAllError.value = e instanceof Error ? e.message : 'Clear failed'
   } finally {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -621,5 +622,19 @@ func TestApplyImport_FailureRollsBack(t *testing.T) {
 	}
 	if k, _ := FindAPIKeyByNameCtx(ctx, db, "fresh"); k != nil {
 		t.Fatal("api key from the failed import was kept")
+	}
+}
+
+// kdf_iterations comes from the uploaded file: an absurd value used to pin a
+// CPU core for as long as the file asked.
+func TestDecryptPayload_RejectsExcessiveIterations(t *testing.T) {
+	enc := &EncryptedExport{Kind: "openposterdb/settings-encrypted", KDF: "pbkdf2-sha256",
+		KDFIterations: maxPBKDF2Iterations + 1, Salt: "AAAAAAAAAAAAAAAAAAAAAA==", Ciphertext: "AAAA"}
+	start := time.Now()
+	if _, err := DecryptPayload(enc, "pass"); err == nil {
+		t.Fatal("excessive kdf_iterations accepted")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("rejection must happen before key derivation")
 	}
 }

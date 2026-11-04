@@ -149,10 +149,6 @@ var Migrations = []Migration{
 		ExpectedError: "no such index",
 	},
 	{
-		SQL:           "CREATE INDEX IF NOT EXISTS idx_image_meta_type_created ON image_meta(image_type, created_at DESC)",
-		ExpectedError: "already exists",
-	},
-	{
 		SQL:           "ALTER TABLE api_key_settings RENAME COLUMN poster_source TO image_source",
 		ExpectedError: "no such column",
 	},

@@ -60,7 +60,7 @@ func newCDNFlowDeps(t *testing.T) (ImageDeps, string) {
 			Inflight:           appimg.NewInflightSet(),
 		},
 		TMDB:      services.NewTmdbClient("test-key", &http.Client{Transport: cdnTmdbStub{}}),
-		CDNHashes: services.NewHashRegistry(0),
+		CDNHashes: services.NewHashRegistry(),
 	}, raw
 }
 

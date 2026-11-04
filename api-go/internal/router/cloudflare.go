@@ -42,8 +42,11 @@ type cfUpdater struct {
 	client *http.Client
 	now    func() time.Time
 
-	// mu is held for a whole check, so concurrent callers wait for the
-	// running fetch and then see its result through the cooldown.
+	// checkMu is held for a whole check, so concurrent checks wait for the
+	// running fetch and then see its result through the cooldown. mu guards
+	// the fields below and is never held across the fetch, so status (the
+	// settings GET) doesn't wait for a check.
+	checkMu     sync.Mutex
 	mu          sync.Mutex
 	lastSuccess time.Time
 	lastAttempt time.Time
@@ -110,33 +113,40 @@ func (u *cfUpdater) statusLocked() cfStatus {
 }
 
 // check fetches the published ranges unless a check ran recently, and
-// applies + persists them when they differ from the current list.
+// applies + persists them when they differ from the current list. The fetch
+// is detached from ctx's cancellation (bounded by cfFetchTimeout): closing
+// the settings tab mid-check must not turn it into a failure + backoff.
 func (u *cfUpdater) check(ctx context.Context) cfCheckResult {
+	u.checkMu.Lock()
+	defer u.checkMu.Unlock()
+	ctx = context.WithoutCancel(ctx)
+
 	u.mu.Lock()
-	defer u.mu.Unlock()
 	now := u.now()
 	if !u.lastSuccess.IsZero() && now.Sub(u.lastSuccess) < cfCheckCooldown {
+		defer u.mu.Unlock()
 		return cfCheckResult{cfStatus: u.statusLocked(), NextCheckAt: u.lastSuccess.Add(cfCheckCooldown).Unix()}
 	}
 	if u.lastErr != "" && now.Sub(u.lastAttempt) < cfRetryAfterFailure {
+		defer u.mu.Unlock()
 		return cfCheckResult{cfStatus: u.statusLocked(), NextCheckAt: u.lastAttempt.Add(cfRetryAfterFailure).Unix()}
 	}
 	u.lastAttempt = now
+	u.mu.Unlock()
 
 	fetched, err := u.fetch(ctx)
 	if err != nil {
-		u.lastErr = err.Error()
 		slog.Warn("Cloudflare range check failed; keeping the current list", "error", err)
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		u.lastErr = err.Error()
 		return cfCheckResult{cfStatus: u.statusLocked(), Checked: true, NextCheckAt: now.Add(cfRetryAfterFailure).Unix()}
 	}
-	u.lastErr = ""
-	u.lastSuccess = now
 	changed := !samePrefixes(fetched, config.CloudflareProxies())
 	if changed {
 		config.SetCloudflareRanges(fetched)
 		slog.Info("Cloudflare IP ranges updated", "ranges", len(fetched))
 	}
-	u.source = "cloudflare.com"
 	if u.db != nil {
 		parts := make([]string, len(fetched))
 		for i, p := range fetched {
@@ -149,6 +159,11 @@ func (u *cfUpdater) check(ctx context.Context) cfCheckResult {
 			slog.Warn("storing the Cloudflare ranges failed", "error", err)
 		}
 	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.lastErr = ""
+	u.lastSuccess = now
+	u.source = "cloudflare.com"
 	return cfCheckResult{cfStatus: u.statusLocked(), Checked: true, Changed: changed, NextCheckAt: now.Add(cfCheckCooldown).Unix()}
 }
 

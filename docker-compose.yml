@@ -1,9 +1,15 @@
 services:
   openposterdb:
-    image: ghcr.io/deadgazes/openposterdb
+    # :latest follows every release; pin a version tag (e.g. :1.3.0) to
+    # upgrade deliberately.
+    image: ghcr.io/deadgazes/openposterdb:latest
     container_name: openposterdb
     restart: unless-stopped
     ports:
+      # Reachable on every interface of the host. With a reverse proxy on the
+      # same host (nginx, Caddy, Traefik), publish on loopback only so clients
+      # can't bypass the proxy:
+      #   - "127.0.0.1:3000:3000"
       - "3000:3000"
     env_file:
       - .env

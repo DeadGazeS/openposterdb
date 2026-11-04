@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, shallowRef, reactive, computed } from 'vue'
 import { useSavedFlash } from '@/composables/useSavedFlash'
 import { useCopyToClipboard } from '@/composables/useCopyToClipboard'
 import { parseApiError, okOrThrow } from '@/lib/api-error'
@@ -70,6 +70,17 @@ async function toggleKeyReveal(id: number) {
     next.add(id)
   }
   revealedKeyIds.value = next
+  forgetRawKey(id)
+}
+
+// Drops a plaintext key from memory once nothing on screen shows it (it was
+// kept until the view unmounted, even after "hide").
+function forgetRawKey(id: number | null) {
+  if (id == null || revealedKeyIds.value.has(id) || connectKeyId.value === id) return
+  if (!(id in rawKeys.value)) return
+  const rest = { ...rawKeys.value }
+  delete rest[id]
+  rawKeys.value = rest
 }
 
 function maskedKey(key: ApiKey): string {
@@ -81,6 +92,7 @@ function maskedKey(key: ApiKey): string {
 const { copyState, copy: copyToClipboard } = useCopyToClipboard()
 async function copyKey(id: number) {
   const raw = await fetchRawKey(id)
+  forgetRawKey(id)
   if (raw) return copyToClipboard(raw, String(id))
 }
 
@@ -94,18 +106,23 @@ const settingsLoading = reactive<Record<number, boolean>>({})
 const connectKeyId = ref<number | null>(null)
 async function toggleConnect(id: number) {
   expandedKey.value = null
-  if (connectKeyId.value === id) {
+  const previous = connectKeyId.value
+  if (previous === id) {
     connectKeyId.value = null
+    forgetRawKey(id)
     return
   }
   // The media-server panel builds URLs from the raw key: fetch it first.
   const key = keys.value.find((k) => k.id === id)
   if (key?.revealable) await fetchRawKey(id)
   connectKeyId.value = id
+  forgetRawKey(previous)
 }
 
 async function toggleSettings(id: number) {
+  const previous = connectKeyId.value
   connectKeyId.value = null
+  forgetRawKey(previous)
   if (expandedKey.value === id) {
     expandedKey.value = null
     return
@@ -195,11 +212,17 @@ async function deleteKey(id: number) {
 
 // --- Header-driven actions (the settings page header owns Save/Discard/Refresh) ---
 
-const expandedFormRef = ref<{
+type ExpandedFormApi = {
   save: () => Promise<void>
   discard: () => void
   dirty: boolean
-} | null>(null)
+}
+// Function ref: a plain ref="" inside v-for makes Vue store an array, so
+// .save() on it threw and the header Save never reached the per-key form.
+const expandedFormRef = shallowRef<ExpandedFormApi | null>(null)
+function setExpandedForm(el: unknown) {
+  expandedFormRef.value = (el as ExpandedFormApi | null) ?? null
+}
 
 function saveExpanded() {
   return expandedFormRef.value?.save()
@@ -309,7 +332,7 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
           <div v-if="settingsLoading[key.id]" class="text-sm text-muted-foreground">Loading settings...</div>
           <RenderSettingsForm
             v-else-if="keySettings[key.id]"
-            ref="expandedFormRef"
+            :ref="setExpandedForm"
             :settings="keySettings[key.id]!"
             :uid="String(key.id)"
             :show-actions="false"

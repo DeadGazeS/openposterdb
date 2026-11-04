@@ -19,6 +19,9 @@ var blackUniform = image.NewUniform(color.Black)
 
 const maxImagePixels = 8192 * 8192
 
+// maxTallAspect bounds height/width of decoded artwork (see decodeImage).
+const maxTallAspect = 3
+
 // decodeImage decodes artwork after checking its declared dimensions, so a
 // tiny file claiming e.g. 50000x50000 pixels (a decompression bomb) is
 // rejected before the decoder allocates gigabytes for it.
@@ -29,6 +32,12 @@ func decodeImage(b []byte) (image.Image, error) {
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
 		return nil, fmt.Errorf("image dimensions %dx%d exceed the %d pixel limit", cfg.Width, cfg.Height, maxImagePixels)
+	}
+	// Renders scale to a target width, so the canvas height grows with the
+	// source's height/width ratio: a 1x60M strip passes the pixel cap but
+	// asks for gigabytes once scaled. Real artwork is nowhere near 3:1 tall.
+	if int64(cfg.Height) > maxTallAspect*int64(cfg.Width) {
+		return nil, fmt.Errorf("image dimensions %dx%d are implausibly tall", cfg.Width, cfg.Height)
 	}
 	img, _, err := image.Decode(bytes.NewReader(b))
 	return img, err

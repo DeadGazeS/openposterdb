@@ -660,7 +660,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 	var rendered []byte
 	if p.Inflight != nil {
-		rendered, err = p.Inflight.RunCoalesced(cacheKey, render)
+		rendered, err = p.Inflight.RunCoalescedCtx(p.Context, cacheKey, render)
 	} else {
 		rendered, err = render()
 	}
@@ -736,6 +736,9 @@ func (p ServeParams) withTitleIdentity(resolved *services.ResolvedID) *services.
 	}
 	target, kitsuID := p.ratingsTargetFor(resolved)
 	out.RatingsTarget = target
+	if p.Caches != nil {
+		services.RememberRatingsTarget(p.Caches.IDs, p.IDType, p.IDValue, target)
+	}
 	switch {
 	case target != nil && target.TMDbID == 0 && target.IMDbID != nil:
 		out.TitleKey = "imdb:" + *target.IMDbID // IMDb-only (no TMDB entry)

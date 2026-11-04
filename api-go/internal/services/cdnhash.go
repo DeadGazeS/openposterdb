@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"sync"
 	"time"
 )
 
@@ -25,20 +24,15 @@ func SettingsHash(s *RenderSettings) string {
 	return hex.EncodeToString(sum[:16]) // 32 hex chars
 }
 
-// HashRegistry maps a settings hash to the most recently registered render
-// settings. It is populated by HandleImage when a redirect is emitted, and
-// read by HandleCDNImage when a /c/{hash}/... request arrives. Entries expire
-// after `ttl`; a background janitor sweeps them up.
+// HashRegistry is the /c/ index: which cache entry a /c/{hash}/... URL
+// serves. HandleImage records it when it issues a redirect; HandleCDNImage
+// only reads it. (It used to also keep hash -> settings for /c/ to render
+// from; /c/ became index-only, so nothing read that map, yet every authed
+// request wrote to it under a global lock.)
 //
-// The registry is process-local — across restarts, entries are lost (the
-// first authenticated request after a restart repopulates the hash, and the
-// CDN edge cache survives the restart).
+// The index is process-local: after a restart the first authenticated
+// request repopulates an entry (the CDN edge cache survives the restart).
 type HashRegistry struct {
-	ttl time.Duration
-
-	mu    sync.RWMutex
-	store map[string]hashEntry
-
 	// served maps a /c/ URL (CDNServedKey) to the cache entry the
 	// authenticated route rendered for it. /c/ serves only from this index —
 	// it never resolves ids, fetches ratings or renders, so a settings hash
@@ -80,81 +74,28 @@ func (r *HashRegistry) LookupServed(key string) (CDNServed, bool) {
 	return v.(CDNServed), true
 }
 
-type hashEntry struct {
-	settings *RenderSettings
-	expires  time.Time
-}
-
-// NewHashRegistry creates a registry with the given TTL per entry. ttl=0
-// disables expiration (entries live forever).
-func NewHashRegistry(ttl time.Duration) *HashRegistry {
+// NewHashRegistry creates an empty /c/ index.
+func NewHashRegistry() *HashRegistry {
 	return &HashRegistry{
-		ttl:   ttl,
-		store: make(map[string]hashEntry),
 		// A CDN re-fetches /c/ URLs after its own cache expires (a day), so
-		// the index outlives the settings-hash TTL. Bounded.
+		// entries live 48 h. Bounded.
 		served: NewMemCache(0, 100_000, 48*time.Hour, 0),
 	}
 }
 
-// Register records the settings under their hash and returns the hash.
+// Register returns the settings hash for a redirect ("" when r or s is nil,
+// i.e. CDN redirects are off).
 func (r *HashRegistry) Register(s *RenderSettings) string {
 	if r == nil || s == nil {
 		return ""
 	}
-	h := SettingsHash(s)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.store[h] = hashEntry{settings: s, expires: time.Now().Add(r.ttl)}
-	return h
+	return SettingsHash(s)
 }
 
-// Lookup returns the settings for the given hash. The second return is false
-// on miss (unknown hash or expired entry).
-func (r *HashRegistry) Lookup(hash string) (*RenderSettings, bool) {
-	if r == nil || hash == "" {
-		return nil, false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	e, ok := r.store[hash]
-	if !ok {
-		return nil, false
-	}
-	if r.ttl > 0 && time.Now().After(e.expires) {
-		return nil, false
-	}
-	return e.settings, true
-}
-
-// Len returns the current number of live entries (test/diagnostic helper).
-func (r *HashRegistry) Len() int {
-	if r == nil {
-		return 0
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.store)
-}
-
-// SweepExpired removes all expired entries; call from a janitor goroutine.
+// SweepExpired drops expired index entries; call from a janitor goroutine.
 func (r *HashRegistry) SweepExpired() int {
-	if r == nil {
+	if r == nil || r.served == nil {
 		return 0
 	}
-	r.served.SweepExpired()
-	if r.ttl <= 0 {
-		return 0
-	}
-	now := time.Now()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	removed := 0
-	for h, e := range r.store {
-		if now.After(e.expires) {
-			delete(r.store, h)
-			removed++
-		}
-	}
-	return removed
+	return r.served.SweepExpired()
 }

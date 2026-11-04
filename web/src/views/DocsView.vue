@@ -4,11 +4,13 @@ import { ApiReference } from "@scalar/api-reference";
 import "@scalar/api-reference/style.css";
 import { ArrowLeft } from "lucide-vue-next";
 import { useAuthStore } from "@/stores/auth";
+import { apiUrl } from "@/lib/api";
 
 const auth = useAuthStore();
 const topbar = ref<HTMLElement>();
 const headerHeight = ref("0px");
 const spec = ref<unknown>(null);
+const loadError = ref(false);
 
 onMounted(async () => {
   if (topbar.value) {
@@ -21,9 +23,15 @@ onMounted(async () => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch("/api/openapi.json", { headers });
-  if (res.ok) {
-    spec.value = await res.json();
+  try {
+    const res = await fetch(apiUrl("/api/openapi.json"), { headers });
+    if (res.ok) {
+      spec.value = await res.json();
+    } else {
+      loadError.value = true;
+    }
+  } catch {
+    loadError.value = true;
   }
 });
 </script>
@@ -48,10 +56,15 @@ onMounted(async () => {
       defaultOpenAllTags: true,
       withDefaultFonts: false,
     }" />
+    <p v-else-if="loadError" class="docs-error" role="alert">The API reference could not be loaded.</p>
   </div>
 </template>
 
 <style scoped>
+.docs-error {
+  padding: 2rem 1rem;
+  text-align: center;
+}
 .docs-page :deep(.scalar-app) {
   --scalar-custom-header-height: var(--topbar-height);
 }

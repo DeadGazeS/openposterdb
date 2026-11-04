@@ -97,12 +97,12 @@ func (c *FanartClient) fetchMovieImages(ctx context.Context, tmdbID uint64) (*Fa
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode == http.StatusNotFound {
 		return &FanartImages{}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("Fanart returned %d: %s", resp.StatusCode, string(body)))
+		return nil, errors.NewOther(fmt.Sprintf("Fanart returned %d: %s", resp.StatusCode, errSnippet(body)))
 	}
 
 	var result movieImages
@@ -142,12 +142,12 @@ func (c *FanartClient) fetchTVImages(ctx context.Context, id uint64) (*FanartIma
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode == http.StatusNotFound {
 		return &FanartImages{}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("Fanart returned %d: %s", resp.StatusCode, string(body)))
+		return nil, errors.NewOther(fmt.Sprintf("Fanart returned %d: %s", resp.StatusCode, errSnippet(body)))
 	}
 
 	var result tvImages

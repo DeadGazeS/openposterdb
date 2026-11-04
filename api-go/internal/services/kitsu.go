@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"time"
 
@@ -144,7 +145,7 @@ func (c *KitsuClient) fetchAnime(ctx context.Context, idOrSlug string) (*KitsuAn
 	if parseErr == nil {
 		url = fmt.Sprintf("%s/anime/%s?include=mappings", kitsuAPIBase, idOrSlug)
 	} else {
-		url = fmt.Sprintf("%s/anime?filter[slug]=%s&include=mappings", kitsuAPIBase, idOrSlug)
+		url = fmt.Sprintf("%s/anime?filter[slug]=%s&include=mappings", kitsuAPIBase, neturl.QueryEscape(idOrSlug))
 	}
 
 	start := time.Now()
@@ -163,12 +164,12 @@ func (c *KitsuClient) fetchAnime(ctx context.Context, idOrSlug string) (*KitsuAn
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil, apperr.NewIDNotFound(fmt.Sprintf("kitsu anime %q not found", idOrSlug))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, apperr.NewOther(fmt.Sprintf("Kitsu returned %d: %s", resp.StatusCode, string(body)))
+		return nil, nil, apperr.NewOther(fmt.Sprintf("Kitsu returned %d: %s", resp.StatusCode, errSnippet(body)))
 	}
 
 	var idNum uint64
@@ -323,7 +324,8 @@ func (c *KitsuClient) fetchAnime(ctx context.Context, idOrSlug string) (*KitsuAn
 // id:"3936"} for MAL 5114. Without include=item Kitsu returns only
 // relationships.item.links (no data), so the include is required.
 // It runs on every mal: request (before the image cache check), so
-// definitive answers — mapped or "no mapping" — are cached; failures are not.
+// definitive answers — mapped or "no mapping" — are cached; failures are
+// remembered for kitsuMALFailureBackoff.
 func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64 {
 	if c == nil || c.HTTP == nil || malID == 0 {
 		return nil
@@ -334,13 +336,29 @@ func (c *KitsuClient) AnimeIDByMALCtx(ctx context.Context, malID uint64) *uint64
 			return copyUint64(v.(*uint64))
 		}
 	}
+	failKey := "malmapfail:" + strconv.FormatUint(malID, 10)
+	if c.cache != nil && kitsuMALFailureBackoff > 0 {
+		if v, ok := upstreamGet(c.cache, failKey); ok && time.Since(v.(time.Time)) < kitsuMALFailureBackoff {
+			return nil // failed moments ago: don't stall another request on Kitsu
+		}
+	}
 	gen := upstreamGenNow()
 	id, definitive := c.fetchAnimeIDByMAL(ctx, malID)
-	if definitive && c.cache != nil {
-		upstreamSet(c.cache, key, gen, id)
+	if c.cache != nil {
+		if definitive {
+			upstreamSet(c.cache, key, gen, id)
+		} else if ctx.Err() == nil {
+			upstreamSet(c.cache, failKey, gen, time.Now())
+		}
 	}
 	return copyUint64(id)
 }
+
+// kitsuMALFailureBackoff is how long a failed MAL→Kitsu lookup is remembered.
+// The lookup runs before the image cache check, so during a Kitsu outage
+// every request for an already-cached mal: image used to wait on Kitsu
+// (retries included) first.
+var kitsuMALFailureBackoff = 2 * time.Minute
 
 func copyUint64(v *uint64) *uint64 {
 	if v == nil {
@@ -371,7 +389,7 @@ func (c *KitsuClient) fetchAnimeIDByMAL(ctx context.Context, malID uint64) (id *
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("kitsu mal→kitsu mapping lookup non-200", "mal_id", malID, "status", resp.StatusCode)
 		return nil, false

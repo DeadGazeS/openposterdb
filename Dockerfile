@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25-bookworm AS api-builder
+FROM golang:1.26-bookworm AS api-builder
 WORKDIR /app
 
 COPY api-go/go.mod api-go/go.sum ./
@@ -21,7 +21,7 @@ RUN if [ -n "${APP_VERSION}" ]; then sed -i "s/\"version\": \"[^\"]*\"/\"version
 RUN npm run build-only
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/* \
     && groupadd --system opdb && useradd --system --gid opdb --create-home opdb
 COPY --from=api-builder /app/openposterdb /usr/local/bin/openposterdb
 COPY --from=api-builder /app/assets /app/assets

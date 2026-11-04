@@ -69,6 +69,10 @@ type EncryptedExport struct {
 // 600k is the OWASP 2023 recommendation for PBKDF2-HMAC-SHA256.
 const pbkdf2Iterations = 600_000
 
+// maxPBKDF2Iterations bounds the count an imported file may ask for (it is
+// attacker-controlled input); 10x today's value leaves room to raise it.
+const maxPBKDF2Iterations = 10 * pbkdf2Iterations
+
 // EncryptPayload seals an ExportPayload with a passphrase-derived AES-256-GCM
 // key. The passphrase is required to decrypt on import; the file itself carries
 // only the salt + ciphertext, so leaking the file without the passphrase is
@@ -130,6 +134,9 @@ func DecryptPayload(enc *EncryptedExport, passphrase string) (*ExportPayload, er
 	iter := enc.KDFIterations
 	if iter <= 0 {
 		iter = pbkdf2Iterations
+	}
+	if iter > maxPBKDF2Iterations {
+		return nil, fmt.Errorf("kdf_iterations %d exceeds the maximum of %d", iter, maxPBKDF2Iterations)
 	}
 	key := pbkdf2.Key([]byte(passphrase), salt, iter, 32, sha256.New)
 	block, err := aes.NewCipher(key)

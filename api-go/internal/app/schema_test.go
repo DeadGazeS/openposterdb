@@ -446,3 +446,22 @@ func sortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Migrations run on every start; one that creates an index a later one drops
+// rebuilt that index over the whole table at each boot for nothing.
+func TestMigrations_NoIndexCreatedThenDropped(t *testing.T) {
+	created := map[string]bool{}
+	for _, m := range Migrations {
+		sql := strings.ToUpper(m.SQL)
+		if i := strings.Index(sql, "CREATE INDEX IF NOT EXISTS "); i >= 0 {
+			name := strings.Fields(sql[i+len("CREATE INDEX IF NOT EXISTS "):])[0]
+			created[name] = true
+		}
+		if i := strings.Index(sql, "DROP INDEX IF EXISTS "); i >= 0 {
+			name := strings.Fields(sql[i+len("DROP INDEX IF EXISTS "):])[0]
+			if created[name] {
+				t.Errorf("index %s is created and then dropped by the migrations", name)
+			}
+		}
+	}
+}

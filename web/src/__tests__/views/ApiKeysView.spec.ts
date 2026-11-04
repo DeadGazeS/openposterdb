@@ -134,6 +134,21 @@ describe('ApiKeysView', () => {
     expect(wrapper.text()).toContain(rawKeys[2]!)
   })
 
+  it('drops the plaintext key from the page once it is hidden again', async () => {
+    mockKeysApi.list.mockResolvedValue({ ok: true, json: () => Promise.resolve(sampleKeys) })
+    mockReveal()
+    const wrapper = mountView()
+    await flushPromises()
+    const btn = wrapper.findAll('button[title="Reveal key"]')[0]!
+    await btn.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(rawKeys[1]!)
+    await wrapper.findAll('button[title="Hide key"]')[0]!.trigger('click')
+    await flushPromises()
+    const state = (wrapper.vm as unknown as { $: { setupState: { rawKeys: Record<number, string> } } }).$.setupState
+    expect(state.rawKeys[1]).toBeUndefined()
+  })
+
   it('shows "No API keys yet." when empty', async () => {
     mockKeysApi.list.mockResolvedValue({
       ok: true,
@@ -219,6 +234,53 @@ describe('ApiKeysView', () => {
     const formEl = wrapper.findComponent({ name: 'RenderSettingsForm' })
     expect(formEl.exists()).toBe(true)
     expect(formEl.props('tabKey')).toBe('key-1-tab')
+  })
+
+  it('header Save reaches the expanded per-key form (ref inside v-for)', async () => {
+    mockKeysApi.list.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(sampleKeys),
+    })
+    mockKeysApi.getSettings.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        image_source: 't', lang: 'en', textless: false, fanart_available: true,
+        ratings_limit: 3, ratings_order: 'mal,imdb', ratings_exclude: '',
+        poster_layout: '{}', logo_layout: '{}', backdrop_layout: '{}', episode_layout: '{}',
+        poster_badge_style: 'lr', logo_badge_style: 'lr', backdrop_badge_style: 'lr',
+        episode_badge_style: 'lr', poster_label_style: 'o', logo_label_style: 'o',
+        backdrop_label_style: 'o', episode_label_style: 'o', poster_badge_direction: 'd',
+        poster_fit: 'native', poster_text_size: 100, logo_text_size: 100,
+        backdrop_text_size: 100, poster_badge_width: 100, poster_badge_height: 100,
+        logo_badge_width: 100, logo_badge_height: 100, backdrop_badge_width: 100,
+        backdrop_badge_height: 100, episode_badge_width: 100, episode_badge_height: 100,
+        poster_logo_size: 100, logo_logo_size: 100, backdrop_logo_size: 100,
+        episode_logo_size: 100, episode_blur: false, poster_badge_shape: 'r',
+        logo_badge_shape: 'r', backdrop_badge_shape: 'r', episode_badge_shape: 'r',
+        poster_badge_alpha: 80, logo_badge_alpha: 80, backdrop_badge_alpha: 80,
+        episode_badge_alpha: 80, backdrop_edge_inset_x: 0, backdrop_edge_inset_y: 0,
+        colors: '',
+      }),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    // Invoke toggleSettings directly — the shadcn Button stub in mountView
+    // doesn't reliably propagate click emits through vue-test-utils, and
+    // toggleSettings is what a real click would call.
+    const vm = wrapper.vm as unknown as { toggleSettings?: (id: number) => Promise<void> }
+    await vm.toggleSettings!(1)
+    await flushPromises()
+
+    // The ref sits inside v-for, which makes Vue hand back an array: the
+    // header Save used to call .save() on that array and throw.
+    mockKeysApi.updateSettings.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
+    const api = wrapper.vm as unknown as { saveExpanded: () => Promise<void> | undefined; expandedDirty: boolean }
+    expect(typeof api.expandedDirty).toBe('boolean')
+    await expect(Promise.resolve(api.saveExpanded())).resolves.not.toThrow()
+    await flushPromises()
+    expect(mockKeysApi.updateSettings).toHaveBeenCalledWith(1, expect.any(Object))
   })
 
   it('shows settings button for each key', async () => {

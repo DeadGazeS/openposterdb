@@ -88,7 +88,7 @@ func HandleBadgePreview(db *sql.DB) http.HandlerFunc {
 		}
 		limit := settings.RatingsLimit
 		if v := q.Get("ratings_limit"); v != "" {
-			if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			if n, err := strconv.ParseInt(v, 10, 32); err == nil && services.ValidateRatingsLimit(int32(n)) == nil {
 				limit = int32(n)
 			}
 		}

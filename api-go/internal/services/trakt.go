@@ -65,9 +65,9 @@ func (c *TraktClient) getRatingCtx(ctx context.Context, url string) (*TraktRatin
 		return nil, nil
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("Trakt returned %d: %s", resp.StatusCode, string(body)))
+		return nil, errors.NewOther(fmt.Sprintf("Trakt returned %d: %s", resp.StatusCode, errSnippet(body)))
 	}
 
 	var result TraktRatingsResponse

@@ -167,7 +167,7 @@ func (c *AniListClient) fetchMediaByMAL(ctx context.Context, malID uint64) (*Ani
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, apperr.NewOther(fmt.Sprintf("AniList rate-limited (429) for MAL id %d", malID))
 	}

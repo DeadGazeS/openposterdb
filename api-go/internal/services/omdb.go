@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"openposterdb/internal/errors"
@@ -36,7 +37,7 @@ type OmdbRating struct {
 
 func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbResponse, error) {
 	apiKey := c.KeyPool.ActiveKeyRaw()
-	url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", apiKey, imdbID)
+	url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", neturl.QueryEscape(apiKey), neturl.QueryEscape(imdbID))
 
 	start := time.Now()
 	resp, err := SendWithRetryCtx(ctx, &OMDBRetry, func() (*http.Response, error) {
@@ -52,9 +53,9 @@ func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbRes
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("OMDb returned %d: %s", resp.StatusCode, string(body)))
+		return nil, errors.NewOther(fmt.Sprintf("OMDb returned %d: %s", resp.StatusCode, errSnippet(body)))
 	}
 
 	var result OmdbResponse

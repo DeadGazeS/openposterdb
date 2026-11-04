@@ -18,16 +18,20 @@ on:
       - "api-go/**"
       - "web/**"
 
+# Least privilege for the default GITHUB_TOKEN (the jobs only read the repo).
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: api-go/go.sum
 
       - name: Run tests
@@ -50,7 +54,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: go-coverage
           path: api-go/coverage.out
@@ -60,9 +64,9 @@ jobs:
     name: Frontend unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -80,14 +84,14 @@ jobs:
     name: E2E tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: api-go/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -101,7 +105,7 @@ jobs:
       # Playwright version); system packages are still installed each run.
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
@@ -134,8 +138,8 @@ jobs:
           # external shell files — keep both in sync when changing).
           JWT_SECRET: abababababababababababababababababababababababababababababababab
           LISTEN_ADDR: 0.0.0.0:3333
-          # Required at startup; the binary runs without entrypoint.sh (which
-          # generates one), so CI must set it. Non-secret test value.
+          # Required at startup (the server never generates it). Non-secret
+          # test value.
           SECRETS_KEY: cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
           COOKIE_SECURE: "false"
           # The suite logs in far more often than the production per-IP limit.
@@ -149,10 +153,13 @@ jobs:
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:3333/api/auth/status > /dev/null 2>&1; then
               echo "Backend ready"
-              break
+              exit 0
             fi
             sleep 1
           done
+          # Fail here with a clear message instead of in every e2e test.
+          echo "Backend did not start within 30 seconds" >&2
+          exit 1
 
       - name: Run E2E tests
         working-directory: web
@@ -160,7 +167,7 @@ jobs:
           CI: true
         run: npx playwright test --project=setup --project=settings --project=chromium --project=live
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
           name: playwright-report

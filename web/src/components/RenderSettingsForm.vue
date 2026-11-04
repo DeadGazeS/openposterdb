@@ -21,7 +21,7 @@ import type { PreviewKind, PreviewParams, RenderSettings, SaveSettingsPayload, S
 import { LANGUAGES, ALL_RATING_SOURCES, RATING_COLOR_ROWS, SOURCE_BADGE_SAMPLES, parseRatingsOrder, parseRatingsExclude } from '@/lib/constants'
 import type { ImageLayout } from '@/lib/layout'
 import { parseLayout, layoutToJSON, layoutTotal } from '@/lib/layout'
-import { colorsQuery } from '@/lib/api'
+import { apiUrl, colorsQuery } from '@/lib/api'
 
 
 
@@ -431,8 +431,9 @@ async function save() {
       colors: editColors.value,
     })
     if (err) {
+      // Keep the edits: reverting threw away every unsaved change on every
+      // tab, so the user couldn't fix the one bad value and retry.
       error.value = err
-      revertEdits()
     } else {
       const updated = await props.loadSettings()
       if (updated) {
@@ -445,7 +446,6 @@ async function save() {
     }
   } catch {
     error.value = 'Failed to save'
-    revertEdits()
   } finally {
     saving.value = false
   }
@@ -466,7 +466,14 @@ async function handleReset() {
   try {
     const ok = await props.resetSettings()
     if (ok) {
-      await props.loadSettings()
+      // Show the reset values (the result used to be thrown away).
+      const updated = await props.loadSettings()
+      if (updated) {
+        syncing = true
+        currentSettings.value = updated
+        applySettings(updated)
+        nextTick(() => { syncing = false })
+      }
       flashSaved()
     } else {
       error.value = 'Failed to reset'
@@ -690,7 +697,7 @@ watch([editRatingsOrder, editRatingsExclude, editPosterLayout, editPosterBadgeAl
 }, { deep: true })
 
 function badgePreviewUrl(sourceKey: string, value: string): string {
-  return `/api/icons/badge?source=${encodeURIComponent(sourceKey)}&value=${encodeURIComponent(value)}&${galleryParams.value}`
+  return apiUrl(`/api/icons/badge?source=${encodeURIComponent(sourceKey)}&value=${encodeURIComponent(value)}&${galleryParams.value}`)
 }
 
 // The badge API resolves source logos by their base key ("rt"/"rta"); the

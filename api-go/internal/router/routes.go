@@ -193,7 +193,7 @@ func (r *Router) registerKeyRoutes() {
 	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleGetKeySettings(s.DB, s.Fanart != nil)(w, req)
+			handlers.HandleGetKeySettings(s.DB, s.fanartAvailable())(w, req)
 		case http.MethodPut:
 			handlers.HandleUpdateKeySettings(s.DB)(w, req)
 		case http.MethodDelete:
@@ -203,14 +203,14 @@ func (r *Router) registerKeyRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/key/me", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/key/me", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		handlers.HandleSelfKeyInfo(s.DB, s.SecretsKey)(w, req)
 	})))
 
-	r.mux.Handle("/api/key/me/settings", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/key/me/settings", handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleSelfSettings(s.DB, s.Fanart != nil)(w, req)
+			handlers.HandleSelfSettings(s.DB, s.fanartAvailable())(w, req)
 		case http.MethodPut:
 			handlers.HandleUpdateSelfSettings(s.DB)(w, req)
 		case http.MethodDelete:
@@ -233,7 +233,7 @@ func (r *Router) registerAdminRoutes() {
 	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
-			handlers.HandleGetSettings(s.DB, s.isFreeAPIKeyEnabled(), s.Config.FreeKeyEnabled != nil, s.Fanart != nil)(w, req)
+			handlers.HandleGetSettings(s.DB, s.isFreeAPIKeyEnabled(), s.Config.FreeKeyEnabled != nil, s.fanartAvailable())(w, req)
 		case http.MethodPut:
 			handlers.HandleUpdateSettings(s.DB, s.Config.FreeKeyEnabled != nil)(w, req)
 		default:
@@ -375,7 +375,7 @@ func (r *Router) registerAdminRoutes() {
 	}))
 
 	r.mux.HandleFunc("/api/admin/settings/export", r.requireAuth(handlers.HandleExportSettings(s.DB, s.ServiceKeys)))
-	r.mux.HandleFunc("/api/admin/settings/import", r.requireAuth(handlers.HandleImportSettings(s.DB, s.ServiceKeys)))
+	r.mux.HandleFunc("/api/admin/settings/import", r.requireAuth(handlers.HandleImportSettings(s.DB, s.ServiceKeys, s.RefreshClientsFromKeys)))
 
 	// Public rating-source logos used by the admin UI (plain brand icons, not
 	// sensitive). Served without auth so <img> tags can load them.
@@ -458,7 +458,7 @@ func (r *Router) registerPreviewRoutes() {
 			}
 		}
 		r.mux.Handle("/api/admin/preview/"+kind, r.requireAuth(serve))
-		r.mux.Handle("/api/key/me/preview/"+kind, handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed())(http.HandlerFunc(serve)))
+		r.mux.Handle("/api/key/me/preview/"+kind, handlers.RequireAPIKeyAuth(r.jwtSecret(), r.lastUsed(), r.state.DB)(http.HandlerFunc(serve)))
 	}
 }
 

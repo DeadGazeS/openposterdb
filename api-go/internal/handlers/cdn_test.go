@@ -16,7 +16,7 @@ import (
 // (not a mux-route 404, so the user's edge can distinguish "hash expired,
 // please refetch authenticated URL" from a generic miss).
 func TestCDNHandler_HashMiss(t *testing.T) {
-	reg := services.NewHashRegistry(0)
+	reg := services.NewHashRegistry()
 	deps := &ImageDeps{}
 
 	mux := http.NewServeMux()
@@ -40,7 +40,7 @@ func TestCDNHandler_HashMiss(t *testing.T) {
 // TestCDNHandler_MethodNotAllowed proves OPTIONS/PUT/etc. on the CDN route
 // are rejected with 405 (CDN fetches are GET only).
 func TestCDNHandler_MethodNotAllowed(t *testing.T) {
-	reg := services.NewHashRegistry(0)
+	reg := services.NewHashRegistry()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
@@ -56,7 +56,7 @@ func TestCDNHandler_MethodNotAllowed(t *testing.T) {
 // TestCDNHandler_HeadAllowed proves HEAD reaches the handler (not 405): a
 // HEAD probe on the authed URL follows HandleImage's CDN redirect here.
 func TestCDNHandler_HeadAllowed(t *testing.T) {
-	reg := services.NewHashRegistry(0)
+	reg := services.NewHashRegistry()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
@@ -72,7 +72,7 @@ func TestCDNHandler_HeadAllowed(t *testing.T) {
 // TestCDNHandler_InvalidID proves the path validator rejects ".." and
 // similar traversal attempts (ValidateIDValue).
 func TestCDNHandler_InvalidID(t *testing.T) {
-	reg := services.NewHashRegistry(0)
+	reg := services.NewHashRegistry()
 	settings := &services.RenderSettings{ImageSource: "t"}
 	hash := reg.Register(settings)
 	mux := http.NewServeMux()

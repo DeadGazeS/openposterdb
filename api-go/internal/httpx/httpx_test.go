@@ -252,3 +252,16 @@ func TestParseIntParam_DefaultApplied(t *testing.T) {
 		t.Errorf("limit: got %d, want default 25", got)
 	}
 }
+
+// DecodeJSON reads at most MaxJSONBody bytes (an unauthenticated login with a
+// multi-GB "password" used to be buffered whole).
+func TestDecodeJSON_BodyLimit(t *testing.T) {
+	big := `{"password":"` + strings.Repeat("x", MaxJSONBody) + `"}`
+	var v map[string]string
+	if err := DecodeJSON(httptest.NewRequest("POST", "/", strings.NewReader(big)), &v); err == nil {
+		t.Fatal("oversized body decoded without error")
+	}
+	if err := DecodeJSON(httptest.NewRequest("POST", "/", strings.NewReader(`{"password":"ok"}`)), &v); err != nil || v["password"] != "ok" {
+		t.Fatalf("small body: %v %v", err, v)
+	}
+}

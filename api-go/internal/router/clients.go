@@ -133,6 +133,7 @@ func (s *AppState) imageDeps() handlers.ImageDeps {
 		AniList:         s.AniList,
 		KitsuIMDbMapper: s.KitsuIMDbMapper,
 		CDNHashes:       s.CDNHashes,
+		LastUsed:        s.lastUsedRecorder(),
 	}
 }
 
@@ -162,4 +163,20 @@ func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {
 		Caches:              s.Caches,
 		Inflight:            s.Inflight,
 	}
+}
+
+// lastUsedRecorder avoids a typed-nil interface when no flusher is set.
+func (s *AppState) lastUsedRecorder() handlers.KeyRecorder {
+	if s.LastUsedFlusher == nil {
+		return nil
+	}
+	return s.LastUsedFlusher
+}
+
+// fanartAvailable reports whether a Fanart client is configured, under the
+// read lock (RefreshClientsFromKeys may be replacing it).
+func (s *AppState) fanartAvailable() bool {
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+	return s.Fanart != nil
 }

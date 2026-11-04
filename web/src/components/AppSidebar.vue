@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { version } from '../../package.json'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { adminApi } from '@/lib/api'
+import { useAdminPrefs } from '@/composables/useAdminPrefs'
 import { LayoutDashboard, Image, Stamp, Wallpaper, Clapperboard, Settings, LogOut, ChevronRight, Github, ExternalLink, Minus, Plus } from 'lucide-vue-next'
 import {
   Sidebar,
@@ -66,24 +66,38 @@ const latestVersionUrl = 'https://github.com/DeadGazeS/openposterdb/pkgs/contain
 // collapsed state is stored per admin user on the server (survives login
 // sessions); localStorage is only a cache for the first paint before prefs load.
 const DISCLAIMER_KEY = 'sidebar-disclaimer-minimised'
-const disclaimerOpen = ref(localStorage.getItem(DISCLAIMER_KEY) !== 'minimised')
-
-onMounted(async () => {
+function readCachedDisclaimer(): boolean {
   try {
-    const res = await adminApi.getPrefs()
-    if (res.ok) {
-      const prefs = (await res.json()) as Record<string, string>
-      disclaimerOpen.value = prefs.disclaimer_minimised !== 'minimised'
-    }
+    return localStorage.getItem(DISCLAIMER_KEY) !== 'minimised'
   } catch {
-    // prefs unavailable: keep the local default
+    return true
   }
-})
+}
+const disclaimerOpen = ref(readCachedDisclaimer())
 
-watch(disclaimerOpen, (open) => {
-  localStorage.setItem(DISCLAIMER_KEY, open ? 'open' : 'minimised')
-  void adminApi.updatePrefs({ disclaimer_minimised: open ? 'open' : 'minimised' })
-})
+// Prefs belong to admin users: API-key sessions got a 401 on every load.
+// Loading them only sets the state; the old watcher also wrote the loaded
+// value straight back to the server.
+const { prefs, savePrefs } = useAdminPrefs(() => auth.isAdminSession)
+watch(
+  prefs,
+  (p) => {
+    if (p) disclaimerOpen.value = p.disclaimer_minimised !== 'minimised'
+  },
+  { immediate: true },
+)
+
+function toggleDisclaimer() {
+  const open = !disclaimerOpen.value
+  disclaimerOpen.value = open
+  const value = open ? 'open' : 'minimised'
+  try {
+    localStorage.setItem(DISCLAIMER_KEY, value)
+  } catch {
+    // storage unavailable: the server copy still applies
+  }
+  if (auth.isAdminSession) void savePrefs({ disclaimer_minimised: value }).catch(() => {})
+}
 
 function parseVersion(v: string): number[] {
   const m = v.replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/)
@@ -245,7 +259,7 @@ function handleLogout() {
           >
             <div
               class="flex items-center justify-between gap-2 cursor-pointer select-none"
-              @click="disclaimerOpen = !disclaimerOpen"
+              @click="toggleDisclaimer"
             >
               <p class="font-semibold text-amber-600 dark:text-amber-400">Disclaimer:</p>
               <span

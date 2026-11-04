@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { adminApi } from '@/lib/api'
+import { useAdminPrefs } from '@/composables/useAdminPrefs'
 import { okOrThrow } from '@/lib/api-error'
 import RefreshButton from '@/components/RefreshButton.vue'
 import ClearCacheButton from '@/components/ClearCacheButton.vue'
@@ -161,18 +162,17 @@ const editing = ref(false)
 const layoutError = ref('')
 let layoutBeforeEdit: DashboardLayout | null = null
 
-onMounted(async () => {
-  try {
-    const res = await adminApi.getPrefs()
-    if (res.ok) {
-      const prefs = (await res.json()) as Record<string, string>
-      // Slow prefs response: don't overwrite edits the user already started.
-      if (!editing.value) layout.value = parseLayout(prefs[DASHBOARD_LAYOUT_PREF], cards)
-    }
-  } catch {
-    // prefs unavailable: keep the default layout
-  }
-})
+// Prefs are shared with the sidebar (one request). Customize stays disabled
+// until they're in: editing the default layout and pressing Done used to
+// overwrite the saved one. If prefs fail to load, editing is allowed.
+const { prefs, isPending: prefsPending, savePrefs } = useAdminPrefs()
+watch(
+  prefs,
+  (p) => {
+    if (p && !editing.value) layout.value = parseLayout(p[DASHBOARD_LAYOUT_PREF], cards)
+  },
+  { immediate: true },
+)
 
 // While editing, hidden tiles stay in the grid (dimmed) so they can be shown again.
 const visibleCards = computed(() =>
@@ -209,8 +209,7 @@ function cancelEditing() {
 async function finishEditing() {
   layoutError.value = ''
   try {
-    const res = await adminApi.updatePrefs({ [DASHBOARD_LAYOUT_PREF]: serializeLayout(layout.value) })
-    if (!res.ok) throw new Error()
+    if (!(await savePrefs({ [DASHBOARD_LAYOUT_PREF]: serializeLayout(layout.value) }))) throw new Error()
     editing.value = false
   } catch {
     layoutError.value = 'Could not save the layout'
@@ -269,7 +268,7 @@ function onCleared(message: string) {
               <Button size="sm" data-testid="layout-done" @click="finishEditing">Done</Button>
             </template>
             <template v-else>
-              <Button variant="outline" size="sm" data-testid="layout-customize" @click="startEditing">
+              <Button variant="outline" size="sm" data-testid="layout-customize" :disabled="prefsPending" @click="startEditing">
                 <LayoutGrid class="size-4 mr-1" />
                 Customize
               </Button>

@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"openposterdb/internal/config"
 	"openposterdb/internal/httpx"
 	"openposterdb/internal/services"
 )
@@ -76,7 +79,13 @@ func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 // HandleExportSettings. The request body can be a plain ExportPayload or an
 // EncryptedExport — the kind tag decides the path. API keys that don't exist
 // yet are recreated with a new value, which is returned in the response.
-func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.HandlerFunc {
+// maxImportBytes bounds an import body (a backup with hundreds of API keys
+// is well under 1 MB).
+const maxImportBytes = 8 << 20
+
+// onApplied (may be nil) runs after an import changed anything, so the
+// router can rebuild the provider clients from the imported service keys.
+func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager, onApplied func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
@@ -98,8 +107,13 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 			return
 		}
 
-		bodyBytes, err := io.ReadAll(r.Body)
+		bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBytes))
 		if err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				httpx.WriteError(w, http.StatusRequestEntityTooLarge, "import file is too large")
+				return
+			}
 			httpx.WriteError(w, 400, "could not read request body")
 			return
 		}
@@ -125,7 +139,15 @@ func HandleImportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 			return
 		}
 
+		if err := validateImportPayload(payload); err != nil {
+			httpx.WriteError(w, 400, "invalid settings in import file: "+err.Error())
+			return
+		}
+
 		result, err := services.ApplyImportPayloadCtx(r.Context(), db, keys, payload)
+		if (err == nil || result.Committed) && onApplied != nil {
+			onApplied()
+		}
 		if err != nil {
 			slog.Warn("settings import failed", "error", err)
 			if result.Committed {
@@ -200,4 +222,35 @@ func resolveEncrypted(enc services.EncryptedExport, bodyPassphrase string, r *ht
 		return nil, errors.New("passphrase required for encrypted export")
 	}
 	return services.DecryptPayload(&enc, passphrase)
+}
+
+// validateImportPayload applies the checks the settings PUT endpoints apply,
+// so a hand-edited or corrupted backup can't store values the UI would have
+// rejected. Per-key settings are also normalised in place. Exports older than
+// MinExportVersion are merged onto the stored row during apply (zero values
+// mean "absent"), so their per-key settings are left to that path.
+func validateImportPayload(p *services.ExportPayload) error {
+	if len(p.Settings) > 0 {
+		g := services.ParseGlobalRenderSettings(p.Settings)
+		if err := services.ValidateRenderSettings(&g); err != nil {
+			return err
+		}
+		if raw, ok := p.Settings["trusted_proxies"]; ok {
+			if _, err := config.ParseTrustedProxies(raw); err != nil {
+				return errors.New(strings.TrimPrefix(err.Error(), "TRUSTED_PROXIES: "))
+			}
+		}
+	}
+	if p.Version < services.MinExportVersion {
+		return nil
+	}
+	for _, ek := range p.APIKeys {
+		if ek.Settings == nil {
+			continue
+		}
+		if err := validateAndNormalizeKeySettings(ek.Settings); err != nil {
+			return fmt.Errorf("api key %q: %w", ek.Name, err)
+		}
+	}
+	return nil
 }

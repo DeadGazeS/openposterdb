@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"openposterdb/internal/errors"
@@ -53,7 +54,7 @@ func (c *MdblistClient) GetRatingsCtx(ctx context.Context, imdbID, mediaType str
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("https://api.mdblist.com/imdb/%s/%s", kind, imdbID)
+	url := fmt.Sprintf("https://api.mdblist.com/imdb/%s/%s", kind, neturl.PathEscape(imdbID))
 	return c.fetchCtx(ctx, url)
 }
 
@@ -93,17 +94,17 @@ func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistRespo
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
 	if resp.StatusCode == http.StatusTooManyRequests {
 		c.KeyPool.Report429()
 		slog.Warn("mdblist API key rate limited (429)", "key", keyHash)
-		return nil, errors.NewOther(fmt.Sprintf("MDBList 429: %s", string(body)))
+		return nil, errors.NewOther(fmt.Sprintf("MDBList 429: %s", errSnippet(body)))
 	}
 
 	c.KeyPool.ReportSuccess()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", resp.StatusCode, string(body)))
+		return nil, errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", resp.StatusCode, errSnippet(body)))
 	}
 
 	var result MdblistResponse

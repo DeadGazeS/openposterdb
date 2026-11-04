@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -37,12 +38,22 @@ func NewInflightSet() *InflightSet {
 // multiple times across different keys (concurrent leaders) — callers are
 // responsible for any per-key side effects (e.g. cache writes) inside fn.
 func (s *InflightSet) RunCoalesced(key string, fn func() ([]byte, error)) ([]byte, error) {
+	return s.RunCoalescedCtx(context.Background(), key, fn)
+}
+
+// RunCoalescedCtx is RunCoalesced where a waiter stops waiting when ctx is
+// done (its client went away); the leader's run is unaffected.
+func (s *InflightSet) RunCoalescedCtx(ctx context.Context, key string, fn func() ([]byte, error)) ([]byte, error) {
 	s.totalCalls.Add(1)
 	s.mu.Lock()
 	if e, ok := s.m[key]; ok {
 		s.mu.Unlock()
-		<-e.ch
-		return e.result, e.err
+		select {
+		case <-e.ch:
+			return e.result, e.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	e := &inflightEntry{ch: make(chan struct{})}
 	s.m[key] = e

@@ -96,7 +96,8 @@ func (m *KitsuIMDbMapper) Load(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	// The table is a few MB; bounded so a broken upstream can't exhaust memory.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("imdb_mapping.json returned HTTP %d (%d bytes)", resp.StatusCode, len(body))
 	}

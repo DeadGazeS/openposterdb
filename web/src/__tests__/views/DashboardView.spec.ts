@@ -263,6 +263,20 @@ describe('DashboardView', () => {
     expect(wrapper.find('[data-testid="stats-grid"]').classes()).toContain('lg:grid-cols-4')
   })
 
+  // Customize before the saved layout arrived used to edit the default
+  // layout, and Done then overwrote the saved one.
+  it('Customize waits for the saved layout to load', async () => {
+    let resolvePrefs!: (v: unknown) => void
+    mockAdminApi.getStats.mockResolvedValue({ ok: true, json: () => Promise.resolve(sampleStats) })
+    mockAdminApi.getPrefs.mockImplementation(() => new Promise((r) => { resolvePrefs = r }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="layout-customize"]').attributes('disabled')).toBeDefined()
+    resolvePrefs({ ok: true, json: () => Promise.resolve({}) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="layout-customize"]').attributes('disabled')).toBeUndefined()
+  })
+
   it('edits and saves the layout', async () => {
     withPrefs({})
     const wrapper = mountView()
@@ -301,18 +315,5 @@ describe('DashboardView', () => {
     await wrapper.find('[data-testid="layout-reset"]').trigger('click')
     expect(tileOrder(wrapper)[0]).toBe('total_api_keys')
     expect(wrapper.find('[data-testid="layout-eye-total_images"]').attributes('aria-pressed')).toBe('false')
-  })
-
-  it('does not let a slow prefs response overwrite edits already started', async () => {
-    mockAdminApi.getStats.mockResolvedValue({ ok: true, json: () => Promise.resolve(sampleStats) })
-    let resolvePrefs!: (v: unknown) => void
-    mockAdminApi.getPrefs.mockReturnValue(new Promise((r) => (resolvePrefs = r)))
-    const wrapper = mountView()
-    await flushPromises()
-    await wrapper.find('[data-testid="layout-customize"]').trigger('click')
-    await wrapper.find('[data-testid="layout-columns-4"]').trigger('click')
-    resolvePrefs({ ok: true, json: () => Promise.resolve({ dashboard_layout: JSON.stringify({ order: [], hidden: [], columns: 2 }) }) })
-    await flushPromises()
-    expect(wrapper.find('[data-testid="stats-grid"]').classes()).toContain('lg:grid-cols-4')
   })
 })

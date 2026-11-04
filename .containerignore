@@ -1,12 +1,17 @@
 .git
 .github
+.gitignore
 .idea
 .opencode
 .cortexkit
 .env
+.env.*
 NOTES.md
 RULES.md
+Containerfile
 api
+api-go/.env
+api-go/.env.*
 docs
 scripts
 web/node_modules

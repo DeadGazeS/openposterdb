@@ -30,7 +30,10 @@ func main() {
 	logConfig(cfg)
 
 	dbPath, dbDir := app.DBPath(cfg.DBDir)
-	os.MkdirAll(dbDir, 0755)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		slog.Error("cannot create the database directory", "dir", dbDir, "error", err)
+		os.Exit(1)
+	}
 
 	db, err := app.OpenDatabase(dbPath)
 	if err != nil {
@@ -147,7 +150,10 @@ func main() {
 	state.SetupTrakt(mgr.TraktClientIDs())
 
 	if !cfg.ExternalCacheOnly {
-		os.MkdirAll(cfg.CacheDir, 0755)
+		if err := os.MkdirAll(cfg.CacheDir, 0755); err != nil {
+			slog.Error("cannot create the cache directory", "dir", cfg.CacheDir, "error", err)
+			os.Exit(1)
+		}
 	}
 	// Background startup housekeeping: finish deletes of cache dirs staged
 	// by a clear that the previous run didn't complete, and drop temp files
@@ -174,7 +180,7 @@ func main() {
 
 	// CDN content-addressed settings hash registry. Entries expire after 5 min
 	// (matches the documented settings-hash TTL); a janitor sweeps them up.
-	state.CDNHashes = services.NewHashRegistry(5 * time.Minute)
+	state.CDNHashes = services.NewHashRegistry()
 	cdnSweeperDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
@@ -219,10 +225,8 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	slog.Info("shutdown signal received, flushing pending last_used updates")
+	slog.Info("shutdown signal received, draining requests")
 
-	flusher.Flush()
-	flusher.Stop()
 	close(cdnSweeperDone)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -230,8 +234,11 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
-	// After the server stops accepting requests: persist batched image access
-	// times (services.TouchImageAccessCtx).
+	// After the server stopped accepting and drained requests, so uses
+	// recorded by in-flight requests aren't lost: persist last_used and the
+	// batched image access times (services.TouchImageAccessCtx).
+	flusher.Stop()
+	flusher.Flush()
 	services.FlushImageAccess(db)
 
 	slog.Info("server stopped")

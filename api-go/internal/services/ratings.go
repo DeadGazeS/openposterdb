@@ -202,7 +202,8 @@ func OrderAndLimit(sources []*RatingSource, order, exclude string, limit int32) 
 		}
 	}
 
-	if len(result) > int(limit) {
+	// A negative limit means "no limit" (it used to slice out of range).
+	if limit > 0 && len(result) > int(limit) {
 		result = result[:limit]
 	}
 	return result
@@ -735,15 +736,18 @@ func InvalidateTitleRatings(ids, ratings *MemCache, idType, idValue string) {
 	if ids == nil || ratings == nil {
 		return
 	}
-	v, ok := ids.Get(idType + "/" + idValue)
-	if !ok {
-		return
+	var targets []*ResolvedID
+	if v, ok := ids.Get(idType + "/" + idValue); ok {
+		if e, ok := v.(idEntry); ok && e.resolved != nil {
+			targets = append(targets, e.resolved, e.resolved.RatingsTarget)
+		}
 	}
-	e, ok := v.(idEntry)
-	if !ok || e.resolved == nil {
-		return
+	if v, ok := ids.Get(ratingsTargetKey(idType, idValue)); ok {
+		if r, ok := v.(*ResolvedID); ok {
+			targets = append(targets, r)
+		}
 	}
-	for _, r := range []*ResolvedID{e.resolved, e.resolved.RatingsTarget} {
+	for _, r := range targets {
 		if r == nil {
 			continue
 		}
@@ -754,4 +758,25 @@ func InvalidateTitleRatings(ids, ratings *MemCache, idType, idValue string) {
 			ratings.Delete(ratingsCacheKey(RatingsQuery{MediaType: "episode", EpisodeShowTMDbID: ep.ShowTMDbID, EpisodeSeason: ep.SeasonNumber, EpisodeEpisode: ep.EpisodeNumber}))
 		}
 	}
+}
+
+func ratingsTargetKey(idType, idValue string) string { return "rt:" + idType + "/" + idValue }
+
+// RememberRatingsTarget records the title a kitsu:/mal: id takes its ratings
+// from. That cross-reference is computed per request (it isn't part of the
+// cached resolution), so without this InvalidateTitleRatings never found the
+// target's ratings. Nil-safe; a no-op when the same target is already stored.
+func RememberRatingsTarget(ids *MemCache, idType, idValue string, target *ResolvedID) {
+	if ids == nil || target == nil {
+		return
+	}
+	key := ratingsTargetKey(idType, idValue)
+	if v, ok := ids.Peek(key); ok {
+		if r, ok := v.(*ResolvedID); ok && r.TMDbID == target.TMDbID && r.MediaType == target.MediaType &&
+			(r.IMDbID == nil) == (target.IMDbID == nil) && (r.IMDbID == nil || *r.IMDbID == *target.IMDbID) {
+			return
+		}
+	}
+	cp := *target
+	ids.Set(key, &cp, 1)
 }

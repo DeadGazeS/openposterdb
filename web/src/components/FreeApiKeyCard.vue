@@ -331,7 +331,8 @@ async function handleFetch() {
   const prevUrl = resultUrl.value
 
   const ext = imageType.value === 'logo' ? 'png' : 'jpg'
-  const url = `${apiBase}/${FREE_API_KEY}/${idType.value}/${imageType.value}-default/${id}.${ext}${queryString.value}`
+  // Encoded: a typed id with ? # or / must not change the path or query.
+  const url = `${apiBase}/${FREE_API_KEY}/${idType.value}/${imageType.value}-default/${encodeURIComponent(id)}.${ext}${queryString.value}`
 
   try {
     const res = await fetch(url)

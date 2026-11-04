@@ -2,7 +2,6 @@ package services
 
 import (
 	"testing"
-	"time"
 )
 
 func TestSettingsHashDeterministic(t *testing.T) {
@@ -53,45 +52,22 @@ func TestSettingsHashNil(t *testing.T) {
 	}
 }
 
-func TestHashRegistryRegisterAndLookup(t *testing.T) {
-	r := NewHashRegistry(0) // no TTL
+func TestHashRegistryRegisterReturnsSettingsHash(t *testing.T) {
+	r := NewHashRegistry()
 	s := &RenderSettings{ImageSource: "t", Lang: "en", RatingsLimit: 3}
-	hash := r.Register(s)
-	if hash == "" {
-		t.Fatal("Register returned empty hash")
-	}
-	got, ok := r.Lookup(hash)
-	if !ok || got == nil || got.Lang != "en" {
-		t.Fatalf("Lookup: got ok=%v, settings=%+v", ok, got)
+	if got := r.Register(s); got == "" || got != SettingsHash(s) {
+		t.Fatalf("Register = %q, want SettingsHash %q", got, SettingsHash(s))
 	}
 }
 
-func TestHashRegistryTTLExpiry(t *testing.T) {
-	r := NewHashRegistry(10 * time.Millisecond)
-	s := &RenderSettings{ImageSource: "t"}
-	hash := r.Register(s)
-	if _, ok := r.Lookup(hash); !ok {
-		t.Fatal("entry must be present immediately after Register")
+func TestHashRegistryServedIndex(t *testing.T) {
+	r := NewHashRegistry()
+	r.RecordServed("k", CDNServed{CacheKey: "ck"})
+	if got, ok := r.LookupServed("k"); !ok || got.CacheKey != "ck" {
+		t.Fatalf("LookupServed: %v %+v", ok, got)
 	}
-	time.Sleep(30 * time.Millisecond)
-	if _, ok := r.Lookup(hash); ok {
-		t.Fatal("entry must expire after TTL")
-	}
-}
-
-func TestHashRegistrySweepExpired(t *testing.T) {
-	r := NewHashRegistry(10 * time.Millisecond)
-	r.Register(&RenderSettings{ImageSource: "t"})
-	if r.Len() != 1 {
-		t.Fatalf("Len: got %d want 1", r.Len())
-	}
-	time.Sleep(30 * time.Millisecond)
-	removed := r.SweepExpired()
-	if removed != 1 {
-		t.Errorf("SweepExpired: got %d want 1", removed)
-	}
-	if r.Len() != 0 {
-		t.Errorf("Len after sweep: got %d want 0", r.Len())
+	if _, ok := r.LookupServed("other"); ok {
+		t.Fatal("unknown key must miss")
 	}
 }
 
@@ -100,8 +76,8 @@ func TestHashRegistryNilSafe(t *testing.T) {
 	if r.Register(&RenderSettings{}) != "" {
 		t.Error("nil Register must return empty string")
 	}
-	if _, ok := r.Lookup("anything"); ok {
-		t.Error("nil Lookup must miss")
+	if _, ok := r.LookupServed("anything"); ok {
+		t.Error("nil LookupServed must miss")
 	}
 	if got := r.SweepExpired(); got != 0 {
 		t.Errorf("nil SweepExpired: got %d want 0", got)

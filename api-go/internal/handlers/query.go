@@ -148,7 +148,7 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 			*k.badgeStyle = services.ParseBadgeStyle(*query.BadgeStyle)
 		}
 		if query.LabelStyle != nil {
-			*k.labelStyle = services.LabelStyle(*query.LabelStyle)
+			*k.labelStyle = services.ParseLabelStyle(*query.LabelStyle)
 		}
 		if query.TextSize != nil {
 			*k.textSize = services.ClampScalePercent(*query.TextSize)
@@ -166,17 +166,21 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 			*k.logoSize = services.ClampScalePercent(*query.LogoSize)
 		}
 		if query.BadgeShape != nil {
-			*k.badgeShape = services.BadgeShape(*query.BadgeShape)
+			*k.badgeShape = services.ParseBadgeShape(*query.BadgeShape)
 		}
 		if query.BadgeAlpha != nil {
 			*k.badgeAlpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
 		}
 		if query.Layout != nil {
-			def := services.DefaultLayout(kind)
-			*k.layout = services.UnmarshalLayout(*query.Layout, &def)
+			// Parsed values only (never raw query strings) reach the cache
+			// key, so garbage can't mint new cache entries; an invalid
+			// layout keeps the stored one.
+			if l := services.UnmarshalLayout(*query.Layout, k.layout); services.ValidateLayout(&l) == nil {
+				*k.layout = l
+			}
 		}
 		if query.BadgeDirection != nil && k.badgeDirection != nil {
-			*k.badgeDirection = services.BadgeDirection(*query.BadgeDirection)
+			*k.badgeDirection = services.ParseBadgeDirection(*query.BadgeDirection)
 		}
 	}
 
@@ -185,7 +189,7 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 	switch kind {
 	case "poster":
 		if query.Fit != nil {
-			s.PosterFit = services.PosterFit(*query.Fit)
+			s.PosterFit = services.ParsePosterFit(*query.Fit)
 		}
 		if query.Textless != nil {
 			s.Textless = *query.Textless
@@ -204,7 +208,7 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 	}
 
 	if query.ImageSource != nil {
-		s.ImageSource = services.ImageSource(*query.ImageSource)
+		s.ImageSource = services.ParseImageSource(*query.ImageSource)
 	}
 
 	return &s

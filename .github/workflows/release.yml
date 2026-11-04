@@ -18,35 +18,41 @@ jobs:
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           echo "image_name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
           echo "platform_pair=$(echo '${{ matrix.platform }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         id: build
         with:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platform }}
+          # Without it the binary reported "dev" (User-Agent, version check).
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
           # Disable BuildKit's automatic attestation manifests. These embed an
           # extra image-index entry per platform that registries (e.g. GHCR)
           # surface as bogus `unknown/unknown` architectures.
@@ -61,7 +67,7 @@ jobs:
           mkdir -p ${{ runner.temp }}/digests
           echo "${{ steps.build.outputs.digest }}" > "${{ runner.temp }}/digests/${{ steps.meta.outputs.platform_pair }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: digest-${{ steps.meta.outputs.platform_pair }}
           path: ${{ runner.temp }}/digests/*
@@ -75,56 +81,65 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: digest-*
           merge-multiple: true
           path: ${{ runner.temp }}/digests
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
+        # Release values come in through env, never interpolated into the
+        # script text.
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
           VERSION="${TAG#v}"
           MAJOR="v${VERSION%%.*}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
+          # A pre-release gets only its own tags: it must not move the major
+          # tag or :latest that users pull.
+          echo "stable=$([ "$PRERELEASE" = "true" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
           echo "image_name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Create and push GHCR manifest
         working-directory: ${{ runner.temp }}/digests
         run: |
           GHCR_IMAGE="ghcr.io/${{ steps.meta.outputs.image_name }}"
-          docker buildx imagetools create \
-            -t "$GHCR_IMAGE:${{ steps.meta.outputs.tag }}" \
-            -t "$GHCR_IMAGE:${{ steps.meta.outputs.version }}" \
-            -t "$GHCR_IMAGE:${{ steps.meta.outputs.major }}" \
-            -t "$GHCR_IMAGE:latest" \
+          TAGS="-t $GHCR_IMAGE:${{ steps.meta.outputs.tag }} -t $GHCR_IMAGE:${{ steps.meta.outputs.version }}"
+          if [ "${{ steps.meta.outputs.stable }}" = "true" ]; then
+            TAGS="$TAGS -t $GHCR_IMAGE:${{ steps.meta.outputs.major }} -t $GHCR_IMAGE:latest"
+          fi
+          # shellcheck disable=SC2086 # TAGS is a list of flags
+          docker buildx imagetools create $TAGS \
             $(for f in *; do echo "$GHCR_IMAGE@$(cat "$f")"; done)
 
       - name: Create and push Docker Hub manifest
         working-directory: ${{ runner.temp }}/digests
         run: |
           DH_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/openposterdb"
-          docker buildx imagetools create \
-            -t "$DH_IMAGE:${{ steps.meta.outputs.tag }}" \
-            -t "$DH_IMAGE:${{ steps.meta.outputs.version }}" \
-            -t "$DH_IMAGE:${{ steps.meta.outputs.major }}" \
-            -t "$DH_IMAGE:latest" \
+          TAGS="-t $DH_IMAGE:${{ steps.meta.outputs.tag }} -t $DH_IMAGE:${{ steps.meta.outputs.version }}"
+          if [ "${{ steps.meta.outputs.stable }}" = "true" ]; then
+            TAGS="$TAGS -t $DH_IMAGE:${{ steps.meta.outputs.major }} -t $DH_IMAGE:latest"
+          fi
+          # shellcheck disable=SC2086 # TAGS is a list of flags
+          docker buildx imagetools create $TAGS \
             $(for f in *; do echo "$DH_IMAGE@$(cat "$f")"; done)

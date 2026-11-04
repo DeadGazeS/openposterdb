@@ -3,6 +3,11 @@ import type { PreviewKind, PreviewParams, SaveSettingsPayload, SourceColors } fr
 
 const BASE_URL = import.meta.env.VITE_API_URL || ''
 
+/** Absolute URL for an API path (honours VITE_API_URL, for <img src> and bare fetches). */
+export function apiUrl(path: string): string {
+  return BASE_URL + path
+}
+
 let _onAuthFailure: (() => void) | null = null
 
 export function setOnAuthFailure(callback: () => void) {
@@ -183,7 +188,9 @@ function makeAdminImageApi(cfg: AdminImageEndpoints): AdminImageApi {
     list: (page, pageSize, sortBy, sortDir) =>
       get(buildUrl(`/api/admin/${cfg.plural}`, { page, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir })),
     image: (key) => get(`/api/admin/${cfg.plural}/${key}${cfg.imageSuffix}`),
-    fetch: (idType, idValue) => post(`/api/admin/${cfg.plural}/${idType}/${idValue}/fetch`),
+    // Encoded like purge: a typed id with '?', '#' or '/' must not change the path.
+    fetch: (idType, idValue) =>
+      post(`/api/admin/${cfg.plural}/${encodeURIComponent(idType)}/${encodeURIComponent(idValue)}/fetch`),
     purge: (idType, idValue, scope = 'title') => del(purgeUrl(cfg.plural, idType, idValue, scope)),
   }
 }

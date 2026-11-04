@@ -6,8 +6,29 @@
 # Usage:
 #   1. Replace posters.example.com with your actual domain
 #   2. Place this file alongside your docker-compose.yml as "Caddyfile"
-#   3. Add a caddy service to your docker-compose.yml (see below)
+#   3. Add a caddy service to your docker-compose.yml, e.g.:
+#
+#        caddy:
+#          image: caddy:2
+#          restart: unless-stopped
+#          ports: ["80:80", "443:443"]
+#          volumes:
+#            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#            - caddy-data:/data
+#
+#      (and `caddy-data:` under volumes:). Caddy reaches the app as
+#      openposterdb:3000 on the compose network, so the app's own port no
+#      longer needs to be published.
+#
+# Caddy replaces X-Forwarded-For with the real client address, which matches
+# the app's default TRUSTED_PROXIES=private (Caddy connects from the Docker
+# network). Behind Cloudflare as well, set TRUSTED_PROXIES=private,cloudflare.
 
 posters.example.com {
 	reverse_proxy openposterdb:3000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
 }

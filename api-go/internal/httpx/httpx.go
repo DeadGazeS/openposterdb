@@ -5,6 +5,7 @@ package httpx
 import (
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -45,10 +46,16 @@ func WriteAppError(w http.ResponseWriter, err error) {
 	WriteError(w, http.StatusInternalServerError, "Internal server error")
 }
 
+// MaxJSONBody bounds a JSON request body. Every JSON body the API accepts
+// (settings, keys, credentials) is a few KB; the settings import, which can
+// be larger, reads its body itself.
+const MaxJSONBody = 1 << 20
+
 // DecodeJSON decodes the request body as JSON into v and closes the body.
+// At most MaxJSONBody bytes are read; a larger body fails to decode.
 func DecodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(v)
+	return json.NewDecoder(io.LimitReader(r.Body, MaxJSONBody)).Decode(v)
 }
 
 // ParseIntParam reads a positive integer query parameter, falling back to def

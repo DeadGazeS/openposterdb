@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
 
 	"openposterdb/internal/httpx"
+	"openposterdb/internal/services"
 )
 
 // KeyRecorder is satisfied by anything that can remember an api_keys ID for
@@ -81,7 +83,9 @@ func RequireAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 	}
 }
 
-func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder) func(http.Handler) http.Handler {
+// RequireAPIKeyAuth admits API-key session JWTs whose key still exists (db
+// nil skips that check, for tests): deleting a key ends its sessions.
+func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder, db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
@@ -94,6 +98,17 @@ func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder) func(http.Handler)
 			if err != nil || claims.KeyID == 0 {
 				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
+			}
+			if db != nil {
+				exists, err := services.APIKeyExistsCachedCtx(r.Context(), db, claims.KeyID)
+				if err != nil {
+					httpx.WriteError(w, http.StatusInternalServerError, "Internal server error")
+					return
+				}
+				if !exists {
+					httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
+					return
+				}
 			}
 
 			// Record the key use so the admin UI can show when each key was

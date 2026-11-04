@@ -45,8 +45,11 @@ func TestKitsuAnimeIDByMAL_Cached(t *testing.T) {
 	}
 }
 
-// A failed lookup is not cached; "Kitsu has no mapping" is.
+// A failed lookup is not cached as an answer; "Kitsu has no mapping" is.
 func TestKitsuAnimeIDByMAL_FailureNotCached(t *testing.T) {
+	orig := kitsuMALFailureBackoff
+	kitsuMALFailureBackoff = 0
+	t.Cleanup(func() { kitsuMALFailureBackoff = orig })
 	stub := &animeStub{kitsu: `{"data":[]}`}
 	stub.fail.Store(true)
 	c := NewKitsuClient(&http.Client{Transport: stub})
@@ -132,5 +135,19 @@ func TestAniListMediaByMAL_OtherGraphQLErrorNotCached(t *testing.T) {
 	}
 	if n := stub.calls.Load(); n != 2 {
 		t.Fatalf("AniList calls = %d, want 2 (transient errors not cached)", n)
+	}
+}
+
+// Within the backoff a failed lookup isn't repeated (Kitsu outage: cached
+// mal: images must not wait on Kitsu every time).
+func TestKitsuAnimeIDByMAL_FailureBacksOff(t *testing.T) {
+	stub := &animeStub{kitsu: `{"data":[]}`}
+	stub.fail.Store(true)
+	c := NewKitsuClient(&http.Client{Transport: stub})
+	c.AnimeIDByMALCtx(t.Context(), 1)
+	before := stub.calls.Load()
+	c.AnimeIDByMALCtx(t.Context(), 1)
+	if n := stub.calls.Load() - before; n != 0 {
+		t.Fatalf("calls within backoff = %d, want 0", n)
 	}
 }

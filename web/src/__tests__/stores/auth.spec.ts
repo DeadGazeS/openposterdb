@@ -262,7 +262,7 @@ describe('auth store', () => {
     expect(auth.isAdminSession).toBe(false)
   })
 
-  it('loginWithApiKey stores JWT token in sessionStorage', async () => {
+  it('loginWithApiKey keeps the JWT in memory only', async () => {
     vi.stubGlobal(
       'fetch',
       mockFetchSuccess({ token: 'jwt-token', name: 'my-key', key_prefix: 'xyz' }),
@@ -271,7 +271,7 @@ describe('auth store', () => {
     const ok = await auth.loginWithApiKey('raw-key')
     expect(ok).toBe(true)
     expect(auth.apiKeyToken).toBe('jwt-token')
-    expect(sessionStorageStub.setItem).toHaveBeenCalledWith('apiKeyToken', 'jwt-token')
+    expect(sessionStorageStub.setItem).not.toHaveBeenCalledWith('apiKeyToken', expect.anything())
     expect(auth.apiKeyInfo).toEqual({ name: 'my-key', key_prefix: 'xyz' })
   })
 
@@ -294,7 +294,6 @@ describe('auth store', () => {
     expect(auth.apiKeyToken).toBeNull()
     expect(auth.apiKeyInfo).toBeNull()
     expect(auth.isApiKeySession).toBe(false)
-    expect(sessionStorageStub.removeItem).toHaveBeenCalledWith('apiKeyToken')
   })
 
   it('isAuthenticated is true for either session type', async () => {
@@ -318,11 +317,13 @@ describe('auth store', () => {
     expect(auth.isAuthenticated).toBe(false)
   })
 
-  it('initializes apiKeyToken from sessionStorage', () => {
+  // The key-session JWT is no longer persisted (injected script could read
+  // it); a copy stored by an older version is ignored and removed.
+  it('ignores and removes an apiKeyToken persisted by older versions', () => {
     sessionStorageMock['apiKeyToken'] = 'persisted-jwt'
     const auth = useAuthStore()
-    expect(auth.apiKeyToken).toBe('persisted-jwt')
-    expect(auth.isApiKeySession).toBe(true)
+    expect(auth.apiKeyToken).toBeNull()
+    expect(sessionStorageStub.removeItem).toHaveBeenCalledWith('apiKeyToken')
   })
 
   it('freeApiKeyEnabled defaults to false', () => {
@@ -386,7 +387,7 @@ describe('auth store - API key session', () => {
     vi.stubGlobal('sessionStorage', sessionStorageStub)
   })
 
-  it('loginWithApiKey stores JWT token in sessionStorage on success', async () => {
+  it('loginWithApiKey stores the JWT (in memory) on success', async () => {
     vi.stubGlobal(
       'fetch',
       mockFetchSuccess({ token: 'jwt-session-token', name: 'my-key', key_prefix: 'abcd1234' }),
@@ -397,7 +398,7 @@ describe('auth store - API key session', () => {
 
     expect(result).toBe(true)
     expect(auth.apiKeyToken).toBe('jwt-session-token')
-    expect(sessionStorageStub.setItem).toHaveBeenCalledWith('apiKeyToken', 'jwt-session-token')
+    expect(sessionStorageStub.setItem).not.toHaveBeenCalled()
     expect(auth.apiKeyInfo).toEqual({ name: 'my-key', key_prefix: 'abcd1234' })
   })
 
@@ -478,12 +479,6 @@ describe('auth store - API key session', () => {
     expect(url).toContain('/api/auth/key-login')
     expect(options.method).toBe('POST')
     expect(JSON.parse(options.body)).toEqual({ api_key: 'my-key' })
-  })
-
-  it('initializes apiKeyToken from sessionStorage', () => {
-    sessionStorageMock['apiKeyToken'] = 'persisted-jwt'
-    const auth = useAuthStore()
-    expect(auth.apiKeyToken).toBe('persisted-jwt')
   })
 
   // Concurrent 401s share one refresh (each used to send its own; the server

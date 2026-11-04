@@ -23,6 +23,9 @@ type cfStub struct {
 
 func (s *cfStub) RoundTrip(req *http.Request) (*http.Response, error) {
 	s.calls.Add(1)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
 	body, status := s.v6, 200
 	if strings.HasSuffix(req.URL.Path, "ips-v4") {
 		body = s.v4
@@ -136,4 +139,41 @@ func TestParseCloudflareList_Rejects(t *testing.T) {
 	if _, err := parseCloudflareList(builtinLines(false) + builtinLines(true)); err != nil {
 		t.Errorf("built-in list rejected: %v", err)
 	}
+}
+
+// Closing the settings tab mid-check (request ctx cancelled) used to abort
+// the fetch and count it as a failure, triggering the 10-minute backoff.
+func TestCloudflareCheck_SurvivesClientCancel(t *testing.T) {
+	resetCloudflare(t)
+	stub := &cfStub{v4: builtinLines(false), v6: builtinLines(true)}
+	u := newCFUpdater(nil, &http.Client{Transport: stub})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if res := u.check(ctx); res.Error != "" || res.CheckedAt == 0 {
+		t.Fatalf("cancelled client turned the check into a failure: %+v", res)
+	}
+}
+
+type blockingStub struct{ release chan struct{} }
+
+func (s blockingStub) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-s.release
+	return nil, context.Canceled
+}
+
+// The settings GET (status) must not wait for a running check (up to 10 s).
+func TestCloudflareStatus_DoesNotWaitForCheck(t *testing.T) {
+	resetCloudflare(t)
+	stub := blockingStub{release: make(chan struct{})}
+	u := newCFUpdater(nil, &http.Client{Transport: stub})
+	go u.check(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	done := make(chan struct{})
+	go func() { u.status(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Error("status blocked behind a running check")
+	}
+	close(stub.release)
 }

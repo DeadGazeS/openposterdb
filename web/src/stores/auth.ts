@@ -41,8 +41,15 @@ export const useAuthStore = defineStore('auth', () => {
     return freeKeyDefaultsPromise
   }
 
-  // API key session state (sessionStorage so it clears on tab close)
-  const apiKeyToken = ref<string | null>(sessionStorage.getItem('apiKeyToken'))
+  // API key session state: memory only, like the admin token (sessionStorage
+  // was readable by any injected script). There is no refresh cookie for key
+  // sessions, so a reload asks for the key again.
+  const apiKeyToken = ref<string | null>(null)
+  try {
+    sessionStorage.removeItem('apiKeyToken') // drop the copy older versions stored
+  } catch {
+    // storage unavailable
+  }
   const apiKeyInfo = ref<{ name: string; key_prefix: string } | null>(null)
 
   const isAdminSession = computed(() => !!token.value)
@@ -100,7 +107,6 @@ export const useAuthStore = defineStore('auth', () => {
     if (!res.ok) return false
     const data = await res.json()
     apiKeyToken.value = data.token
-    sessionStorage.setItem('apiKeyToken', data.token)
     apiKeyInfo.value = { name: data.name, key_prefix: data.key_prefix }
     return true
   }
@@ -108,7 +114,6 @@ export const useAuthStore = defineStore('auth', () => {
   function logoutApiKey() {
     apiKeyToken.value = null
     apiKeyInfo.value = null
-    sessionStorage.removeItem('apiKeyToken')
   }
 
   // One refresh at a time: several requests hitting 401 together each used to

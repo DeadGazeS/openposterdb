@@ -38,6 +38,17 @@ test.describe('key settings (self-service)', () => {
     return apiKey
   }
 
+  // Key sessions live in memory only (no refresh cookie), so a reload lands
+  // on the login page: sign in again with the same key.
+  async function reloadAndRelogin(page: Page, apiKey: string) {
+    await page.reload()
+    await page.goto('/login')
+    await page.click('text=Sign in with API key instead')
+    await page.fill('#apikey', apiKey)
+    await page.click('button[type="submit"]')
+    await expect(page).toHaveURL(/\/individual-image-settings/)
+  }
+
   test('displays settings form with defaults', async ({ page, request }) => {
     // Ensure global settings are at a known state (other tests may change them)
     const adminToken = await ensureAdmin(request)
@@ -72,7 +83,7 @@ test.describe('key settings (self-service)', () => {
   })
 
   test('settings persist after save and reload', async ({ page, request }) => {
-    await loginWithApiKey(page, request)
+    const apiKey = await loginWithApiKey(page, request)
 
     // Enable fanart
     await page.getByTestId('fanart-checkbox').check()
@@ -80,7 +91,7 @@ test.describe('key settings (self-service)', () => {
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
     // Reload
-    await page.reload()
+    await reloadAndRelogin(page, apiKey)
     await expect(page.getByTestId('page-title')).toContainText('Image Settings')
 
     // Settings should persist
@@ -163,7 +174,7 @@ test.describe('key settings (self-service)', () => {
   })
 
   test('label style persists after change and reload', async ({ page, request }) => {
-    await loginWithApiKey(page, request)
+    const apiKey = await loginWithApiKey(page, request)
     await page.getByTestId('form-tab-poster').click()
 
     // Change poster label style to Text
@@ -174,7 +185,7 @@ test.describe('key settings (self-service)', () => {
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
     // Reload and verify persistence
-    await page.reload()
+    await reloadAndRelogin(page, apiKey)
     await expect(page.getByTestId('page-title')).toContainText('Image Settings')
     await page.getByTestId('form-tab-poster').click()
 

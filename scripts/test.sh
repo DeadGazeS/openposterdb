@@ -46,6 +46,13 @@ if [ -f .env ]; then
     ENV_FILE_ARGS=(--env-file .env)
 fi
 
+# Throwaway secrets for the test container (the server refuses to start
+# without them; TEST_JWT_SECRET used to be referenced but never set, and
+# SECRETS_KEY was missing entirely).
+rand_hex() { od -An -tx1 -N32 /dev/urandom | tr -d ' \n'; }
+TEST_JWT_SECRET="${TEST_JWT_SECRET:-$(rand_hex)}"
+TEST_SECRETS_KEY="${TEST_SECRETS_KEY:-$(rand_hex)}"
+
 echo "Starting container..."
 $CTR rm -f "$CONTAINER_NAME" 2>/dev/null || true
 $CTR run -d --name "$CONTAINER_NAME" \
@@ -53,6 +60,7 @@ $CTR run -d --name "$CONTAINER_NAME" \
     --tmpfs /tmp/openposterdb-e2e \
     "${ENV_FILE_ARGS[@]}" \
     -e JWT_SECRET="${TEST_JWT_SECRET}" \
+    -e SECRETS_KEY="${TEST_SECRETS_KEY}" \
     -e LISTEN_ADDR=0.0.0.0:3000 \
     -e COOKIE_SECURE=false \
     -e RATE_LIMIT_AUTH_RPM=0 \

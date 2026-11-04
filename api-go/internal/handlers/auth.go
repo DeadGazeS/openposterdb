@@ -105,7 +105,7 @@ func IssueTokenPairCtx(ctx context.Context, db *sql.DB, jwtSecret []byte, userID
 
 	rawRefresh = GenerateRefreshToken()
 	tokenHash := HashRefreshToken(rawRefresh)
-	expiresAt := time.Now().Add(refreshTokenExpiryDays * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	expiresAt := time.Now().UTC().Add(refreshTokenExpiryDays * 24 * time.Hour).Format("2006-01-02 15:04:05")
 
 	if _, err := services.CreateRefreshTokenCtx(ctx, db, userID, tokenHash, expiresAt); err != nil {
 		return "", "", err

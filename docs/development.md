@@ -4,7 +4,7 @@ Most self-hosters should use Docker (see the [README](../README.md)). These inst
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26+
 - Node.js 20.19+ (for the admin UI)
 - A [TMDB API key](https://www.themoviedb.org/settings/api)
 - At least one ratings source: [MDBList API key](https://mdblist.com/preferences/) (preferred — covers all 9 rating sources), [OMDb API key](https://www.omdbapi.com/apikey.aspx), or [Trakt Client ID](https://trakt.tv/oauth/applications)

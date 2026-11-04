@@ -522,7 +522,7 @@ func TestApplyQueryOverridesEveryKindGetsEveryPerKindField(t *testing.T) {
 		{"badge_width", func() *ImageQuery { return &ImageQuery{BadgeWidth: i32(150)} }, services.ScalePercent(150)},
 		{"badge_height", func() *ImageQuery { return &ImageQuery{BadgeHeight: i32(160)} }, services.ScalePercent(160)},
 		{"logo_size", func() *ImageQuery { return &ImageQuery{LogoSize: i32(170)} }, services.ScalePercent(170)},
-		{"badge_shape", func() *ImageQuery { return &ImageQuery{BadgeShape: str("pill")} }, services.BadgeShape("pill")},
+		{"badge_shape", func() *ImageQuery { return &ImageQuery{BadgeShape: str("p")} }, services.BadgeShapePill},
 		{"badge_alpha", func() *ImageQuery { return &ImageQuery{BadgeAlpha: i32(80)} }, services.BadgeAlpha(80)},
 	}
 
@@ -553,7 +553,7 @@ func TestApplyQueryOverridesEveryKindGetsEveryPerKindField(t *testing.T) {
 // deliberate asymmetry: it applies to poster/backdrop/episode but never to
 // logo, whose badge layout is direction-agnostic.
 func TestApplyQueryOverridesBadgeDirectionPerKind(t *testing.T) {
-	dir := "tb"
+	dir := "v"
 	for _, kind := range []string{"poster", "backdrop", "episode"} {
 		base := services.DefaultRenderSettings()
 		got := applyQueryOverrides(&base, &ImageQuery{BadgeDirection: &dir}, kind)
@@ -566,7 +566,7 @@ func TestApplyQueryOverridesBadgeDirectionPerKind(t *testing.T) {
 		case "episode":
 			v = got.EpisodeBadgeDirection
 		}
-		if v != services.BadgeDirection("tb") {
+		if v != services.BadgeDirectionVertical {
 			t.Errorf("kind %q: badge_direction not applied, got %q", kind, v)
 		}
 	}
@@ -601,13 +601,13 @@ func TestApplyQueryOverridesInvalidRatingsLimitRejectsAll(t *testing.T) {
 func TestApplyQueryOverridesUnknownKind(t *testing.T) {
 	base := services.DefaultRenderSettings()
 	w := int32(150)
-	src := "fanart"
+	src := "f"
 	got := applyQueryOverrides(&base, &ImageQuery{BadgeWidth: &w, ImageSource: &src}, "banner")
 	if got.PosterBadgeWidth != base.PosterBadgeWidth || got.LogoBadgeWidth != base.LogoBadgeWidth ||
 		got.BackdropBadgeWidth != base.BackdropBadgeWidth || got.EpisodeBadgeWidth != base.EpisodeBadgeWidth {
 		t.Error("unknown kind must not apply per-kind overrides")
 	}
-	if got.ImageSource != services.ImageSource("fanart") {
+	if got.ImageSource != services.ImageSourceFanart {
 		t.Errorf("image_source is kind-independent, got %q", got.ImageSource)
 	}
 }

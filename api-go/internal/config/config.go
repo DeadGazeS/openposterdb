@@ -32,9 +32,6 @@ type Config struct {
 	RateLimitRPM        uint64
 	RateLimitCDNRPM     uint64
 	RateLimitAuthRPM    uint64
-	// TrustedProxies (TRUSTED_PROXIES) may set X-Forwarded-For; nil means
-	// the default (loopback + private ranges).
-	TrustedProxies *[]netip.Prefix
 	// TrustedProxiesEnv is the raw TRUSTED_PROXIES value. When set it locks
 	// the setting (the admin UI shows it read-only); when empty the value
 	// stored in global settings (Settings → General → Config) applies.
@@ -52,14 +49,15 @@ type Config struct {
 }
 
 func FromEnv() (*Config, error) {
-	trusted, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
-	if err != nil {
-		return nil, err
-	}
 	// Load .env into the process env if present. Already-set env vars take
 	// precedence (godotenv.Load does not overwrite); quotes/inline comments
 	// are handled by godotenv so the sanitizeValue workaround below is gone.
 	_ = godotenv.Load()
+	// Validated after .env is loaded, so a value set only there is checked
+	// too (it used to be validated before, i.e. only from the real env).
+	if _, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES")); err != nil {
+		return nil, err
+	}
 
 	c := &Config{
 		TMDBAPIKey:          optionalSecret("TMDB_API_KEY"),
@@ -73,14 +71,13 @@ func FromEnv() (*Config, error) {
 		RatingsMinStaleSecs: envUint64OrDefault("RATINGS_STALE_SECS", 86400),
 		RatingsMaxAgeSecs:   envUint64OrDefault("RATINGS_MAX_AGE_SECS", 31536000),
 		ImageStaleSecs:      envUint64OrDefault("IMAGE_STALE_SECS", 0),
-		ImageQuality:        envUint8OrDefault("IMAGE_QUALITY", 85),
+		ImageQuality:        clampQuality(envUint8OrDefault("IMAGE_QUALITY", 85)),
 		ImageMemCacheMB:     envUint64OrDefault("IMAGE_MEM_CACHE_MB", 512),
 		StaticDir:           os.Getenv("STATIC_DIR"),
 		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
 		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
 		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
 		RateLimitAuthRPM:    envUint64OrDefault("RATE_LIMIT_AUTH_RPM", 10),
-		TrustedProxies:      &trusted,
 		TrustedProxiesEnv:   strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
@@ -258,10 +255,10 @@ func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 			if err != nil {
 				return nil, fmt.Errorf("TRUSTED_PROXIES: %q: %w", part, err)
 			}
-			if p.Bits() == 0 {
-				// Trusting every address would let any client choose its
-				// own rate-limit identity again.
-				return nil, fmt.Errorf("TRUSTED_PROXIES: %q would trust every address", part)
+			if p.Bits() < minTrustedPrefixBits(p.Addr()) {
+				// Trusting (nearly) every address would let any client
+				// choose its own rate-limit identity again.
+				return nil, fmt.Errorf("TRUSTED_PROXIES: %q is too wide to trust", part)
 			}
 			out = append(out, p.Masked())
 		default:
@@ -322,3 +319,18 @@ func SetCloudflareRanges(p []netip.Prefix) {
 
 // CloudflareGeneration changes whenever SetCloudflareRanges is called.
 func CloudflareGeneration() uint64 { return cloudflareGen.Load() }
+
+// minTrustedPrefixBits is the widest prefix accepted as a trusted proxy range:
+// /8 for IPv4 (10.0.0.0/8 is the widest private range) and /7 for IPv6
+// (fc00::/7, unique local).
+func minTrustedPrefixBits(a netip.Addr) int {
+	if a.Is4() || a.Is4In6() {
+		return 8
+	}
+	return 7
+}
+
+// clampQuality keeps IMAGE_QUALITY within JPEG's 1-100.
+func clampQuality(q uint8) uint8 {
+	return max(1, min(q, 100))
+}

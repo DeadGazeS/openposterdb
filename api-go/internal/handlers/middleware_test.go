@@ -72,7 +72,7 @@ func TestRequireAPIKeyAuth_RecordsKeyUse(t *testing.T) {
 	flusher := services.NewLastUsedFlusher(db, 1) // 1ns interval; we flush manually
 
 	mux := http.NewServeMux()
-	mux.Handle("/protected", RequireAPIKeyAuth(jwtSecret, flusher)(
+	mux.Handle("/protected", RequireAPIKeyAuth(jwtSecret, flusher, db)(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}),
@@ -138,7 +138,7 @@ func TestRequireAPIKeyAuth_NilFlusherSafe(t *testing.T) {
 	_ = prefix
 
 	mux := http.NewServeMux()
-	mux.Handle("/p", RequireAPIKeyAuth(jwtSecret, nil)(
+	mux.Handle("/p", RequireAPIKeyAuth(jwtSecret, nil, nil)(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 	))
 	req := httptest.NewRequest("GET", "/p", nil)
@@ -147,5 +147,41 @@ func TestRequireAPIKeyAuth_NilFlusherSafe(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("nil flusher must not break auth: got %d", rec.Code)
+	}
+}
+
+// Deleting an API key must end its self-service sessions; the signed JWT
+// used to stay valid for its whole 24 h lifetime.
+func TestRequireAPIKeyAuth_DeletedKeyRejected(t *testing.T) {
+	db := newKeyAuthDB(t)
+	_, hash, prefix := services.GenerateAPIKey()
+	if _, err := services.CreateAPIKey(db, "test", hash, prefix, "", 1); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+	var keyID int64
+	if err := db.QueryRow(`SELECT id FROM api_keys WHERE key_hash = ?`, hash).Scan(&keyID); err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	secret := []byte("01234567890123456789012345678901234567890123456789012345678901234567")
+	token, err := CreateAPIKeyToken(keyID, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := RequireAPIKeyAuth(secret, nil, db)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	do := func() int {
+		req := httptest.NewRequest("GET", "/p", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if c := do(); c != 200 {
+		t.Fatalf("live key: got %d", c)
+	}
+	if err := services.DeleteAPIKey(db, keyID); err != nil {
+		t.Fatal(err)
+	}
+	if c := do(); c != http.StatusUnauthorized {
+		t.Fatalf("deleted key: got %d, want 401", c)
 	}
 }

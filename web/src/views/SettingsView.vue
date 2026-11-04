@@ -82,6 +82,7 @@ async function copyServiceKey(svc: string, chip: ServiceKeyChip) {
   const key = await chipValue(svc, chip)
   if (!key) return
   const id = `${svc}:${chipKey(chip)}`
+  forgetRevealed(id)
   try {
     await navigator.clipboard.writeText(key)
     serviceCopyState.value[id] = 'copied'
@@ -140,6 +141,7 @@ watch(
     if (!keys) return
     for (const svc of ['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const) {
       const k = keys[svc]
+      if (pendingServiceSaves.has(svc)) continue // unsaved chips: keep them
       if (k && !k.locked) serviceKeyChips.value[svc] = (k.keys ?? []).map((r) => ({ id: r.id, masked: r.masked }))
     }
   },
@@ -171,14 +173,19 @@ async function chipValue(svc: string, chip: ServiceKeyChip): Promise<string | nu
   if (chip.value) return chip.value
   const id = `${svc}:${chipKey(chip)}`
   if (revealedValues.value[id]) return revealedValues.value[id]!
-  const res = await adminApi.revealServiceKey(svc, chip.id!)
-  if (!res.ok) {
+  try {
+    const res = await adminApi.revealServiceKey(svc, chip.id!)
+    if (!res.ok) {
+      serviceKeysError.value = 'Could not reveal the key'
+      return null
+    }
+    const data = (await res.json()) as { key: string }
+    revealedValues.value = { ...revealedValues.value, [id]: data.key }
+    return data.key
+  } catch {
     serviceKeysError.value = 'Could not reveal the key'
     return null
   }
-  const data = (await res.json()) as { key: string }
-  revealedValues.value = { ...revealedValues.value, [id]: data.key }
-  return data.key
 }
 
 function displayedKey(svc: string, chip: ServiceKeyChip): string {
@@ -196,6 +203,16 @@ async function toggleReveal(svc: string, chip: ServiceKeyChip) {
     next.add(id)
   }
   revealedKeys.value = next
+  forgetRevealed(id)
+}
+
+// Drops a revealed plaintext once it isn't shown (it was kept until the view
+// unmounted, removed chips included).
+function forgetRevealed(id: string) {
+  if (revealedKeys.value.has(id) || !(id in revealedValues.value)) return
+  const rest = { ...revealedValues.value }
+  delete rest[id]
+  revealedValues.value = rest
 }
 
 function newChip(value: string): ServiceKeyChip {
@@ -234,24 +251,50 @@ function onServiceKeyDraftInput(svc: string) {
 }
 
 function removeServiceKey(svc: string, chip: ServiceKeyChip) {
+  const id = `${svc}:${chipKey(chip)}`
+  if (revealedKeys.value.has(id)) {
+    const next = new Set(revealedKeys.value)
+    next.delete(id)
+    revealedKeys.value = next
+  }
+  forgetRevealed(id)
   serviceKeyChips.value[svc] = (serviceKeyChips.value[svc] ?? []).filter((c) => chipKey(c) !== chipKey(chip))
   void saveServiceKeys(svc)
 }
 
+// Services whose chips changed while another save was running: saved next,
+// and not re-seeded from the server meanwhile (that dropped the new chips).
+const pendingServiceSaves = new Set<string>()
+
 async function saveServiceKeys(svc: string) {
-  if (serviceKeysSaving.value) return
+  if (serviceKeysSaving.value) {
+    pendingServiceSaves.add(svc)
+    return
+  }
   serviceKeysSaving.value = svc
   serviceKeysError.value = ''
-  // Stored keys go back as references; only newly typed keys travel as text.
-  const value = (serviceKeyChips.value[svc] ?? []).map((c) => (c.id ? `ref:${c.id}` : c.value)).join(',')
-  const res = await adminApi.updateServiceKeys({ [svc]: value })
-  if (res.ok) {
-    await refetchServiceKeys()
-  } else {
-    const data = await res.json().catch(() => null)
-    serviceKeysError.value = data?.error || 'Failed to save'
+  try {
+    // Stored keys go back as references; only newly typed keys travel as text.
+    const value = (serviceKeyChips.value[svc] ?? []).map((c) => (c.id ? `ref:${c.id}` : c.value)).join(',')
+    const res = await adminApi.updateServiceKeys({ [svc]: value })
+    if (res.ok) {
+      await refetchServiceKeys()
+    } else {
+      const data = await res.json().catch(() => null)
+      serviceKeysError.value = data?.error || 'Failed to save'
+    }
+  } catch {
+    // Without this a network error left "saving" set and blocked every
+    // later save until a reload.
+    serviceKeysError.value = 'Failed to save'
+  } finally {
+    serviceKeysSaving.value = null
   }
-  serviceKeysSaving.value = null
+  const next = pendingServiceSaves.values().next().value
+  if (next !== undefined) {
+    pendingServiceSaves.delete(next)
+    await saveServiceKeys(next)
+  }
 }
 
 const serviceLabels: Record<string, string> = {
@@ -337,16 +380,20 @@ const { active: apiSavedCheck, flash: showApiSaved } = useSavedFlash()
 
 async function saveFreeApiKeyToggle(): Promise<void> {
   if (!settings.value) return
-  const res = await adminApi.updateSettings({
-    image_source: settings.value.image_source,
-    free_api_key_enabled: freeApiKeyEnabled.value,
-  })
-  if (res.ok) {
-    await refetch()
-    showApiSaved()
-  } else {
-    const data = await res.json().catch(() => null)
-    freeKeyError.value = data?.error || 'Failed to save'
+  try {
+    const res = await adminApi.updateSettings({
+      image_source: settings.value.image_source,
+      free_api_key_enabled: freeApiKeyEnabled.value,
+    })
+    if (res.ok) {
+      await refetch()
+      showApiSaved()
+    } else {
+      const data = await res.json().catch(() => null)
+      freeKeyError.value = data?.error || 'Failed to save'
+    }
+  } catch {
+    freeKeyError.value = 'Failed to save'
   }
 }
 

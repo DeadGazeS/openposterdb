@@ -61,8 +61,12 @@ export function useRenderSettingsForm<T = unknown>(
     },
     async resetSettings(): Promise<boolean> {
       if (!opts.api.reset) return false
-      const res = await opts.api.reset()
-      return res.ok
+      try {
+        const res = await opts.api.reset()
+        return res.ok
+      } catch {
+        return false // network error: callers show "Failed to reset"
+      }
     },
   }
 }

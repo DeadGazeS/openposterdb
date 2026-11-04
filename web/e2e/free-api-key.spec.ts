@@ -140,11 +140,11 @@ test.describe('free API key', () => {
     expect(res.status()).not.toBe(401)
   })
 
-  test('poster endpoint with free key returns 401 when disabled', async ({ request }) => {
+  test('poster endpoint with free key returns 403 when disabled', async ({ request }) => {
     await setFreeApiKey(request, false)
 
     const res = await request.get('/t0-free-rpdb/imdb/poster-default/tt0111161.jpg')
-    expect(res.status()).toBe(401)
+    expect(res.status()).toBe(403)
   })
 })
 

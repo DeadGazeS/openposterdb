@@ -98,7 +98,8 @@ func isAPIPath(path string) bool {
 	if len(first) == 64 && isHex(first) {
 		return true
 	}
-	return false
+	// The public free key isn't hex; without this its URLs got the SPA.
+	return first == handlers.FreeAPIKey && len(parts) == 2
 }
 
 func isHex(s string) bool {

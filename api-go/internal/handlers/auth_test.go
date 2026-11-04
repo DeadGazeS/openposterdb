@@ -560,3 +560,31 @@ func TestKeyLoginHandler_InvalidKey_401(t *testing.T) {
 		t.Errorf("status: got %d, want 401 (body=%+v)", status, body)
 	}
 }
+
+// expires_at is compared as UTC (refresh + pruning); it used to be written in
+// local time, so with TZ != UTC sessions expired hours early or late.
+func TestIssueTokenPair_ExpiryIsUTC(t *testing.T) {
+	db := authTestDB(t)
+	if _, err := db.Exec(`INSERT INTO admin_users (username, password_hash) VALUES ('a', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	orig := time.Local
+	time.Local = time.FixedZone("UTC+10", 10*3600)
+	t.Cleanup(func() { time.Local = orig })
+
+	if _, _, err := IssueTokenPairCtx(context.Background(), db, []byte("01234567890123456789012345678901"), 1, "a"); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.QueryRow(`SELECT expires_at FROM refresh_tokens`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	got, err := time.Parse("2006-01-02 15:04:05", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Now().UTC().Add(refreshTokenExpiryDays * 24 * time.Hour)
+	if d := got.Sub(want); d > time.Minute || d < -time.Minute {
+		t.Fatalf("expires_at %s is %s off UTC expiry", raw, d)
+	}
+}
