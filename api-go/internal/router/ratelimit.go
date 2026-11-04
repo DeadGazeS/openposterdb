@@ -30,6 +30,9 @@ type rateLimiter struct {
 	count       atomic.Int64
 	idleTimeout time.Duration
 	overflow    *rate.Limiter // shared bucket once maxLimiterEntries is reached
+	// clientIP keys the buckets; the Router sets it to its live
+	// trusted-proxy resolver (Settings → General → Config / TRUSTED_PROXIES).
+	clientIP func(*http.Request) string
 }
 
 // maxLimiterEntries bounds the per-IP map; beyond it new IPs share one
@@ -42,6 +45,7 @@ func newRateLimiter(perMinute uint64) *rateLimiter {
 		perMinute:   perMinute,
 		idleTimeout: 5 * time.Minute,
 		overflow:    rate.NewLimiter(rate.Limit(float64(perMinute)/60.0), burst),
+		clientIP:    defaultClientIP,
 	}
 }
 
@@ -93,14 +97,9 @@ func (r *rateLimiter) SweepIdle() int {
 	return removed
 }
 
-// trustedProxies are the peers allowed to tell us the client's address via
-// X-Forwarded-For (TRUSTED_PROXIES; default: loopback + private ranges, i.e.
-// a reverse proxy on the same host or Docker network). Set by New.
-var trustedProxies = config.DefaultTrustedProxies()
-
-func isTrustedProxy(a netip.Addr) bool {
+func isTrustedProxy(a netip.Addr, trusted []netip.Prefix) bool {
 	a = a.Unmap()
-	for _, p := range trustedProxies {
+	for _, p := range trusted {
 		if p.Contains(a) {
 			return true
 		}
@@ -108,18 +107,19 @@ func isTrustedProxy(a netip.Addr) bool {
 	return false
 }
 
-// clientIP returns the address rate limits are keyed on. X-Forwarded-For is
-// only honoured when the connection comes from a trusted proxy, and then
-// walked from the right, skipping trusted hops: the first untrusted entry is
-// the client. The leftmost entries are whatever the client sent, so taking
-// the first one (as before) let anyone pick a fresh identity per request.
-func clientIP(r *http.Request) string {
+// clientIPFor returns the address rate limits are keyed on, given the peers
+// trusted to set X-Forwarded-For. XFF is only honoured when the connection
+// comes from a trusted proxy, and then walked from the right, skipping
+// trusted hops: the first untrusted entry is the client. The leftmost
+// entries are whatever the client sent, so taking the first one let anyone
+// pick a fresh identity per request.
+func clientIPFor(r *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	peer, err := netip.ParseAddr(host)
-	if err != nil || !isTrustedProxy(peer) {
+	if err != nil || !isTrustedProxy(peer, trusted) {
 		return host
 	}
 	xff := r.Header.Values("X-Forwarded-For")
@@ -133,11 +133,17 @@ func clientIP(r *http.Request) string {
 		if err != nil {
 			return host // malformed chain: fall back to the proxy itself
 		}
-		if !isTrustedProxy(a) {
+		if !isTrustedProxy(a, trusted) {
 			return a.Unmap().String()
 		}
 	}
 	return host
+}
+
+// defaultClientIP resolves with the default trust (loopback + private);
+// limiters created outside a Router use it.
+func defaultClientIP(r *http.Request) string {
+	return clientIPFor(r, config.DefaultTrustedProxies())
 }
 
 // RateLimit returns a middleware that admits requests only when the client's
@@ -152,7 +158,7 @@ func RateLimit(rl *rateLimiter) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIP(r)
+			ip := rl.clientIP(r)
 			lim := rl.limiter(ip)
 			r2 := lim.Reserve()
 			if !r2.OK() {

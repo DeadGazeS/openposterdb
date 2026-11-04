@@ -43,22 +43,23 @@ type AppState struct {
 }
 
 func New(state *AppState) *Router {
-	if state.Config != nil && state.Config.TrustedProxies != nil {
-		trustedProxies = *state.Config.TrustedProxies
-	}
 	r := &Router{
-		state: state,
-		mux:   http.NewServeMux(),
+		state:      state,
+		mux:        http.NewServeMux(),
+		trust:      newProxyTrust(state.Config, state.DB),
+		cloudflare: newCFUpdater(state.DB, state.HTTPClient),
 	}
 	r.registerRoutes()
 	return r
 }
 
 type Router struct {
-	state     *AppState
-	mux       *http.ServeMux
-	staticDir string
-	fs        http.Handler
+	state      *AppState
+	mux        *http.ServeMux
+	trust      *proxyTrust // which peers may set X-Forwarded-For (rate-limit keys)
+	cloudflare *cfUpdater  // Cloudflare edge ranges: built-in, or updated from cloudflare.com
+	staticDir  string
+	fs         http.Handler
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {

@@ -89,16 +89,17 @@ func TestRateLimit_DisabledOnZero(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
+	trusted := config.DefaultTrustedProxies()
 	ip := func(remote string, xff ...string) string {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.RemoteAddr = remote
 		for _, v := range xff {
 			r.Header.Add("X-Forwarded-For", v)
 		}
-		return clientIP(r)
+		return clientIPFor(r, trusted)
 	}
 	// Default: only loopback/private peers may set X-Forwarded-For.
-	trustedProxies = config.DefaultTrustedProxies()
+	trusted = config.DefaultTrustedProxies()
 	if got := ip("1.2.3.4:5555"); got != "1.2.3.4" {
 		t.Errorf("no XFF: got %q", got)
 	}
@@ -122,7 +123,7 @@ func TestClientIP(t *testing.T) {
 
 	// TRUSTED_PROXIES=none: always the connection address.
 	none, _ := config.ParseTrustedProxies("none")
-	trustedProxies = none
+	trusted = none
 	if got := ip("172.18.0.2:5555", "9.9.9.9"); got != "172.18.0.2" {
 		t.Errorf("none: got %q", got)
 	}
@@ -131,7 +132,7 @@ func TestClientIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trustedProxies = custom
+	trusted = custom
 	if got := ip("10.0.0.5:5555", "9.9.9.9, 173.245.48.10"); got != "9.9.9.9" {
 		t.Errorf("custom: got %q want 9.9.9.9", got)
 	}
@@ -141,14 +142,14 @@ func TestClientIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trustedProxies = cf
+	trusted = cf
 	if got := ip("172.18.0.3:5555", "6.6.6.6, 9.9.9.9, 162.158.10.20"); got != "9.9.9.9" {
 		t.Errorf("cloudflare keyword: got %q want the visitor 9.9.9.9", got)
 	}
 	if got := ip("172.18.0.3:5555", "9.9.9.9, 2606:4700::1"); got != "9.9.9.9" {
 		t.Errorf("cloudflare keyword (IPv6 edge): got %q", got)
 	}
-	trustedProxies = config.DefaultTrustedProxies()
+	trusted = config.DefaultTrustedProxies()
 
 	if _, err := config.ParseTrustedProxies("10.0.0.0/33"); err == nil {
 		t.Error("invalid CIDR must be rejected")

@@ -109,6 +109,19 @@ const router = createRouter({
           redirect: { name: 'settings-api' },
         },
         {
+          path: 'settings/general',
+          name: 'settings-general',
+          component: () => import('@/views/SettingsView.vue'),
+          meta: { title: 'General' },
+          // Like the other tabbed sections: always carry the active tab in
+          // the URL (reload / bookmark / share land on the same view).
+          beforeEnter: (to) => {
+            if (!('tab' in to.query)) {
+              return { name: 'settings-general', query: { ...to.query, tab: 'config' } }
+            }
+          },
+        },
+        {
           path: 'settings/api',
           name: 'settings-api',
           component: () => import('@/views/SettingsView.vue'),
@@ -123,10 +136,9 @@ const router = createRouter({
           },
         },
         {
+          // Backup moved into Settings → General; keep old links working.
           path: 'settings/backup',
-          name: 'settings-backup',
-          component: () => import('@/views/SettingsView.vue'),
-          meta: { title: 'Backup' },
+          redirect: { name: 'settings-general', query: { tab: 'backup' } },
         },
         {
           path: 'settings/image',

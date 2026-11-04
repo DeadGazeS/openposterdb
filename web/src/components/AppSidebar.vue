@@ -50,7 +50,7 @@ const settingsItems = computed(() =>
     ? [
         { title: 'API', to: '/admin/settings/api' },
         { title: 'Global Image Settings', to: '/admin/settings/image' },
-        { title: 'Backup', to: '/admin/settings/backup' },
+        { title: 'General', to: '/admin/settings/general' },
       ]
     : [],
 )

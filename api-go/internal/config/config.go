@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/joho/godotenv"
 )
@@ -33,7 +34,11 @@ type Config struct {
 	RateLimitAuthRPM    uint64
 	// TrustedProxies (TRUSTED_PROXIES) may set X-Forwarded-For; nil means
 	// the default (loopback + private ranges).
-	TrustedProxies     *[]netip.Prefix
+	TrustedProxies *[]netip.Prefix
+	// TrustedProxiesEnv is the raw TRUSTED_PROXIES value. When set it locks
+	// the setting (the admin UI shows it read-only); when empty the value
+	// stored in global settings (Settings → General → Config) applies.
+	TrustedProxiesEnv  string
 	ExternalCacheOnly  bool
 	EnableCDNRedirects bool
 	FreeKeyEnabled     *bool
@@ -76,6 +81,7 @@ func FromEnv() (*Config, error) {
 		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
 		RateLimitAuthRPM:    envUint64OrDefault("RATE_LIMIT_AUTH_RPM", 10),
 		TrustedProxies:      &trusted,
+		TrustedProxiesEnv:   strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
@@ -252,6 +258,11 @@ func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 			if err != nil {
 				return nil, fmt.Errorf("TRUSTED_PROXIES: %q: %w", part, err)
 			}
+			if p.Bits() == 0 {
+				// Trusting every address would let any client choose its
+				// own rate-limit identity again.
+				return nil, fmt.Errorf("TRUSTED_PROXIES: %q would trust every address", part)
+			}
 			out = append(out, p.Masked())
 		default:
 			a, err := netip.ParseAddr(part)
@@ -276,12 +287,38 @@ var cloudflareRanges = []string{
 	"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
 }
 
-// CloudflareProxies returns Cloudflare's edge ranges (TRUSTED_PROXIES
-// keyword "cloudflare").
-func CloudflareProxies() []netip.Prefix {
+// Current Cloudflare ranges: the built-in list until a newer one is fetched
+// from cloudflare.com (SetCloudflareRanges). cloudflareGen changes with
+// every update so parsed TRUSTED_PROXIES values can be re-expanded.
+var (
+	cloudflareCurrent atomic.Pointer[[]netip.Prefix]
+	cloudflareGen     atomic.Uint64
+)
+
+// BuiltinCloudflareProxies returns the ranges compiled into the binary.
+func BuiltinCloudflareProxies() []netip.Prefix {
 	out := make([]netip.Prefix, 0, len(cloudflareRanges))
 	for _, c := range cloudflareRanges {
 		out = append(out, netip.MustParsePrefix(c))
 	}
 	return out
 }
+
+// CloudflareProxies returns Cloudflare's edge ranges (TRUSTED_PROXIES
+// keyword "cloudflare"): the latest fetched list, else the built-in one.
+func CloudflareProxies() []netip.Prefix {
+	if p := cloudflareCurrent.Load(); p != nil {
+		return append([]netip.Prefix(nil), *p...)
+	}
+	return BuiltinCloudflareProxies()
+}
+
+// SetCloudflareRanges replaces the current Cloudflare ranges.
+func SetCloudflareRanges(p []netip.Prefix) {
+	cp := append([]netip.Prefix(nil), p...)
+	cloudflareCurrent.Store(&cp)
+	cloudflareGen.Add(1)
+}
+
+// CloudflareGeneration changes whenever SetCloudflareRanges is called.
+func CloudflareGeneration() uint64 { return cloudflareGen.Load() }

@@ -3,6 +3,7 @@ package router
 import (
 	"log/slog"
 	"net/http"
+	"openposterdb/internal/config"
 	"path/filepath"
 	"strings"
 	"time"
@@ -57,6 +58,7 @@ func (r *Router) registerAuthRoutes() {
 	// Per-IP limit on the credential endpoints (login/setup/key-login): they
 	// were unthrottled, allowing unlimited password guessing.
 	authLimiter := newRateLimiter(r.state.Config.RateLimitAuthRPM)
+	authLimiter.clientIP = r.trust.clientIP
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		for range ticker.C {
@@ -297,6 +299,58 @@ func (r *Router) registerAdminRoutes() {
 		}
 	}))
 
+	// Client IP / reverse proxy settings (Settings → General → Config):
+	// which peers may set X-Forwarded-For. TRUSTED_PROXIES in the
+	// environment locks it. The response includes how this very request's
+	// address was resolved, so the admin can check the setting.
+	r.mux.HandleFunc("/api/admin/settings/network", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+		switch req.Method {
+		case http.MethodGet:
+		case http.MethodPut:
+			if r.trust.locked() {
+				httpx.WriteError(w, 409, "set by the TRUSTED_PROXIES environment variable")
+				return
+			}
+			var body proxySettings
+			if err := httpx.DecodeJSON(req, &body); err != nil {
+				httpx.WriteError(w, 400, "invalid request body")
+				return
+			}
+			raw := body.raw()
+			if _, err := config.ParseTrustedProxies(raw); err != nil {
+				httpx.WriteError(w, 400, strings.TrimPrefix(err.Error(), "TRUSTED_PROXIES: "))
+				return
+			}
+			if err := services.SetGlobalSettingCtx(req.Context(), s.DB, trustedProxiesSetting, raw); err != nil {
+				httpx.WriteError(w, 500, "Failed to save")
+				return
+			}
+		default:
+			httpx.WriteError(w, 405, "Method not allowed")
+			return
+		}
+		httpx.WriteJSON(w, 200, map[string]any{
+			"locked":     r.trust.locked(),
+			"settings":   parseProxySettings(r.trust.effectiveRaw(req.Context())),
+			"cloudflare": r.cloudflare.status(),
+			"detected": map[string]string{
+				"client_ip":     r.trust.clientIP(req),
+				"remote_addr":   req.RemoteAddr,
+				"forwarded_for": strings.Join(req.Header.Values("X-Forwarded-For"), ", "),
+			},
+		})
+	}))
+
+	// Check cloudflare.com for newer edge ranges (the UI calls this when the
+	// Cloudflare box is ticked). Rate-limited server-side: see cfCheckCooldown.
+	r.mux.HandleFunc("/api/admin/settings/network/cloudflare-check", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			httpx.WriteError(w, 405, "Method not allowed")
+			return
+		}
+		httpx.WriteJSON(w, 200, r.cloudflare.check(req.Context()))
+	}))
+
 	// Reveal one stored provider key (the list only carries masked forms).
 	r.mux.HandleFunc("/api/admin/settings/services/reveal", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
@@ -329,6 +383,7 @@ func (r *Router) registerAdminRoutes() {
 	// Unauthenticated and renders on every request: per-IP limit. Generous,
 	// since the settings page loads a row of badges per colour change.
 	badgeLimiter := newRateLimiter(600)
+	badgeLimiter.clientIP = r.trust.clientIP
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		for range ticker.C {
@@ -414,7 +469,9 @@ func (r *Router) registerImageRoutes() {
 	// sweeps idle IPs every minute so long-running deployments don't grow
 	// the limiters map unboundedly.
 	imageLimiter := newRateLimiter(s.Config.RateLimitRPM)
+	imageLimiter.clientIP = r.trust.clientIP
 	cdnLimiter := newRateLimiter(s.Config.RateLimitCDNRPM)
+	cdnLimiter.clientIP = r.trust.clientIP
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		for range ticker.C {

@@ -216,6 +216,12 @@ export const adminApi = {
   },
   getServiceKeys: (): Promise<Response> => get('/api/admin/settings/services'),
   updateServiceKeys: (keys: Record<string, string | null>): Promise<Response> => put('/api/admin/settings/services', keys),
+  // Client IP / reverse proxy (Settings → General → Config).
+  getNetworkSettings: (): Promise<Response> => get('/api/admin/settings/network'),
+  updateNetworkSettings: (settings: { trust_private: boolean; trust_cloudflare: boolean; custom: string[] }): Promise<Response> =>
+    put('/api/admin/settings/network', settings),
+  // Server checks cloudflare.com for newer edge ranges (rate-limited there).
+  checkCloudflareRanges: (): Promise<Response> => post('/api/admin/settings/network/cloudflare-check'),
   // The status lists keys only as {id, masked}; reveal fetches one key.
   revealServiceKey: (service: string, id: string): Promise<Response> =>
     post('/api/admin/settings/services/reveal', { service, id }),
