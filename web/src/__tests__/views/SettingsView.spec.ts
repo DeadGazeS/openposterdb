@@ -25,6 +25,9 @@ const mockAdminApi = vi.hoisted(() => ({
   previewPoster: vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) }),
   previewLogo: vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) }),
   previewBackdrop: vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) }),
+  getServiceKeys: vi.fn(),
+  updateServiceKeys: vi.fn(),
+  revealServiceKey: vi.fn(),
 }))
 
 const mockKeysApi = vi.hoisted(() => ({
@@ -516,5 +519,40 @@ describe('SettingsView', () => {
 
     expect((slider.element as HTMLInputElement).value).toBe('120')
     expect(wrapper.find('[data-testid="discard-settings-button"]').exists()).toBe(false)
+  })
+
+  // Source API keys arrive only as {id, masked}: the plaintext is fetched per
+  // key on reveal, and kept keys are saved back as "ref:<id>".
+  it('source API keys: masked refs, reveal on request, save by reference', async () => {
+    const empty = { locked: false, has_key: false, masked: null }
+    mockAdminApi.getServiceKeys.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        tmdb: empty, mdblist: empty, fanart: empty, trakt: empty,
+        omdb: { locked: false, has_key: true, masked: 'omdb...e001, omdb...e002', keys: [
+          { id: 'aaa111', masked: 'omdb...e001' },
+          { id: 'bbb222', masked: 'omdb...e002' },
+        ] },
+      }),
+    })
+    mockAdminApi.revealServiceKey.mockResolvedValue({ ok: true, json: () => Promise.resolve({ key: 'omdb-secretvalue-0001' }) })
+    mockAdminApi.updateServiceKeys.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
+    mockRoute.query = { tab: 'source-api-keys' }
+
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('omdb...e001')
+    expect(mockAdminApi.revealServiceKey).not.toHaveBeenCalled()
+
+    const chip = wrapper.findAll('button[title="Reveal key"]').find((b) => b.text() === 'omdb...e001')!
+    await chip.trigger('click')
+    await flushPromises()
+    expect(mockAdminApi.revealServiceKey).toHaveBeenCalledWith('omdb', 'aaa111')
+    expect(wrapper.text()).toContain('omdb-secretvalue-0001')
+
+    const remove = wrapper.findAll('button[aria-label="Remove OMDb key"]')
+    await remove[1]!.trigger('click')
+    await flushPromises()
+    expect(mockAdminApi.updateServiceKeys).toHaveBeenCalledWith({ omdb: 'ref:aaa111' })
   })
 })

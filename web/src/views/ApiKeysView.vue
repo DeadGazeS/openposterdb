@@ -9,7 +9,6 @@ import type { SaveSettingsPayload } from '@/lib/settings'
 import RenderSettingsForm from '@/components/RenderSettingsForm.vue'
 import MediaServerConnect from '@/components/MediaServerConnect.vue'
 import type { RenderSettings } from '@/lib/settings'
-import { maskKey } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Settings, Plus, Loader2, Check, Plug } from 'lucide-vue-next'
@@ -18,11 +17,10 @@ interface ApiKey {
   id: number
   name: string
   key_prefix: string
-  // Raw key, decrypted server-side from the api_keys.encrypted_key column.
-  // Empty string for keys that pre-date the encrypted_key column (created
-  // before this feature shipped) — the UI shows the prefix-only fallback for
-  // those rows since the raw is gone with the dismissed create banner.
-  key: string
+  // Whether the raw key can be revealed (POST /api/keys/{id}/reveal). Keys
+  // that pre-date the encrypted_key column can't — the UI shows the prefix.
+  // The list itself never carries raw keys.
+  revealable: boolean
   created_at: string
   last_used_at: string | null
 }
@@ -41,24 +39,49 @@ const error = ref('')
 const loading = ref(false)
 const { active: showCreateCheck, flash: flashCreated } = useSavedFlash()
 
-// Per-row reveal state — mirrors the Source API Keys reveal UX in
-// SettingsView.vue. Each click toggles between the dotted placeholder and the
-// raw key (decrypted server-side from the v2 envelope in api_keys.encrypted_key).
-// Keys created before encrypted_key shipped have an empty `key` field; the
-// reveal button is disabled for those and the prefix-only fallback is shown.
+// Per-row reveal state. Raw keys are fetched from the server only when the
+// user reveals, copies, or opens the media-server panel for a key, and kept
+// in memory for this view only.
+const rawKeys = ref<Record<number, string>>({})
 const revealedKeyIds = ref<Set<number>>(new Set())
-function toggleKeyReveal(id: number) {
+const revealError = ref('')
+
+async function fetchRawKey(id: number): Promise<string | null> {
+  if (rawKeys.value[id]) return rawKeys.value[id]!
+  revealError.value = ''
+  try {
+    const res = await keysApi.reveal(id)
+    if (!res.ok) throw new Error()
+    const data = (await res.json()) as { key: string }
+    rawKeys.value = { ...rawKeys.value, [id]: data.key }
+    return data.key
+  } catch {
+    revealError.value = 'Could not reveal the key'
+    return null
+  }
+}
+
+async function toggleKeyReveal(id: number) {
   const next = new Set(revealedKeyIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    if (!(await fetchRawKey(id))) return
+    next.add(id)
+  }
   revealedKeyIds.value = next
+}
+
+function maskedKey(key: ApiKey): string {
+  return `${key.key_prefix}…`
 }
 
 // Per-row "Copy" feedback ('idle' | 'copied'). Briefly flips to 'copied' after
 // a successful clipboard write so the user gets visual confirmation.
 const { copyState, copy: copyToClipboard } = useCopyToClipboard()
-function copyKey(raw: string, id: number) {
-  return copyToClipboard(raw, String(id))
+async function copyKey(id: number) {
+  const raw = await fetchRawKey(id)
+  if (raw) return copyToClipboard(raw, String(id))
 }
 
 // Per-key settings state
@@ -69,9 +92,16 @@ const settingsLoading = reactive<Record<number, boolean>>({})
 // Per-key "Connect a media server" panel — mutually exclusive with the
 // settings panel above (only one panel open per row at a time).
 const connectKeyId = ref<number | null>(null)
-function toggleConnect(id: number) {
+async function toggleConnect(id: number) {
   expandedKey.value = null
-  connectKeyId.value = connectKeyId.value === id ? null : id
+  if (connectKeyId.value === id) {
+    connectKeyId.value = null
+    return
+  }
+  // The media-server panel builds URLs from the raw key: fetch it first.
+  const key = keys.value.find((k) => k.id === id)
+  if (key?.revealable) await fetchRawKey(id)
+  connectKeyId.value = id
 }
 
 async function toggleSettings(id: number) {
@@ -235,6 +265,7 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
     <!-- Key list -->
     <div class="space-y-3">
       <h4 class="text-sm font-semibold">Existing keys</h4>
+      <p v-if="revealError" class="text-sm text-destructive">{{ revealError }}</p>
       <p v-if="keys.length === 0" class="text-sm text-muted-foreground">No API keys yet.</p>
       <div v-for="key in keys" :key="key.id" class="rounded-md border">
         <div class="flex items-center justify-between p-3">
@@ -246,16 +277,16 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
                   type="button"
                   class="hover:underline"
                   :title="revealedKeyIds.has(key.id) ? 'Hide key' : 'Reveal key'"
-                  :disabled="!key.key"
+                  :disabled="!key.revealable"
                   @click="toggleKeyReveal(key.id)"
-                >{{ revealedKeyIds.has(key.id) ? key.key : maskKey(key.key) }}</button>
+                >{{ revealedKeyIds.has(key.id) ? rawKeys[key.id] : maskedKey(key) }}</button>
                 <Button
-                  v-if="revealedKeyIds.has(key.id) && key.key"
+                  v-if="revealedKeyIds.has(key.id) && key.revealable"
                   variant="ghost"
                   size="sm"
                   class="h-5 px-1.5 text-xs hover:text-foreground"
                   title="Copy to clipboard"
-                  @click="copyKey(key.key, key.id)"
+                  @click="copyKey(key.id)"
                 >{{ copyState[key.id] === 'copied' ? 'Copied' : 'Copy' }}</Button>
               </span>
               &middot; Created {{ key.created_at }}
@@ -292,7 +323,7 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
 
         <!-- Inline "Connect a media server" panel -->
         <div v-else-if="connectKeyId === key.id" class="border-t px-3 py-4 bg-muted/30">
-          <MediaServerConnect :api-key="key.key" :key-prefix="key.key_prefix" />
+          <MediaServerConnect :api-key="rawKeys[key.id] ?? ''" :key-prefix="key.key_prefix" />
         </div>
       </div>
     </div>

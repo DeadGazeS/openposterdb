@@ -186,6 +186,8 @@ func (r *Router) registerKeyRoutes() {
 		handlers.HandleDeleteKey(s.DB)(w, req)
 	})))
 
+	r.mux.Handle("/api/keys/{id}/reveal", handlers.RequireAuth(r.jwtSecret())(handlers.HandleRevealKey(s.DB, s.SecretsKey)))
+
 	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
@@ -247,6 +249,22 @@ func (r *Router) registerAdminRoutes() {
 		case http.MethodPut:
 			var update services.ServiceKeysUpdate
 			_ = httpx.DecodeJSON(req, &update)
+			// The UI keeps existing keys as "ref:<fingerprint>" (it never
+			// receives their plaintext); expand them before validating.
+			for _, f := range []struct {
+				name  string
+				value **string
+			}{{"tmdb", &update.TMDB}, {"mdblist", &update.MDBList}, {"omdb", &update.OMDB}, {"fanart", &update.Fanart}, {"trakt", &update.Trakt}} {
+				if *f.value == nil {
+					continue
+				}
+				expanded, err := s.ServiceKeys.ExpandKeyRefs(f.name, **f.value)
+				if err != nil {
+					httpx.WriteError(w, 400, f.name+": "+err.Error())
+					return
+				}
+				*f.value = &expanded
+			}
 
 			validators := []struct {
 				name  string
@@ -277,6 +295,29 @@ func (r *Router) registerAdminRoutes() {
 		default:
 			httpx.WriteError(w, 405, "Method not allowed")
 		}
+	}))
+
+	// Reveal one stored provider key (the list only carries masked forms).
+	r.mux.HandleFunc("/api/admin/settings/services/reveal", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			httpx.WriteError(w, 405, "Method not allowed")
+			return
+		}
+		var body struct {
+			Service string `json:"service"`
+			ID      string `json:"id"`
+		}
+		if err := httpx.DecodeJSON(req, &body); err != nil {
+			httpx.WriteError(w, 400, "invalid request body")
+			return
+		}
+		key, ok := s.ServiceKeys.RevealKey(body.Service, body.ID)
+		if !ok {
+			httpx.WriteError(w, 404, "key not found")
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.WriteJSON(w, 200, map[string]string{"key": key})
 	}))
 
 	r.mux.HandleFunc("/api/admin/settings/export", r.requireAuth(handlers.HandleExportSettings(s.DB, s.ServiceKeys)))

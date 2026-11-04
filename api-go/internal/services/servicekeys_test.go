@@ -441,3 +441,36 @@ func TestReload_KeepsKeysOnReadError(t *testing.T) {
 		t.Fatalf("a deleted key must clear on reload, got %q", got)
 	}
 }
+
+// The status never carries plaintext keys; the UI keeps existing keys by
+// fingerprint ("ref:<id>") and reveals one on request.
+func TestServiceKeys_RefsRevealExpand(t *testing.T) {
+	db := newServiceKeysTestDB(t)
+	mgr := newServiceKeysManager(t, db, "init-secret", "", nil, "", "", "")
+	v := "omdb-key-one,omdb-key-two"
+	if err := mgr.UpdateKeys(&ServiceKeysUpdate{OMDB: &v}); err != nil {
+		t.Fatal(err)
+	}
+	st := mgr.GetStatus().OMDB
+	if len(st.Keys) != 2 {
+		t.Fatalf("refs: %+v", st.Keys)
+	}
+	for _, r := range st.Keys {
+		if strings.Contains(r.Masked, "omdb-key-one") || strings.Contains(r.Masked, "omdb-key-two") || r.ID == "" {
+			t.Fatalf("status leaks a key or lacks an id: %+v", r)
+		}
+	}
+	if k, ok := mgr.RevealKey("omdb", st.Keys[1].ID); !ok || k != "omdb-key-two" {
+		t.Fatalf("reveal: %q %v", k, ok)
+	}
+	if _, ok := mgr.RevealKey("omdb", "nope"); ok {
+		t.Fatal("unknown id must not reveal")
+	}
+	got, err := mgr.ExpandKeyRefs("omdb", "ref:"+st.Keys[1].ID+", new-key")
+	if err != nil || got != "omdb-key-two,new-key" {
+		t.Fatalf("expand: %q %v", got, err)
+	}
+	if _, err := mgr.ExpandKeyRefs("omdb", "ref:deadbeef"); err == nil {
+		t.Fatal("unknown ref must be an error")
+	}
+}

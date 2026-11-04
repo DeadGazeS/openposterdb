@@ -22,6 +22,7 @@ const mockKeysApi = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
   deleteSettings: vi.fn(),
+  reveal: vi.fn(),
 }))
 
 const mockAdminApi = vi.hoisted(() => ({
@@ -37,13 +38,18 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
+// Raw keys exist only server-side; the list carries `revealable` and the raw
+// value comes from POST /api/keys/{id}/reveal.
+const rawKeys: Record<number, string> = {
+  1: 'opdb_abc123def4567890abcdef1234567890abcdef1234567890abcdef1234567890',
+  2: 'opdb_xyzhijklmnopqrstuvwxyz0123456789abcdef0123456789abcdef012345',
+}
 const sampleKeys = [
   {
     id: 1,
     name: 'jellyfin-prod',
     key_prefix: 'opdb_abc',
-    // Real key, decrypted server-side from the api_keys.encrypted_key column.
-    key: 'opdb_abc123def4567890abcdef1234567890abcdef1234567890abcdef1234567890',
+    revealable: true,
     created_at: '2026-01-01',
     last_used_at: null,
   },
@@ -51,11 +57,17 @@ const sampleKeys = [
     id: 2,
     name: 'plex-dev',
     key_prefix: 'opdb_xyz',
-    key: 'opdb_xyzhijklmnopqrstuvwxyz0123456789abcdef0123456789abcdef012345',
+    revealable: true,
     created_at: '2026-02-01',
     last_used_at: '2026-03-01',
   },
 ]
+
+function mockReveal() {
+  mockKeysApi.reveal.mockImplementation((id: number) =>
+    Promise.resolve({ ok: true, json: () => Promise.resolve({ key: rawKeys[id] }) }),
+  )
+}
 
 function mountView() {
   const queryClient = new QueryClient({
@@ -97,6 +109,7 @@ describe('ApiKeysView', () => {
       ok: true,
       json: () => Promise.resolve(sampleKeys),
     })
+    mockReveal()
 
     const wrapper = mountView()
     await flushPromises()
@@ -104,25 +117,21 @@ describe('ApiKeysView', () => {
     expect(wrapper.text()).toContain('jellyfin-prod')
     expect(wrapper.text()).toContain('plex-dev')
 
-    // Keys are masked by default — same maskKey as Source API Keys
-    // (first 4 + ... + last 4 for the 64-char raw, hiding at least half).
-    // Click each Reveal button to surface the full decrypted key.
+    // Masked by default (the list has no raw key — only the prefix), and no
+    // reveal request is made until the user asks.
     const revealButtons = wrapper.findAll('button[title="Reveal key"]')
     expect(revealButtons.length).toBe(sampleKeys.length)
-    // Default (masked) state shows the masked form, not the raw key.
-    expect(wrapper.text()).not.toContain(sampleKeys[0]!.key)
-    expect(wrapper.text()).not.toContain(sampleKeys[1]!.key)
-    // Each row's masked form is exactly first 4 + "..." + last 4 of the raw.
-    const expectedMask0 = sampleKeys[0]!.key.slice(0, 4) + '...' + sampleKeys[0]!.key.slice(-4)
-    const expectedMask1 = sampleKeys[1]!.key.slice(0, 4) + '...' + sampleKeys[1]!.key.slice(-4)
-    expect(wrapper.text()).toContain(expectedMask0)
-    expect(wrapper.text()).toContain(expectedMask1)
+    expect(wrapper.text()).toContain('opdb_abc…')
+    expect(wrapper.text()).not.toContain(rawKeys[1]!)
+    expect(mockKeysApi.reveal).not.toHaveBeenCalled()
 
     for (const btn of revealButtons) await btn.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain(sampleKeys[0]!.key)
-    expect(wrapper.text()).toContain(sampleKeys[1]!.key)
+    expect(mockKeysApi.reveal).toHaveBeenCalledWith(1)
+    expect(mockKeysApi.reveal).toHaveBeenCalledWith(2)
+    expect(wrapper.text()).toContain(rawKeys[1]!)
+    expect(wrapper.text()).toContain(rawKeys[2]!)
   })
 
   it('shows "No API keys yet." when empty', async () => {
@@ -238,7 +247,7 @@ describe('ApiKeysView', () => {
           id: 1,
           name: 'legacy-key',
           key_prefix: 'opdb_old',
-          key: '',
+          revealable: false,
           created_at: '2025-12-01',
           last_used_at: null,
         },
@@ -254,35 +263,6 @@ describe('ApiKeysView', () => {
     // No masked form visible — empty input yields the **** fallback, but we
     // don't render a button content for disabled legacy rows.
     expect(wrapper.findAll('button[title="Reveal key"]').length).toBe(1)
-  })
-
-  it('uses the same maskKey as SettingsView (shared from @/lib/utils)', async () => {
-    // Sanity check that the obfuscation rule is enforced: a 64-char hex key
-    // shows exactly first 4 + "..." + last 4 = 11 chars visible, hiding 53.
-    const fullKey = 'a'.repeat(64)
-    mockKeysApi.list.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([
-        {
-          id: 1,
-          name: 'mask-check',
-          key_prefix: 'opdb_zz',
-          key: fullKey,
-          created_at: '2026-08-01',
-          last_used_at: null,
-        },
-      ]),
-    })
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    const masked = 'aaaa...aaaa'
-    expect(wrapper.text()).toContain(masked)
-    expect(wrapper.text()).not.toContain(fullKey)
-    // The middle of the raw key (positions 30-34 = 'aaaaa') must not leak.
-    expect(wrapper.text()).not.toContain('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' + 'a')
-    void 'aaaaa' // type-only — see assertion above
   })
 
   it('creates key and shows raw key value in yellow banner', async () => {
@@ -394,6 +374,7 @@ describe('ApiKeysView', () => {
       json: () => Promise.resolve(sampleKeys),
     })
 
+    mockReveal()
     const wrapper = mountView()
     await flushPromises()
 
@@ -406,7 +387,8 @@ describe('ApiKeysView', () => {
 
     const panel = wrapper.findComponent({ name: 'MediaServerConnect' })
     expect(panel.exists()).toBe(true)
-    expect(panel.props('apiKey')).toBe(sampleKeys[0]!.key)
+    // The panel builds media-server URLs from the raw key, fetched on open.
+    expect(panel.props('apiKey')).toBe(rawKeys[1])
     expect(panel.props('keyPrefix')).toBe(sampleKeys[0]!.key_prefix)
   })
 
@@ -452,6 +434,7 @@ describe('ApiKeysView', () => {
     })
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
+    mockReveal()
 
     const wrapper = mountView()
     await flushPromises()
@@ -467,7 +450,7 @@ describe('ApiKeysView', () => {
     await copyButton!.trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenCalledWith(sampleKeys[0]!.key)
+    expect(writeText).toHaveBeenCalledWith(rawKeys[1])
     // After click, the button label briefly flips to 'Copied'.
     expect(wrapper.text()).toContain('Copied')
   })

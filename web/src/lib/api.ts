@@ -216,6 +216,9 @@ export const adminApi = {
   },
   getServiceKeys: (): Promise<Response> => get('/api/admin/settings/services'),
   updateServiceKeys: (keys: Record<string, string | null>): Promise<Response> => put('/api/admin/settings/services', keys),
+  // The status lists keys only as {id, masked}; reveal fetches one key.
+  revealServiceKey: (service: string, id: string): Promise<Response> =>
+    post('/api/admin/settings/services/reveal', { service, id }),
   preview: (kind: PreviewKind, params: PreviewParams): Promise<Response> =>
     get(buildUrl(`/api/admin/preview/${kind}`, previewQuery(params))),
 
@@ -270,6 +273,8 @@ export const keysApi = {
   list: (): Promise<Response> => get('/api/keys'),
   create: (name: string): Promise<Response> => post('/api/keys', { name }),
   delete: (id: number): Promise<Response> => del(`/api/keys/${id}`),
+  // The list never carries raw keys; reveal fetches one on explicit request.
+  reveal: (id: number): Promise<Response> => post(`/api/keys/${id}/reveal`),
   getSettings: (id: number): Promise<Response> => get(`/api/keys/${id}/settings`),
   updateSettings: (id: number, settings: SaveSettingsPayload): Promise<Response> => put(`/api/keys/${id}/settings`, settings),
   deleteSettings: (id: number): Promise<Response> => del(`/api/keys/${id}/settings`),

@@ -32,11 +32,10 @@ func HandleListKeys(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 			ID        int64  `json:"id"`
 			Name      string `json:"name"`
 			KeyPrefix string `json:"key_prefix"`
-			// Key holds the raw key, decrypted from the api_keys.encrypted_key
-			// column. Empty when the row pre-dates the encrypted_key column
-			// (raw is gone with the dismissed create banner) — the frontend
-			// shows the prefix-only fallback for those rows.
-			Key        string  `json:"key,omitempty"`
+			// Revealable: the raw key can be fetched with
+			// POST /api/keys/{id}/reveal (rows that pre-date the
+			// encrypted_key column can't). The list never carries plaintext.
+			Revealable bool    `json:"revealable"`
 			CreatedAt  string  `json:"created_at"`
 			LastUsedAt *string `json:"last_used_at"`
 		}
@@ -50,14 +49,7 @@ func HandleListKeys(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 				CreatedAt:  k.CreatedAt,
 				LastUsedAt: k.LastUsedAt,
 			}
-			if k.EncryptedKey != nil && *k.EncryptedKey != "" {
-				raw, decErr := services.DecryptAPIKey(*k.EncryptedKey, secretsKey)
-				if decErr != nil {
-					slog.Error("failed to decrypt api key for list response", "id", k.ID, "error", decErr)
-				} else {
-					row.Key = raw
-				}
-			}
+			row.Revealable = k.EncryptedKey != nil && *k.EncryptedKey != ""
 			result[i] = row
 		}
 
@@ -574,5 +566,38 @@ func HandleResetSelfSettings(db *sql.DB) http.HandlerFunc {
 		}
 
 		httpx.WriteJSON(w, 200, map[string]bool{"ok": true})
+	}
+}
+
+// HandleRevealKey returns one API key's raw value (admin "reveal"/"copy"),
+// decrypted from api_keys.encrypted_key. The key list never includes it.
+func HandleRevealKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpx.WriteError(w, 405, "Method not allowed")
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			httpx.WriteError(w, 400, "invalid id")
+			return
+		}
+		k, err := services.FindAPIKeyByIDCtx(r.Context(), db, id)
+		if err != nil {
+			httpx.WriteError(w, 500, "Failed to load key")
+			return
+		}
+		if k == nil || k.EncryptedKey == nil || *k.EncryptedKey == "" {
+			httpx.WriteError(w, 404, "key not available")
+			return
+		}
+		raw, err := services.DecryptAPIKey(*k.EncryptedKey, secretsKey)
+		if err != nil {
+			slog.Error("failed to decrypt api key for reveal", "id", id, "error", err)
+			httpx.WriteError(w, 500, "Failed to decrypt key")
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.WriteJSON(w, 200, map[string]string{"key": raw})
 	}
 }

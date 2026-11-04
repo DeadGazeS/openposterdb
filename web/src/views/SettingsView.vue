@@ -69,7 +69,15 @@ const apiTab = computed<ApiTab>({
 
 type SettingsResponse = RenderSettings & { free_api_key_enabled: boolean; free_api_key_locked: boolean }
 
-type ServiceKey = { locked: boolean; has_key: boolean; masked: string | null; keys?: string[] }
+// The server lists stored keys only as {id, masked}; plaintext is fetched
+// per key on reveal/copy, and kept keys are sent back as "ref:<id>".
+type ServiceKeyRef = { id: string; masked: string }
+type ServiceKey = { locked: boolean; has_key: boolean; masked: string | null; keys?: ServiceKeyRef[] }
+// A chip is either a stored key (id) or a newly typed one (value, unsaved).
+type ServiceKeyChip = { id?: string; masked: string; value?: string }
+function chipKey(c: ServiceKeyChip): string {
+  return c.id ? `id:${c.id}` : `new:${c.value}`
+}
 type ServiceKeysResponse = { tmdb: ServiceKey; mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
 
 const freeApiKeyEnabled = ref(false)
@@ -82,8 +90,10 @@ const serviceKeysError = ref('')
 // each chip toggles its own label briefly when clicked. Only revealed chips
 // render the button, but the state stays a flat record for simplicity.
 const serviceCopyState = ref<Record<string, 'idle' | 'copied'>>({})
-async function copyServiceKey(svc: string, key: string) {
-  const id = `${svc}:${key}`
+async function copyServiceKey(svc: string, chip: ServiceKeyChip) {
+  const key = await chipValue(svc, chip)
+  if (!key) return
+  const id = `${svc}:${chipKey(chip)}`
   try {
     await navigator.clipboard.writeText(key)
     serviceCopyState.value[id] = 'copied'
@@ -112,7 +122,7 @@ async function copyServiceKey(svc: string, key: string) {
 // Per-service key chips. Each chip is one key; the whole list is saved
 // (comma-joined, matching the backend's multi-key format) whenever a chip is
 // added or removed — there is no separate Save button.
-const serviceKeyChips = ref<Record<string, string[]>>({
+const serviceKeyChips = ref<Record<string, ServiceKeyChip[]>>({
   tmdb: [],
   mdblist: [],
   omdb: [],
@@ -142,7 +152,7 @@ watch(
     if (!keys) return
     for (const svc of ['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const) {
       const k = keys[svc]
-      if (k && !k.locked) serviceKeyChips.value[svc] = [...(k.keys ?? [])]
+      if (k && !k.locked) serviceKeyChips.value[svc] = (k.keys ?? []).map((r) => ({ id: r.id, masked: r.masked }))
     }
   },
   { immediate: true },
@@ -160,20 +170,48 @@ function splitServiceKeys(s: string): string[] {
 // api-go/internal/services/servicekeys.go: first len/4 (max 4) chars + "..." +
 // last len/4 chars, always hiding at least half of the key.
 
-// Keys the user has chosen to reveal (per service+key); everything else stays
-// masked until clicked.
+// Keys the user has chosen to reveal (per service+chip); everything else stays
+// masked. Stored keys' plaintext is fetched from the server on first reveal.
 const revealedKeys = ref<Set<string>>(new Set())
+const revealedValues = ref<Record<string, string>>({})
 
-function isRevealed(svc: string, key: string): boolean {
-  return revealedKeys.value.has(`${svc}:${key}`)
+function isRevealed(svc: string, chip: ServiceKeyChip): boolean {
+  return revealedKeys.value.has(`${svc}:${chipKey(chip)}`)
 }
 
-function toggleReveal(svc: string, key: string) {
-  const id = `${svc}:${key}`
+async function chipValue(svc: string, chip: ServiceKeyChip): Promise<string | null> {
+  if (chip.value) return chip.value
+  const id = `${svc}:${chipKey(chip)}`
+  if (revealedValues.value[id]) return revealedValues.value[id]!
+  const res = await adminApi.revealServiceKey(svc, chip.id!)
+  if (!res.ok) {
+    serviceKeysError.value = 'Could not reveal the key'
+    return null
+  }
+  const data = (await res.json()) as { key: string }
+  revealedValues.value = { ...revealedValues.value, [id]: data.key }
+  return data.key
+}
+
+function displayedKey(svc: string, chip: ServiceKeyChip): string {
+  if (!isRevealed(svc, chip)) return chip.masked
+  return chip.value ?? revealedValues.value[`${svc}:${chipKey(chip)}`] ?? chip.masked
+}
+
+async function toggleReveal(svc: string, chip: ServiceKeyChip) {
+  const id = `${svc}:${chipKey(chip)}`
   const next = new Set(revealedKeys.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    if (!(await chipValue(svc, chip))) return
+    next.add(id)
+  }
   revealedKeys.value = next
+}
+
+function newChip(value: string): ServiceKeyChip {
+  return { value, masked: maskKey(value) }
 }
 
 // Add the draft's keys as chips (Enter / comma / space all work), then
@@ -185,7 +223,7 @@ function commitServiceKeyDraft(svc: string) {
   if (add.length === 0) return
   const merged = [...(serviceKeyChips.value[svc] ?? [])]
   for (const k of add) {
-    if (!merged.includes(k)) merged.push(k)
+    if (!merged.some((c) => c.value === k)) merged.push(newChip(k))
   }
   serviceKeyChips.value[svc] = merged
   serviceKeyDraft.value[svc] = ''
@@ -199,7 +237,7 @@ function onServiceKeyDraftInput(svc: string) {
     const add = splitServiceKeys(draft)
     const merged = [...(serviceKeyChips.value[svc] ?? [])]
     for (const k of add) {
-      if (!merged.includes(k)) merged.push(k)
+      if (!merged.some((c) => c.value === k)) merged.push(newChip(k))
     }
     serviceKeyChips.value[svc] = merged
     serviceKeyDraft.value[svc] = ''
@@ -207,8 +245,8 @@ function onServiceKeyDraftInput(svc: string) {
   }
 }
 
-function removeServiceKey(svc: string, key: string) {
-  serviceKeyChips.value[svc] = (serviceKeyChips.value[svc] ?? []).filter((k) => k !== key)
+function removeServiceKey(svc: string, chip: ServiceKeyChip) {
+  serviceKeyChips.value[svc] = (serviceKeyChips.value[svc] ?? []).filter((c) => chipKey(c) !== chipKey(chip))
   void saveServiceKeys(svc)
 }
 
@@ -216,7 +254,8 @@ async function saveServiceKeys(svc: string) {
   if (serviceKeysSaving.value) return
   serviceKeysSaving.value = svc
   serviceKeysError.value = ''
-  const value = (serviceKeyChips.value[svc] ?? []).join(',')
+  // Stored keys go back as references; only newly typed keys travel as text.
+  const value = (serviceKeyChips.value[svc] ?? []).map((c) => (c.id ? `ref:${c.id}` : c.value)).join(',')
   const res = await adminApi.updateServiceKeys({ [svc]: value })
   if (res.ok) {
     await refetchServiceKeys()
@@ -555,29 +594,29 @@ async function onImportFile(e: Event) {
               </div>
               <div v-else class="flex flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 min-h-9">
                 <span
-                  v-for="key in serviceKeyChips[service]"
-                  :key="key"
+                  v-for="chip in serviceKeyChips[service]"
+                  :key="chipKey(chip)"
                   class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
                 >
                   <button
                     type="button"
                     class="hover:underline"
-                    :title="isRevealed(service, key) ? 'Hide key' : 'Reveal key'"
-                    @click="toggleReveal(service, key)"
-                  >{{ isRevealed(service, key) ? key : maskKey(key) }}</button>
+                    :title="isRevealed(service, chip) ? 'Hide key' : 'Reveal key'"
+                    @click="toggleReveal(service, chip)"
+                  >{{ displayedKey(service, chip) }}</button>
                   <button
-                    v-if="isRevealed(service, key)"
+                    v-if="isRevealed(service, chip)"
                     type="button"
                     class="hover:text-foreground"
-                    :title="serviceCopyState[`${service}:${key}`] === 'copied' ? 'Copied' : 'Copy to clipboard'"
-                    @click="copyServiceKey(service, key)"
-                  >{{ serviceCopyState[`${service}:${key}`] === 'copied' ? 'Copied' : 'Copy' }}</button>
+                    :title="serviceCopyState[`${service}:${chipKey(chip)}`] === 'copied' ? 'Copied' : 'Copy to clipboard'"
+                    @click="copyServiceKey(service, chip)"
+                  >{{ serviceCopyState[`${service}:${chipKey(chip)}`] === 'copied' ? 'Copied' : 'Copy' }}</button>
                   <button
                     type="button"
                     class="hover:text-destructive disabled:opacity-50"
                     :aria-label="`Remove ${serviceLabels[service]} key`"
                     :disabled="serviceKeysSaving !== null"
-                    @click="removeServiceKey(service, key)"
+                    @click="removeServiceKey(service, chip)"
                   >×</button>
                 </span>
                 <input

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -223,9 +224,23 @@ type ServiceKeyStatus struct {
 	Locked bool    `json:"locked"`
 	HasKey bool    `json:"has_key"`
 	Masked *string `json:"masked"`
-	// Keys holds the real (decrypted) keys. Only populated by the admin
-	// settings endpoint, which already has plaintext access (export).
-	Keys []string `json:"keys,omitempty"`
+	// Keys lists each stored key as a fingerprint + masked form — never the
+	// plaintext (RevealKey returns one key on explicit request). The admin UI
+	// renders a removable chip per key and sends "ref:<id>" back for the keys
+	// it keeps (ExpandKeyRefs).
+	Keys []ServiceKeyRef `json:"keys,omitempty"`
+}
+
+// ServiceKeyRef identifies a stored provider key without revealing it.
+type ServiceKeyRef struct {
+	ID     string `json:"id"`
+	Masked string `json:"masked"`
+}
+
+// KeyFingerprint is a stable, non-reversible id for a stored key.
+func KeyFingerprint(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:8])
 }
 
 type ServiceKeysResponse struct {
@@ -508,13 +523,15 @@ func (m *ServiceKeyManager) statusFor(service string, keys []string) ServiceKeyS
 		s := strings.Join(parts, ", ")
 		masked = &s
 	}
-	// The real keys are only exposed for unlocked services (env-locked keys
-	// stay hidden); the admin UI uses them to render removable per-key chips.
-	var realKeys []string
+	// Per-key refs only for unlocked services (env-locked keys aren't
+	// editable here).
+	var refs []ServiceKeyRef
 	if !locked && hasKey {
-		realKeys = keys
+		for _, k := range keys {
+			refs = append(refs, ServiceKeyRef{ID: KeyFingerprint(k), Masked: MaskKey(k)})
+		}
 	}
-	return ServiceKeyStatus{Locked: locked, HasKey: hasKey, Masked: masked, Keys: realKeys}
+	return ServiceKeyStatus{Locked: locked, HasKey: hasKey, Masked: masked, Keys: refs}
 }
 
 func (m *ServiceKeyManager) UpdateKeys(update *ServiceKeysUpdate) error {
@@ -704,4 +721,67 @@ func checkTraktClientIDCtx(ctx context.Context, httpClient *http.Client, clientI
 
 func checkTraktClientID(httpClient *http.Client, clientID string) error {
 	return checkTraktClientIDCtx(context.Background(), httpClient, clientID)
+}
+
+func (m *ServiceKeyManager) keysFor(service string) ([]string, bool) {
+	switch service {
+	case "tmdb":
+		return m.Keys.tmdb, true
+	case "mdblist":
+		return m.Keys.mdblist, true
+	case "omdb":
+		return m.Keys.omdb, true
+	case "fanart":
+		return m.Keys.fanart, true
+	case "trakt":
+		return m.Keys.trakt, true
+	}
+	return nil, false
+}
+
+// RevealKey returns the stored key with the given fingerprint (admin
+// "reveal"/"copy"). Env-locked services are never revealed.
+func (m *ServiceKeyManager) RevealKey(service, id string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.EnvLocked(service) {
+		return "", false
+	}
+	keys, ok := m.keysFor(service)
+	if !ok {
+		return "", false
+	}
+	for _, k := range keys {
+		if KeyFingerprint(k) == id {
+			return k, true
+		}
+	}
+	return "", false
+}
+
+// ExpandKeyRefs replaces "ref:<fingerprint>" entries in a comma-separated key
+// list with the stored key they name, so the UI can keep existing keys
+// without ever holding their plaintext. Unknown refs are an error.
+func (m *ServiceKeyManager) ExpandKeyRefs(service, value string) (string, error) {
+	if !strings.Contains(value, "ref:") {
+		return value, nil
+	}
+	m.mu.RLock()
+	stored, _ := m.keysFor(service)
+	byID := make(map[string]string, len(stored))
+	for _, k := range stored {
+		byID[KeyFingerprint(k)] = k
+	}
+	m.mu.RUnlock()
+	parts := parseKeys(value)
+	for i, p := range parts {
+		if id, ok := strings.CutPrefix(p, "ref:"); ok {
+			k, found := byID[id]
+			if !found {
+				return "", fmt.Errorf("unknown key reference %q (reload the page)", id)
+			}
+			parts[i] = k
+		}
+	}
+	return strings.Join(parts, ","), nil
 }
