@@ -110,6 +110,6 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 		if releaseDate == nil && d.DB != nil {
 			releaseDate, _ = services.ReadImageMetaCtx(r.Context(), d.DB, served.CacheKey)
 		}
-		writeImage(w, r, bytes, served.ContentType, releaseDate, d.Config)
+		writeImage(w, r, bytes, served.ContentType, cdnCacheControl(releaseDate, d.Config))
 	}
 }

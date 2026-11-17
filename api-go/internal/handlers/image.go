@@ -207,31 +207,40 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 			}
 		}
 
-		var served services.CDNServed
-		params := d.serveParams(r.Context(), idTypeStr, idValue, kind, settings, query.RatingsLimit, query.ImageSize)
-		params.Served = &served
-		bytes, contentType, err := image.ServeImage(params)
+		bytes, contentType, err := image.ServeImage(d.serveParams(r.Context(), idTypeStr, idValue, kind, settings, query.RatingsLimit, query.ImageSize))
 		if err != nil {
 			writeServeError(w, err)
 			return
 		}
-		writeImage(w, r, bytes, contentType, served.ReleaseDate, d.Config)
+		writeImage(w, r, bytes, contentType, directImageCacheControl)
 	}
 }
 
-// writeImage sends a rendered image. max-age follows the title's age
+// directImageCacheControl is the lifetime of the direct image URL. It stays
+// short: the URL doesn't change when the key's settings do, so a long
+// max-age would keep old renders in clients and proxies. The ETag makes the
+// re-check cheap (304, no body).
+const directImageCacheControl = "public, max-age=3600, stale-while-revalidate=86400"
+
+// cdnCacheControl is the lifetime of a /c/ URL, whose settings hash changes
+// with the settings: max-age follows the title's age
 // (services.ComputeCDNMaxAge: about a day for new releases, up to a year for
 // titles whose ratings no longer move), stale-while-revalidate is 7× that.
-// The ETag is a hash of the bytes; a matching If-None-Match gets a 304.
-func writeImage(w http.ResponseWriter, r *http.Request, bytes []byte, contentType string, releaseDate *string, cfg *ImageServeConfig) {
+func cdnCacheControl(releaseDate *string, cfg *ImageServeConfig) string {
 	var minStale, maxAge uint64
 	if cfg != nil {
 		minStale, maxAge = cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs
 	}
 	age := services.ComputeCDNMaxAge(releaseDate, minStale, maxAge)
+	return fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", age, age*7)
+}
+
+// writeImage sends a rendered image with the given Cache-Control. The ETag
+// is a hash of the bytes; a matching If-None-Match gets a 304.
+func writeImage(w http.ResponseWriter, r *http.Request, bytes []byte, contentType, cacheControl string) {
 	etag := imageETag(bytes)
 	h := w.Header()
-	h.Set("Cache-Control", fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", age, age*7))
+	h.Set("Cache-Control", cacheControl)
 	h.Set("ETag", etag)
 	if etagMatches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
