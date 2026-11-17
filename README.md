@@ -63,6 +63,10 @@ docker compose up -d
 
 Then open **http://localhost:3000** and create your admin account.
 
+> **Plain HTTP from another machine?** Login cookies are HTTPS-only by default. If you open the admin UI over
+> `http://` on anything other than `localhost` (e.g. `http://192.168.1.10:3000`), set `COOKIE_SECURE=false` in
+> `.env` — otherwise the browser drops the session cookie and login silently does nothing.
+
 TMDB is required for artwork — it can be set in `.env` or later via the admin UI (Settings → External API Keys) without restarting. MDBList is recommended (a single key covers all nine rating sources). Fanart.tv, OMDb, and Trakt keys can also be added through the admin UI without restarting.
 
 ## Connect your media server

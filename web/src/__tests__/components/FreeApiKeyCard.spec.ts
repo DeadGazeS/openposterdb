@@ -688,4 +688,57 @@ describe('FreeApiKeyCard', () => {
     expect(text).toContain('Badge style: default (Logo left · Number right)')
     expect(text).toContain('Language: any (fr)')
   })
+
+  // --- Badge placement (layout=) ---
+
+  /** The layout= value from the curl example, parsed, or null when absent. */
+  function curlLayout(wrapper: VueWrapper) {
+    const m = findCurlCode(wrapper).text().match(/[?&]layout=([^&"]+)/)
+    return m ? JSON.parse(decodeURIComponent(m[1]!.replace(/\+/g, ' '))) : null
+  }
+
+  it('seeds the placement editor from the server layout and sends no layout by default', () => {
+    const wrapper = mountCard(true)
+    expect((wrapper.find('[data-testid="free-bottom-per-row"]').element as HTMLInputElement).value).toBe('3')
+    expect(curlLayout(wrapper)).toBeNull()
+    expect(wrapper.find('[data-testid="free-layout-reset"]').exists()).toBe(false)
+  })
+
+  it('sends the edited layout and can reset it', async () => {
+    const wrapper = mountCard(true)
+    await wrapper.find('[data-testid="free-top-per-row"]').setValue('2')
+    await flushPromises()
+    const sent = curlLayout(wrapper)
+    expect(sent.top.per_row).toBe(2)
+    expect(sent.bottom.per_row).toBe(3)
+
+    await wrapper.find('[data-testid="free-layout-reset"]').trigger('click')
+    await flushPromises()
+    expect(curlLayout(wrapper)).toBeNull()
+  })
+
+  it('switching image type loads that type\'s server layout and drops the override', async () => {
+    const wrapper = mountCard(true)
+    await wrapper.find('[data-testid="free-bottom-rows"]').setValue('2')
+    await flushPromises()
+    expect(curlLayout(wrapper)).not.toBeNull()
+
+    await setSelectById(wrapper, 'free-image-type', 'backdrop')
+    expect(curlLayout(wrapper)).toBeNull()
+    expect((wrapper.find('[data-testid="free-top-per-row"]').element as HTMLInputElement).value).toBe('5')
+  })
+
+  it('a late server load does not overwrite an edited layout', async () => {
+    const pending: { resolve?: (v: unknown) => void } = {}
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise((r) => { pending.resolve = r })))
+    const wrapper = mountCard(true, null)
+    await wrapper.find('[data-testid="free-left-per-row"]').setValue('1')
+    await wrapper.find('[data-testid="free-left-rows"]').setValue('2')
+    await flushPromises()
+
+    pending.resolve!({ ok: true, json: () => Promise.resolve(makeDefaults()) })
+    await flushPromises()
+    const sent = curlLayout(wrapper)
+    expect(sent.left).toMatchObject({ per_row: 1, rows: 2 })
+  })
 })
