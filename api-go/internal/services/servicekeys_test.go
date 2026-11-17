@@ -101,8 +101,14 @@ func TestDecrypt_Tampered_Fails(t *testing.T) {
 	}
 	// Flip one byte in the middle (skip the v2: prefix + a few chars so we
 	// hit the b64 payload, not the version header).
+	// The replacement must differ from the original character, or nothing
+	// is tampered with (the payload is random, so 'X' was there ~1 run in 64).
 	idx := len(encrypted)/2 + 1
-	tampered := encrypted[:idx] + "X" + encrypted[idx+1:]
+	repl := "X"
+	if encrypted[idx] == 'X' {
+		repl = "Y"
+	}
+	tampered := encrypted[:idx] + repl + encrypted[idx+1:]
 	if _, err := decryptV2(tampered, secretsKey, "tmdb"); err == nil {
 		t.Error("decrypt of tampered v2 ciphertext should fail")
 	}
