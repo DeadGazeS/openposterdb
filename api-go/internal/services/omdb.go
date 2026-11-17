@@ -1,10 +1,10 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	neturl "net/url"
 	"time"
@@ -35,27 +35,41 @@ type OmdbRating struct {
 	Value  string `json:"Value"`
 }
 
-func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbResponse, error) {
-	apiKey := c.KeyPool.ActiveKeyRaw()
-	url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", neturl.QueryEscape(apiKey), neturl.QueryEscape(imdbID))
+// omdbLimitBlock: OMDb's daily limit answers 401 "Request limit reached!"
+// without a Retry-After; the key is left alone this long before it is tried
+// again.
+const omdbLimitBlock = time.Hour
 
+// omdbLimited: OMDb reports its daily request limit as a 401 with
+// "Request limit reached!" (an invalid key is a 401 too, but not a limit).
+func omdbLimited(status int, body []byte) bool {
+	return status == http.StatusTooManyRequests ||
+		(status == http.StatusUnauthorized && bytes.Contains(body, []byte("Request limit reached")))
+}
+
+func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbResponse, error) {
 	start := time.Now()
-	resp, err := SendWithRetryCtx(ctx, &OMDBRetry, func() (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		return c.HTTP.Do(req)
+	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+		service: "OMDb",
+		retry:   &OMDBRetry,
+		do: func(key string) (*http.Response, error) {
+			url := fmt.Sprintf("https://www.omdbapi.com/?apikey=%s&i=%s", neturl.QueryEscape(key), neturl.QueryEscape(imdbID))
+			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("User-Agent", UserAgent())
+			return c.HTTP.Do(req)
+		},
+		limited:    omdbLimited,
+		limitBlock: omdbLimitBlock,
 	})
 	logSlow("OMDb", time.Since(start).Milliseconds())
 	if err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("OMDb returned %d: %s", resp.StatusCode, errSnippet(body)))
+	if status != http.StatusOK {
+		return nil, errors.NewOther(fmt.Sprintf("OMDb returned %d: %s", status, errSnippet(body)))
 	}
 
 	var result OmdbResponse

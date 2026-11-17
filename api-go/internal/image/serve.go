@@ -584,6 +584,10 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	if p.Context == nil {
 		p.Context = context.Background()
 	}
+	start := time.Now()
+	defer func() {
+		services.LogSlow("image request", time.Since(start).Milliseconds(), "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
+	}()
 	idType, err := services.ParseIDType(p.IDType)
 	if err != nil {
 		return nil, "", err
@@ -978,7 +982,8 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 		rawBadges = fetchRatings(p.Context, p.Caches.Ratings,
 			services.RatingsClients{TMDB: p.TMDB, OMDB: p.OMDB, MDBList: p.MDBList, Trakt: p.Trakt},
 			services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
-				EpisodeShowTMDbID: epShowID, EpisodeSeason: epSeason, EpisodeEpisode: epEpisode},
+				EpisodeShowTMDbID: epShowID, EpisodeSeason: epSeason, EpisodeEpisode: epEpisode,
+				ReleaseDate: resolved.ReleaseDate},
 		)
 		slog.Debug("ratings fetched",
 			"kind", p.Kind,
@@ -1041,8 +1046,10 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 	if err != nil {
 		return nil, err
 	}
+	renderStart := time.Now()
 	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
 	release()
+	services.LogSlow("render", time.Since(renderStart).Milliseconds(), "kind", p.Kind, "cache_key", cacheKey)
 	if err != nil {
 		return nil, apperr.NewImageError(err)
 	}

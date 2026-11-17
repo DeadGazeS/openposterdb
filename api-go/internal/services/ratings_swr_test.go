@@ -7,13 +7,15 @@ import (
 	"time"
 )
 
+// withRatingsRefreshAfter sets every ratings refresh age (old and new
+// releases, partial and failed fetches) to d.
 func withRatingsRefreshAfter(t *testing.T, d time.Duration) {
 	t.Helper()
-	old, oldEmpty := ratingsRefreshAfter, emptyRatingsTTL
-	ratingsRefreshAfter, emptyRatingsTTL = d, d
+	old, oldNew, oldPartial, oldEmpty := ratingsRefreshAfter, newReleaseRefreshAfter, partialRatingsTTL, emptyRatingsTTL
+	ratingsRefreshAfter, newReleaseRefreshAfter, partialRatingsTTL, emptyRatingsTTL = d, d, d, d
 	t.Cleanup(func() {
 		waitNoRefresh(t) // background refreshes read these vars
-		ratingsRefreshAfter, emptyRatingsTTL = old, oldEmpty
+		ratingsRefreshAfter, newReleaseRefreshAfter, partialRatingsTTL, emptyRatingsTTL = old, oldNew, oldPartial, oldEmpty
 	})
 }
 
@@ -157,14 +159,18 @@ func waitNoIDRefresh(t *testing.T) {
 
 func withStaleServeMax(t *testing.T, d time.Duration) {
 	t.Helper()
-	old := staleServeMax
-	staleServeMax = d
-	t.Cleanup(func() { waitNoRefresh(t); waitNoIDRefresh(t); staleServeMax = old })
+	old, oldRatings := staleServeMax, ratingsStaleServeMax
+	staleServeMax, ratingsStaleServeMax = d, d
+	t.Cleanup(func() {
+		waitNoRefresh(t)
+		waitNoIDRefresh(t)
+		staleServeMax, ratingsStaleServeMax = old, oldRatings
+	})
 }
 
-// While refreshes keep coming back empty, the old badges are only kept up to
-// staleServeMax after their last successful fetch (re-storing them used to
-// reset the cache TTL, so they were served forever).
+// While refreshes keep failing, the old badges are only kept up to
+// ratingsStaleServeMax after their last successful fetch (re-storing them
+// used to reset the cache TTL, so they were served forever).
 func TestFetchRatingsCached_StaleCapAppliesDuringOutage(t *testing.T) {
 	withRatingsRefreshAfter(t, 10*time.Millisecond)
 	withStaleServeMax(t, 60*time.Millisecond)
@@ -173,7 +179,7 @@ func TestFetchRatingsCached_StaleCapAppliesDuringOutage(t *testing.T) {
 	cache := NewMemCache(0, 100, time.Hour, 0)
 	q := imdbOnly("tt0000007")
 	FetchRatingsCachedCtx(t.Context(), cache, clients, q)
-	stub.empty = true
+	stub.fail.Store(true)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		got := FetchRatingsCachedCtx(t.Context(), cache, clients, q)

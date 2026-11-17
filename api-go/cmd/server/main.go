@@ -123,7 +123,7 @@ func main() {
 
 	// Process-wide in-memory caches (mirroring the Rust moka caches): rendered
 	// images capped by IMAGE_MEM_CACHE_MB (1h TTL, 30min idle), ID resolutions
-	// (50k entries, 1h TTL), and fetched ratings (50k entries, 30min TTL).
+	// (50k entries, 24h TTL), and fetched ratings (50k entries, 72h TTL).
 	state.Caches = &services.MemCacheSet{
 		ImageMem: services.NewMemCache(
 			int64(cfg.ImageMemCacheMB)*1024*1024, 0,
@@ -134,10 +134,11 @@ func main() {
 		IDs: services.NewMemCache(
 			0, 50_000, 24*time.Hour, 0,
 		),
-		// Hard limit; badges older than services.ratingsRefreshAfter (30 min)
-		// are served while a background refresh runs.
+		// Hard limit, past the 24 h refresh of older titles (see
+		// services.ratingsRefreshFor): due badges are served while a
+		// background refresh runs.
 		Ratings: services.NewMemCache(
-			0, 50_000, 24*time.Hour, 0,
+			0, 50_000, 72*time.Hour, 0,
 		),
 	}
 	// Mirror the Rust image_mem_cache: re-check release-date staleness of

@@ -4,14 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	neturl "net/url"
 	"time"
 
 	"openposterdb/internal/errors"
-
-	"log/slog"
 )
 
 type MdblistClient struct {
@@ -76,35 +73,26 @@ func (c *MdblistClient) GetRatingsByTMDB(tmdbID uint64, mediaType string) (*Mdbl
 }
 
 func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistResponse, error) {
-	apiKey := c.KeyPool.ActiveKeyRaw()
-	keyHash := c.KeyPool.ActiveKeyHash()
-
-	fullURL := fmt.Sprintf("%s?apikey=%s", url, apiKey)
-
 	start := time.Now()
-	resp, err := SendWithRetryCtx(ctx, &MDBListRetry, func() (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
-		req.Header.Set("User-Agent", UserAgent())
-		return c.HTTP.Do(req)
+	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+		service: "MDBList",
+		retry:   &MDBListRetry,
+		do: func(key string) (*http.Response, error) {
+			req, err := http.NewRequestWithContext(ctx, "GET", url+"?apikey="+neturl.QueryEscape(key), nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("User-Agent", UserAgent())
+			return c.HTTP.Do(req)
+		},
+		limited: is429,
 	})
 	logSlow("MDBList", time.Since(start).Milliseconds())
-
 	if err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
-	if resp.StatusCode == http.StatusTooManyRequests {
-		c.KeyPool.Report429()
-		slog.Warn("mdblist API key rate limited (429)", "key", keyHash)
-		return nil, errors.NewOther(fmt.Sprintf("MDBList 429: %s", errSnippet(body)))
-	}
-
-	c.KeyPool.ReportSuccess()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", resp.StatusCode, errSnippet(body)))
+	if status != http.StatusOK {
+		return nil, errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", status, errSnippet(body)))
 	}
 
 	var result MdblistResponse

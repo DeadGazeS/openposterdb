@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -29,7 +28,10 @@ type TraktRatingsResponse struct {
 }
 
 func (c *TraktClient) requestCtx(ctx context.Context, url string) (*http.Request, error) {
-	clientID := c.KeyPool.ActiveKeyRaw()
+	return c.requestWithKey(ctx, url, c.KeyPool.ActiveKeyRaw())
+}
+
+func (c *TraktClient) requestWithKey(ctx context.Context, url, clientID string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -46,28 +48,28 @@ func (c *TraktClient) request(url string) (*http.Request, error) {
 }
 
 func (c *TraktClient) getRatingCtx(ctx context.Context, url string) (*TraktRatingsResponse, error) {
-	req, err := c.requestCtx(ctx, url)
-	if err != nil {
-		return nil, errors.NewAPIError(err)
-	}
-
 	start := time.Now()
-	resp, err := SendWithRetryCtx(ctx, &TraktRetry, func() (*http.Response, error) {
-		return c.HTTP.Do(req)
+	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+		service: "Trakt",
+		retry:   &TraktRetry,
+		do: func(key string) (*http.Response, error) {
+			req, err := c.requestWithKey(ctx, url, key)
+			if err != nil {
+				return nil, err
+			}
+			return c.HTTP.Do(req)
+		},
+		limited: is429,
 	})
 	logSlow("Trakt", time.Since(start).Milliseconds())
 	if err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		return nil, nil
 	}
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamJSON))
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("Trakt returned %d: %s", resp.StatusCode, errSnippet(body)))
+	if status != http.StatusOK {
+		return nil, errors.NewOther(fmt.Sprintf("Trakt returned %d: %s", status, errSnippet(body)))
 	}
 
 	var result TraktRatingsResponse

@@ -15,13 +15,17 @@ import (
 type omdbStub struct {
 	calls atomic.Int32
 	delay time.Duration
-	empty bool
-	fixed string // when set, the imdbRating returned for every id
+	empty bool        // a successful answer without ratings
+	fail  atomic.Bool // an error answer (an outage, not "no ratings")
+	fixed string      // when set, the imdbRating returned for every id
 }
 
 func (s *omdbStub) RoundTrip(req *http.Request) (*http.Response, error) {
 	s.calls.Add(1)
 	time.Sleep(s.delay)
+	if s.fail.Load() {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"Response":"False","Error":"down"}`))}, nil
+	}
 	body := `{"Response":"False"}`
 	if !s.empty {
 		id := req.URL.Query().Get("i")
@@ -69,26 +73,44 @@ func TestFetchRatingsCached_ConcurrentCallsShareOneFetch(t *testing.T) {
 	}
 }
 
-// An empty badge list (every provider failed, or genuinely no ratings) is only
-// cached briefly, so an upstream outage doesn't pin badge-less posters for
-// the full ratings TTL.
-func TestFetchRatingsCached_EmptyResultShortTTL(t *testing.T) {
+// When every provider failed the empty result is only cached briefly, so an
+// upstream outage doesn't pin badge-less posters for the full ratings age.
+func TestFetchRatingsCached_FailedFetchShortTTL(t *testing.T) {
 	old := emptyRatingsTTL
 	emptyRatingsTTL = 30 * time.Millisecond
 	defer func() { emptyRatingsTTL = old }()
 
-	stub := &omdbStub{empty: true}
+	stub := &omdbStub{}
+	stub.fail.Store(true)
 	clients := RatingsClients{OMDB: NewOmdbClient([]string{"k"}, &http.Client{Transport: stub})}
 	cache := NewMemCache(0, 100, time.Hour, 0)
 	FetchRatingsCachedCtx(t.Context(), cache, clients, imdbOnly("tt0000004"))
 	FetchRatingsCachedCtx(t.Context(), cache, clients, imdbOnly("tt0000004"))
 	if n := stub.calls.Load(); n != 1 {
-		t.Fatalf("within the empty TTL: calls = %d, want 1", n)
+		t.Fatalf("within the failure TTL: calls = %d, want 1", n)
 	}
 	time.Sleep(40 * time.Millisecond)
-	stub.empty = false
+	stub.fail.Store(false)
 	if got := FetchRatingsCachedCtx(t.Context(), cache, clients, imdbOnly("tt0000004")); len(got) != 1 {
-		t.Fatalf("after the empty TTL the ratings must be refetched, got %v", got)
+		t.Fatalf("after the failure TTL the ratings must be refetched, got %v", got)
+	}
+}
+
+// A title the providers answered for, just without ratings, is cached like
+// any successful fetch — not refetched every couple of minutes.
+func TestFetchRatingsCached_NoRatingsCachedLikeSuccess(t *testing.T) {
+	old := emptyRatingsTTL
+	emptyRatingsTTL = 10 * time.Millisecond
+	defer func() { emptyRatingsTTL = old }()
+
+	stub := &omdbStub{empty: true}
+	clients := RatingsClients{OMDB: NewOmdbClient([]string{"k"}, &http.Client{Transport: stub})}
+	cache := NewMemCache(0, 100, time.Hour, 0)
+	FetchRatingsCachedCtx(t.Context(), cache, clients, imdbOnly("tt0000009"))
+	time.Sleep(30 * time.Millisecond)
+	FetchRatingsCachedCtx(t.Context(), cache, clients, imdbOnly("tt0000009"))
+	if n := stub.calls.Load(); n != 1 {
+		t.Fatalf("calls = %d, want 1 (no-ratings result kept for the ratings age)", n)
 	}
 }
 

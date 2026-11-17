@@ -411,13 +411,13 @@ func httpGet(client *http.Client, config *RetryConfig, url string) (*http.Respon
 	return httpGetCtx(context.Background(), client, config, url)
 }
 
-// logSlow logs a warning when an operation takes longer than 2 seconds. It's
-// not currently called from anywhere — kept around as a useful per-call
-// timing helper. Wire it up at the relevant call sites (TmdbClient.Get +
-// FetchImageBytes, for instance) if you want slow-TMDB warnings back in
-// the logs.
-func logSlow(label string, ms int64) {
+// logSlow logs a warning when an operation takes longer than 2 seconds
+// (provider calls, ratings fetches, renders, whole image requests).
+func logSlow(label string, ms int64, attrs ...any) {
 	if ms > 2000 {
-		slog.Warn("slow "+label, "ms", ms)
+		slog.Warn("slow "+label, append([]any{"ms", ms}, attrs...)...)
 	}
 }
+
+// LogSlow is logSlow for other packages.
+func LogSlow(label string, ms int64, attrs ...any) { logSlow(label, ms, attrs...) }

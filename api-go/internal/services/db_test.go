@@ -477,10 +477,10 @@ func (c *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 func TestTmdbRatingSkippedWithoutTMDbID(t *testing.T) {
 	tr := &countingTransport{body: `{"vote_average":7.5}`}
 	tmdb := NewTmdbClient("k", &http.Client{Transport: tr})
-	if b := fetchTmdbRatingCtx(context.Background(), tmdb, 0, "movie", 0, 0, 0); b != nil || tr.n != 0 {
+	if b, _ := fetchTmdbRatingCtx(context.Background(), tmdb, 0, "movie", 0, 0, 0); b != nil || tr.n != 0 {
 		t.Errorf("tmdbID 0: badge=%v requests=%d, want nil and 0", b, tr.n)
 	}
-	if b := fetchTmdbRatingCtx(context.Background(), tmdb, 278, "movie", 0, 0, 0); b == nil || tr.n != 1 {
+	if b, _ := fetchTmdbRatingCtx(context.Background(), tmdb, 278, "movie", 0, 0, 0); b == nil || tr.n != 1 {
 		t.Errorf("tmdbID 278: badge=%v requests=%d, want a badge and 1", b, tr.n)
 	}
 }
