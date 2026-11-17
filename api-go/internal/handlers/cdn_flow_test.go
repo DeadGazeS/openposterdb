@@ -109,7 +109,7 @@ func TestCDNRedirect_EndToEnd(t *testing.T) {
 // for any string.
 func TestHandleIsValid_UnknownKeyRejected(t *testing.T) {
 	deps, apiKey := newCDNFlowDeps(t)
-	h := HandleIsValid(deps.DB, func() bool { return false })
+	h := HandleIsValid(deps.DB, func() bool { return false }, nil)
 	for key, want := range map[string]int{
 		apiKey:              http.StatusOK,
 		"not-a-real-key-42": http.StatusUnauthorized,

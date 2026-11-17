@@ -82,8 +82,8 @@ func FromEnv() (*Config, error) {
 		ImageMemCacheMB:     envUint64OrDefault("IMAGE_MEM_CACHE_MB", 512),
 		StaticDir:           os.Getenv("STATIC_DIR"),
 		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
-		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
-		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
+		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 300),     // Rust default (bursts of 240)
+		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 300), // Rust default (bursts of 240)
 		RateLimitAuthRPM:    envUint64OrDefault("RATE_LIMIT_AUTH_RPM", 10),
 		TrustedProxiesEnv:   strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),

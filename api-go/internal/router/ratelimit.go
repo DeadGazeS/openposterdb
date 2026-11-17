@@ -26,6 +26,7 @@ type rlEntry struct {
 // sight of an IP and reaped by SweepIdle after idleTimeout without traffic.
 type rateLimiter struct {
 	perMinute   uint64
+	burst       int
 	limiters    sync.Map // map[string]*rlEntry
 	count       atomic.Int64
 	idleTimeout time.Duration
@@ -39,10 +40,27 @@ type rateLimiter struct {
 // bucket until idle entries are swept.
 const maxLimiterEntries = 100_000
 
+// Rust image-route limits: 300 requests a minute with a burst of 240 per
+// API-key prefix + IP; isValid 10 a second with a burst of 30.
+const (
+	imageBurst       = 240
+	isValidPerMinute = 600
+	isValidBurst     = 30
+)
+
+// newRateLimiter allows perMinute requests a minute, the whole minute's
+// quota at once.
 func newRateLimiter(perMinute uint64) *rateLimiter {
-	burst := max(int(perMinute), 1)
+	return newRateLimiterBurst(perMinute, int(perMinute))
+}
+
+// newRateLimiterBurst allows perMinute requests a minute with bursts of up to
+// burst (capped at perMinute, at least 1).
+func newRateLimiterBurst(perMinute uint64, burst int) *rateLimiter {
+	burst = max(min(burst, int(perMinute)), 1)
 	return &rateLimiter{
 		perMinute:   perMinute,
+		burst:       burst,
 		idleTimeout: 5 * time.Minute,
 		overflow:    rate.NewLimiter(rate.Limit(float64(perMinute)/60.0), burst),
 		clientIP:    defaultClientIP,
@@ -62,10 +80,7 @@ func (r *rateLimiter) limiter(ip string) *rate.Limiter {
 		return e.lim
 	}
 	perSec := float64(r.perMinute) / 60.0
-	burst := int(r.perMinute)
-	if burst < 1 {
-		burst = 1
-	}
+	burst := max(r.burst, 1)
 	if r.count.Load() >= maxLimiterEntries {
 		return r.overflow
 	}

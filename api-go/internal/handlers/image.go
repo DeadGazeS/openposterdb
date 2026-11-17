@@ -271,9 +271,12 @@ func etagMatches(header, etag string) bool {
 	return false
 }
 
-func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
+// HandleIsValid answers /{apiKey}/isValid. HEAD is accepted like on the image
+// routes (clients probe with it), and a valid key's use is recorded for the
+// admin "last used" column like an image request.
+func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool, lastUsed KeyRecorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
 		}
@@ -299,6 +302,7 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc
 			httpx.WriteJSON(w, 401, map[string]interface{}{"error": "Invalid or missing API key"})
 			return
 		}
+		recordKey(lastUsed, k.ID)
 
 		httpx.WriteJSON(w, 200, map[string]interface{}{"valid": true})
 	}

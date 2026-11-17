@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,20 @@ import (
 )
 
 var dummyHash = hashPasswordDummy()
+
+type clientIPKey struct{}
+
+// WithClientIP stores the request's client IP (resolved through the trusted
+// proxies) for handlers that log it.
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPKey{}, ip)
+}
+
+// ClientIPFromContext returns the IP stored by WithClientIP, or "".
+func ClientIPFromContext(ctx context.Context) string {
+	ip, _ := ctx.Value(clientIPKey{}).(string)
+	return ip
+}
 
 func hashPasswordDummy() string {
 	h, _ := services.HashPassword("openposterdb-dummy-timing-pad")
@@ -139,7 +154,8 @@ func RefreshCookie(token string, maxAgeSecs int, secure bool) *http.Cookie {
 func AuthStatus(ctx context.Context, db *sql.DB, isFreeAPIKeyEnabled func() bool, disablePublicPages bool) (int, any) {
 	count, err := services.CountAdminUsersCtx(ctx, db)
 	if err != nil {
-		return 500, map[string]string{"error": err.Error()}
+		slog.Error("auth status: counting admin users failed", "error", err)
+		return 500, map[string]string{"error": "Internal server error"}
 	}
 	return 200, map[string]any{
 		"setup_required":       count == 0,
@@ -163,8 +179,12 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 	}
 
 	userID, err := services.CreateFirstAdminUserCtx(ctx, db, username, passwordHash)
-	if err != nil {
+	if errors.Is(err, services.ErrSetupCompleted) {
 		return 403, map[string]string{"error": err.Error()}, nil
+	}
+	if err != nil {
+		slog.Error("setup: creating the admin user failed", "error", err)
+		return 500, map[string]string{"error": "Account operation failed"}, nil
 	}
 
 	slog.Info("Admin account setup completed", "user", username)
@@ -181,15 +201,18 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 
 func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, any, []*http.Cookie) {
 	userID, returnedUsername, passwordHash, err := services.FindAdminUserByUsernameCtx(ctx, db, username)
+	// Failed logins carry the (trusted-proxy resolved) client IP and a hash of
+	// the attempted username: enough to spot a guessing run in the log
+	// without writing typed passwords-as-usernames into it.
 	if err != nil || returnedUsername == "" {
 		services.VerifyPasswordCtx(ctx, password, dummyHash)
-		slog.Warn("Login failed: unknown username")
+		slog.Warn("Login failed: unknown username", "client_ip", ClientIPFromContext(ctx), "username_hash", services.KeyHash(username))
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 
 	ok, err := services.VerifyPasswordCtx(ctx, password, passwordHash)
 	if err != nil || !ok {
-		slog.Warn("Login failed: incorrect password")
+		slog.Warn("Login failed: incorrect password", "client_ip", ClientIPFromContext(ctx), "username_hash", services.KeyHash(username))
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 

@@ -71,7 +71,7 @@ func TestHandleCreateKey_ValidatesName(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		HandleCreateKey(db, testSecretsKey)(rec, req)
+		RequireAuth(jwtSecret)(HandleCreateKey(db, testSecretsKey)).ServeHTTP(rec, req)
 		if rec.Code != c.want {
 			t.Errorf("name %q: got %d want %d (body %s)", c.name, rec.Code, c.want, rec.Body.String())
 		}

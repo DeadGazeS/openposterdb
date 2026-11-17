@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -41,6 +42,9 @@ func CreateAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
 	return CreateAdminUserCtx(context.Background(), db, username, passwordHash)
 }
 
+// ErrSetupCompleted: an admin already exists, setup can't run again.
+var ErrSetupCompleted = errors.New("Setup already completed")
+
 func CreateFirstAdminUserCtx(ctx context.Context, db *sql.DB, username, passwordHash string) (int64, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -53,7 +57,7 @@ func CreateFirstAdminUserCtx(ctx context.Context, db *sql.DB, username, password
 		return 0, err
 	}
 	if count > 0 {
-		return 0, fmt.Errorf("Setup already completed")
+		return 0, ErrSetupCompleted
 	}
 
 	now := nowUTC()

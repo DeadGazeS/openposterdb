@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"golang.org/x/image/font"
 
@@ -617,12 +618,19 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 // writePurgeResult answers a purge/clear: 200 {ok:true,...} when every step
 // succeeded, else 500 {ok:false, errors, ...} with whatever did get done (the
 // failures used to be swallowed behind ok:true).
+// The client gets which steps failed, not the errors themselves (paths, SQL);
+// those go to the log.
 func writePurgeResult(w http.ResponseWriter, errs []string, body map[string]any) {
 	status := 200
 	body["ok"] = len(errs) == 0
 	if len(errs) > 0 {
 		status = 500
-		body["errors"] = errs
+		failed := make([]string, len(errs))
+		for i, e := range errs {
+			step, _, _ := strings.Cut(e, ": ")
+			failed[i] = step + " failed"
+		}
+		body["errors"] = failed
 		slog.Warn("cache purge partially failed", "errors", errs)
 	}
 	httpx.WriteJSON(w, status, body)
@@ -636,6 +644,14 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 		}
 
 		scope := r.URL.Query().Get("scope")
+		if _, err := services.ParseIDType(idType); err != nil {
+			httpx.WriteError(w, 400, "invalid id_type")
+			return
+		}
+		if err := services.ValidateIDValue(idValue); err != nil {
+			httpx.WriteError(w, 400, "invalid id_value")
+			return
+		}
 
 		var errs []string
 		note := func(what string, err error) {
@@ -671,8 +687,10 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 		note("image metadata", err)
 
 		idKey := idType + "/" + idValue
+		var ratingsDeleted int64
 		if scope != "variant" {
-			_, err := services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
+			var err error
+			ratingsDeleted, err = services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
 			note("available ratings", err)
 		}
 
@@ -684,11 +702,13 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			if scope != "variant" {
 				services.InvalidateTitleRatings(caches.IDs, caches.Ratings, idType, idValue)
 			}
+			// DeleteTitle, not DeletePrefix: "imdb/tt123" must not evict
+			// "imdb/tt1234567".
 			if caches.ImageMem != nil {
-				caches.ImageMem.DeletePrefix(idType + "/" + idValue)
+				caches.ImageMem.DeleteTitle(idKey)
 			}
 			if caches.IDs != nil {
-				caches.IDs.DeletePrefix(idType + "/" + idValue)
+				caches.IDs.DeleteTitle(idKey)
 			}
 		}
 
@@ -696,6 +716,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			"external_cache_only": externalCacheOnly,
 			"files_deleted":       filesDeleted,
 			"meta_deleted":        metaDeleted,
+			"ratings_deleted":     ratingsDeleted,
 		})
 	}
 }
