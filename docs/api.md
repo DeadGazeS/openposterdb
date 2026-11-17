@@ -65,11 +65,11 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `id_type`: `imdb`, `tmdb`, `tvdb`, `kitsu`, `mal` (see [Anime IDs](#anime-ids-kitsu--mal))
 - `id_value`: e.g. `tt1234567`, `movie-123`, `series-456`, `episode-1396-S1E1`. Episode IMDb IDs (e.g. `tt0959621`), TVDB episode IDs, and series-level IDs with season/episode (e.g. `episode-tt14786934-S1E1`, `episode-81189-S3E5`) are also supported. Kitsu takes a numeric ID or a slug (`13658` or `fairy-tail-2018`), MAL a numeric ID (`35972`)
 - `?fallback=true`: accepted for RPDB plugin compatibility but ignored as OPDB falls back to TMDB by default
-- `?lang={code}`: override the image language for this request (e.g. `?lang=de` for German, `?lang=pt-BR` for Brazilian Portuguese). Supports regional variants — when a region-specific image exists (e.g. `pt-BR`), it is preferred; otherwise falls back to the base language (`pt`), then English. Applies to posters and logos. Backdrops are language-agnostic and ignore this parameter
+- `?lang={code}`: override the image language for this request (e.g. `?lang=de` for German, `?lang=pt-BR` for Brazilian Portuguese). Posters and logos are picked in this order: the regional variant (`pt-BR`), the base language (`pt`), English, the title's original language, images without text, any image — first on TMDB, then on Fanart.tv, then the title's default TMDB poster. Backdrops prefer images without text, then this language
 - `?imageSize={size}`: control output image dimensions. Available sizes vary by image type (see [Image sizes](#image-sizes))
 - `?ratings_limit={0-10}`: maximum number of rating badges to display (0 = no ratings). Defaults to the layout's total capacity when omitted (the number of badges shown is the sum of the per-side `per_row × rows` counts)
-- `?ratings_order={keys}`: comma-separated rating source keys controlling display order. Valid keys: `imdb`, `tmdb`, `rt` (RT Critics), `rta` (RT Audience), `mc` (Metacritic), `trakt`, `lb` (Letterboxd), `mal` (MyAnimeList), `mdblist` (MDBList score), `ebert` (Roger Ebert). Example: `?ratings_order=imdb,tmdb,rt`
-- `?ratings_exclude={keys}`: comma-separated rating source keys to hide entirely (same valid keys as `ratings_order`). Excluded sources are dropped *before* ordering and limiting, so an excluded source frees its badge slot for the next preferred source rather than leaving a gap. Example: `?ratings_exclude=rt` shows your ratings but never RT Critics
+- `?ratings_order={keys}`: comma-separated rating source keys controlling display order. Valid keys: `imdb`, `tmdb`, `rt` (RT Critics), `rta` (RT Audience), `mc` (Metacritic), `trakt`, `lb` (Letterboxd), `mal` (MyAnimeList), `mdblist` (MDBList score), `ebert` (Roger Ebert). Example: `?ratings_order=imdb,tmdb,rt`. Empty (`?ratings_order=`) clears the stored order for this request
+- `?ratings_exclude={keys}`: comma-separated rating source keys to hide entirely (same valid keys as `ratings_order`). Excluded sources are dropped *before* ordering and limiting, so an excluded source frees its badge slot for the next preferred source rather than leaving a gap. Example: `?ratings_exclude=rt` shows your ratings but never RT Critics. Empty (`?ratings_exclude=`) clears the stored list, so every source can show again
 - `?badge_style={h|v|d}`: badge layout — `h` (horizontal), `v` (vertical), `d` (default)
 - `?label_style={t|i|o|h}`: label rendering — `t` (text), `i` (white icons), `o` (official provider logos), `h` (high-resolution provider logos rasterized from the `highRes` SVGs)
 - `?text_size={50-400}`: rating text font size as a percentage of the default (100 = default)
@@ -77,10 +77,8 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `?badge_width={50-400}` / `?badge_height={50-400}`: scale the badge frame on a single axis as a percentage of the default (100 = default). The width applies to the badge's total width and section split, the height to the box height; text and logo sizes are unaffected (they scale only with `text_size`/`logo_size`)
 - `?logo_size={50-400}`: rating source logo size as a percentage of the default (100 = default)
 - `?badge_shape={r|p}`: badge corner shape — `r` (rounded, default), `p` (pill, fully rounded ends). Pills always render as a horizontal icon/label-left, value-right lozenge, even on image types whose default style is vertical (logos, backdrops, episodes)
-- `?badge_background={d|k|t|n}`: badge background — `d` (default: source-coloured label + dark value), `k` (dark: uniformly dark), `t` (transparent: semi-transparent so the artwork shows through), `n` (none: no background, label/value drawn directly on the image with a drop shadow)
+- `?badge_alpha={0-100}`: badge background opacity in percent (default 80; `0` = no background, label and value drawn directly on the image with a drop shadow)
 - `?image_source={t|f}`: image source — `t` (TMDB, default), `f` (Fanart.tv). Applies to all image types. The non-selected source is used as fallback
-- `?badge_direction={d|h|v}`: badge stacking direction — `d` (default), `h` (horizontal), `v` (vertical). Applies to poster, backdrop, and episode endpoints
-- `?position={bc|tc|l|r|tl|tr|bl|br}`: badge anchor position. Applies to poster, backdrop, and episode endpoints
 - `?textless={true|false}`: prefer textless images when available (poster only). Works with both TMDB and Fanart.tv sources
 - `?blur={true|false}`: apply Gaussian blur for spoiler protection (episode only). Badges remain sharp over the blurred still image
 - `?layout={json}`: set the badge layout (applies to all four image types). A JSON object with a `top`, `right`, `bottom`, and `left` slot, each holding `per_row` (badges per row), `rows` (row count), and `start` (anchor along the side — `l`/`c`/`r` for top/bottom, `t`/`c`/`b` for left/right), plus an `order` array of side names listing the fill order. Badges are laid out in horizontal rows on every side. The total number of ratings shown is the sum of all four side capacities (`per_row × rows`). Example: `?layout={"bottom":{"per_row":3,"rows":1,"start":"c"}}`. Defaults: poster bottom 3×1 centre, logo bottom 5×1 centre, backdrop top 5×1 right, episode right 1×1 top.
@@ -89,7 +87,21 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 
 Old RPDB parameter names `?poster_source=` and `?fanart_textless=` are accepted as aliases.
 
-**Scope notes:** `textless`, `fit`, and `layout` (poster) are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `text_size`, `badge_size`, `badge_width`, `badge_height`, `logo_size`, `badge_shape`, `badge_background`, `image_source`, `layout`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
+### Legacy parameters
+
+URLs written for the earlier (v1.3) version keep working. These parameters are mapped onto the settings above; when the current parameter is in the same URL, it wins.
+
+| Legacy parameter | Maps to |
+|---|---|
+| `?position={bc\|tc\|l\|r\|tl\|tr\|bl\|br}` | a `layout`: the badges sit at that anchor. `bc`/`tc` give a row at the bottom/top centre; corners and `l`/`r` give a column on that side (or a row with `badge_direction=h`). Ignored when `layout` is given |
+| `?badge_direction={d\|h\|v}` | the same `layout` conversion: `h` = a row, `v` = a column, `d` = a row for `bc`/`tc` and a column elsewhere. Also sets which way the `d` badge style faces |
+| `?split={true\|false}` | the same `layout` conversion, with the badges split over two opposite sides (the first half at `position`, the rest mirrored: top/bottom for rows, left/right for a column). Poster and logo |
+| `?badge_background={d\|k\|t\|n}` | `badge_alpha`: `d` → 80, `k` (dark) → 78, `t` (transparent) → 47, `n` (none) → 0. Ignored when `badge_alpha` is given |
+| `?badge_size={xs\|s\|m\|l\|xl}` | `badge_size` in percent: 58 / 79 / 100 / 121 / 142 (episodes: 50 / 66 / 83 / 100 / 117, as their default was `l`). Numbers keep working as before |
+
+The layout conversion uses the badge count of the layout it replaces (or `ratings_limit` when given). Unknown values fall back to the defaults, like every other parameter.
+
+**Scope notes:** `textless`, `fit`, and `layout` (poster) are poster-only. `blur` is episode-only. `edge_inset_x`/`edge_inset_y` are backdrop-only. For shared parameters (`ratings_limit`, `badge_style`, `label_style`, `text_size`, `badge_size`, `badge_width`, `badge_height`, `logo_size`, `badge_shape`, `badge_alpha`, `image_source`, `layout`), the override is applied to the correct image-type-specific setting (e.g. `?badge_style=h` on the poster endpoint sets `poster_badge_style`, on the logo endpoint sets `logo_badge_style`).
 
 ## Anime IDs (Kitsu / MAL)
 
