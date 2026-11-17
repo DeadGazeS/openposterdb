@@ -72,7 +72,7 @@ func TestUpgradeV005_RemovesRustRenders(t *testing.T) {
 		}
 	}
 	rustKey := "imdb/tt1@mil.ptr.sv.lt.dv.bm.shr.bgd.zm"
-	goKey := "imdb/tt1@mil.sh.li.dd.shr.ba80.zm"
+	goKey := "imdb/tt1@mil.sh.li.dd.shr.ba80.zm" + RenderEpochCacheSuffix() // current epoch
 	write("posters/" + rustKey + ".jpg")
 	write("posters/" + goKey + ".jpg")
 	write("backdrops/imdb/tt2_b_f@mil.ptr.sv.lt.dv.bl.shr.bgd.zm.jpg")

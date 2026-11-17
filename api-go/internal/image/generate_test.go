@@ -47,7 +47,7 @@ func TestBlurImageSmooths(t *testing.T) {
 	src := checkerboardRGBA(64, 64)
 	before := meanAdjacentDelta(src)
 
-	blurred := blurImage(src, 4)
+	blurred := blurImage(src, 4, 1)
 	b := blurred.Bounds()
 	if b.Dx() != 64 || b.Dy() != 64 {
 		t.Fatalf("blur changed dimensions: got %dx%d, want 64x64", b.Dx(), b.Dy())
@@ -67,7 +67,7 @@ func TestBlurImageSmooths(t *testing.T) {
 
 func TestBlurImageSmallUnchanged(t *testing.T) {
 	small := image.NewRGBA(image.Rect(0, 0, 6, 6))
-	blurred := blurImage(small, 4)
+	blurred := blurImage(small, 4, 1)
 	if blurred != small {
 		t.Error("tiny images should be returned unchanged")
 	}

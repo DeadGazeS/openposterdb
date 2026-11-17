@@ -567,7 +567,7 @@ func RenderEpisodeSync(imageBytes []byte, params RenderParams) ([]byte, error) {
 	}
 
 	if params.Blur && canvas.Bounds().Dx() >= 8 && canvas.Bounds().Dy() >= 8 {
-		canvas = blurImage(canvas, 4)
+		canvas = blurImage(canvas, episodeBlurDivisor, episodeBlurPasses)
 	}
 
 	if len(params.Badges) == 0 {

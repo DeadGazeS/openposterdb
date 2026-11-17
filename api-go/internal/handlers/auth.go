@@ -156,7 +156,7 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 		return 400, map[string]string{"error": err.Error()}, nil
 	}
 
-	passwordHash, err := services.HashPassword(password)
+	passwordHash, err := services.HashPasswordCtx(ctx, password)
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
 		return 400, map[string]string{"error": "Account operation failed"}, nil
@@ -182,12 +182,12 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCookies bool, username, password string) (int, any, []*http.Cookie) {
 	userID, returnedUsername, passwordHash, err := services.FindAdminUserByUsernameCtx(ctx, db, username)
 	if err != nil || returnedUsername == "" {
-		services.VerifyPassword(password, dummyHash)
+		services.VerifyPasswordCtx(ctx, password, dummyHash)
 		slog.Warn("Login failed: unknown username")
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 
-	ok, err := services.VerifyPassword(password, passwordHash)
+	ok, err := services.VerifyPasswordCtx(ctx, password, passwordHash)
 	if err != nil || !ok {
 		slog.Warn("Login failed: incorrect password")
 		return 401, map[string]string{"error": "Unauthorized"}, nil
@@ -199,7 +199,7 @@ func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 	// current format now that we know the plaintext. A failed rewrite is not
 	// fatal: the PHC hash keeps working and is retried on the next login.
 	if services.NeedsRehash(passwordHash) {
-		if newHash, herr := services.HashPassword(password); herr != nil {
+		if newHash, herr := services.HashPasswordCtx(ctx, password); herr != nil {
 			slog.Warn("re-hashing legacy password failed", "error", herr)
 		} else if uerr := services.UpdateAdminPasswordHashCtx(ctx, db, userID, newHash); uerr != nil {
 			slog.Warn("storing re-hashed legacy password failed", "error", uerr)

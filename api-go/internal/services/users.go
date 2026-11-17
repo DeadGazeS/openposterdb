@@ -144,11 +144,19 @@ func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
 // Rust version stored PHC strings with the argon2 crate defaults instead; see
 // VerifyPassword.)
 func HashPassword(password string) (string, error) {
+	return HashPasswordCtx(context.Background(), password)
+}
+
+// HashPasswordCtx is HashPassword; waiting for a hashing slot ends with ctx.
+func HashPasswordCtx(ctx context.Context, password string) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := argon2IDKey([]byte(password), salt)
+	hash, err := argon2IDKey(ctx, []byte(password), salt)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("%x:%x", salt, hash), nil
 }
 
@@ -167,8 +175,14 @@ func NeedsRehash(storedHash string) bool {
 // Returns false (not an error) when the password doesn't match; returns an
 // error only on malformed stored hash.
 func VerifyPassword(password, storedHash string) (bool, error) {
+	return VerifyPasswordCtx(context.Background(), password, storedHash)
+}
+
+// VerifyPasswordCtx is VerifyPassword; waiting for a hashing slot ends with
+// ctx (the error is then ctx.Err()).
+func VerifyPasswordCtx(ctx context.Context, password, storedHash string) (bool, error) {
 	if strings.HasPrefix(storedHash, phcPrefix) {
-		return verifyPHCArgon2id(password, storedHash)
+		return verifyPHCArgon2id(ctx, password, storedHash)
 	}
 	before, after, ok := strings.Cut(storedHash, ":")
 	if !ok {
@@ -182,23 +196,31 @@ func VerifyPassword(password, storedHash string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	hash := argon2IDKey([]byte(password), salt)
+	hash, err := argon2IDKey(ctx, []byte(password), salt)
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(hash, expectedHash) == 1, nil
 }
 
 // passwordHashSlots caps concurrent argon2id runs: each allocates 64 MiB, so
 // a burst of parallel logins (login is unauthenticated) could otherwise
-// exhaust memory. Extra callers wait for a slot.
+// exhaust memory. Extra callers wait for a slot, or until their context ends
+// (a client that went away no longer holds a place in the queue).
 var passwordHashSlots = make(chan struct{}, 4)
 
-func argon2IDKey(password, salt []byte) []byte {
-	return argon2IDKeyParams(password, salt, 1, 64*1024, 4, 32)
+func argon2IDKey(ctx context.Context, password, salt []byte) ([]byte, error) {
+	return argon2IDKeyParams(ctx, password, salt, 1, 64*1024, 4, 32)
 }
 
-func argon2IDKeyParams(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
-	passwordHashSlots <- struct{}{}
+func argon2IDKeyParams(ctx context.Context, password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
+	select {
+	case passwordHashSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	defer func() { <-passwordHashSlots }()
-	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen), nil
 }
 
 // Upper bounds for parameters read from a stored PHC string, so a corrupted
@@ -212,7 +234,7 @@ const (
 // verifyPHCArgon2id verifies password against a PHC string
 // "$argon2id$v=19$m=<KiB>,t=<iterations>,p=<lanes>$<b64 salt>$<b64 hash>"
 // (unpadded standard base64, as written by the Rust argon2 crate).
-func verifyPHCArgon2id(password, phc string) (bool, error) {
+func verifyPHCArgon2id(ctx context.Context, password, phc string) (bool, error) {
 	parts := strings.Split(phc, "$")
 	// "", "argon2id", ["v=19",] "m=..,t=..,p=..", salt, hash
 	if len(parts) == 5 {
@@ -261,7 +283,10 @@ func verifyPHCArgon2id(password, phc string) (bool, error) {
 	if len(salt) < 8 || len(expected) < 4 || len(expected) > phcMaxKeyLen {
 		return false, fmt.Errorf("invalid PHC salt or hash length")
 	}
-	hash := argon2IDKeyParams([]byte(password), salt, uint32(t), uint32(m), uint8(p), uint32(len(expected)))
+	hash, err := argon2IDKeyParams(ctx, []byte(password), salt, uint32(t), uint32(m), uint8(p), uint32(len(expected)))
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(hash, expected) == 1, nil
 }
 

@@ -119,17 +119,18 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 	titleKey := resolved.TitleKey
 	title := resolved.Title
 	imageTypeChar := ImageDbValue(p.Kind)
+	// At most CROSS_ID_CONCURRENCY writers at a time; when all are busy the
+	// copies are skipped (a request via another id then renders normally).
+	release, ok := currentCrossIDSlots().tryAcquire()
+	if !ok {
+		slog.Debug("cross-id cache write skipped: writers busy", "id", p.IDType+"/"+p.IDValue)
+		return
+	}
 	go func() {
-		// Use a background context for the writes so the cross-id cache
-		// population survives a client disconnect on the originating request
-		// (this is server-side cache maintenance, not part of the response).
-		ctx := p.Context
-		if ctx == nil {
-			ctx = context.Background()
-		} else {
-			bg := context.Background()
-			ctx = bg
-		}
+		defer release()
+		// A background context: the copies survive a client disconnect on
+		// the originating request (server-side cache maintenance).
+		ctx := context.Background()
 		for _, alt := range alternates {
 			altKey, altPath, err := p.cacheKeyFor(alt.idType, alt.idValue, suffix)
 			if err != nil {

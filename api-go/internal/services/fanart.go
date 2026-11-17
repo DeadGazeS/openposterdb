@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -211,32 +212,35 @@ func SelectFanartImage(posters []FanartPoster, lang string, textless bool) (*Fan
 		return best
 	}
 
+	// Tiers, most likes first within each: textless ("00") when asked for,
+	// then lang → base language → en → textless → untagged ("") → any.
 	if textless {
 		if p := findBest("00"); p != nil {
 			return p, PosterMatchTextless, true
 		}
 	}
-
-	if p := findBest(lang); p != nil {
-		return p, PosterMatchLanguage, true
+	var tiers []string
+	for _, l := range []string{lang, LangBase(lang), "en", "00", ""} {
+		if !slices.Contains(tiers, l) {
+			tiers = append(tiers, l)
+		}
 	}
-
-	base := LangBase(lang)
-	if base != lang {
-		if p := findBest(base); p != nil {
+	for _, l := range tiers {
+		if p := findBest(l); p != nil {
+			if l == "00" {
+				return p, PosterMatchTextless, true
+			}
 			return p, PosterMatchLanguage, true
 		}
 	}
 
-	if lang != "en" && base != "en" {
-		if p := findBest("en"); p != nil {
-			return p, PosterMatchLanguage, true
+	var best *FanartPoster
+	var bestLikes int64
+	for i := range posters {
+		likes, _ := strconv.ParseInt(posters[i].Likes, 10, 64)
+		if best == nil || likes > bestLikes {
+			best, bestLikes = &posters[i], likes
 		}
 	}
-
-	if p := findBest(""); p != nil {
-		return p, PosterMatchLanguage, true
-	}
-
-	return nil, 0, false
+	return best, PosterMatchLanguage, true
 }

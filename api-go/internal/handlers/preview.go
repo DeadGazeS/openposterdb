@@ -165,7 +165,9 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 	if kind == "episode" {
 		idValue = image.DemoEpisodeID
 	}
-	idKey := "imdb/" + idValue
+	// "preview/": the image path keys this table by "<idType>/<id>" with a
+	// different value format (services.ValidSourcesString).
+	idKey := "preview/imdb/" + idValue
 
 	if p.cfg.TMDB != nil {
 		if sources, _, _, err := services.ReadAvailableRatingsCtx(p.ctx, p.db, idKey); err == nil {

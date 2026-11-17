@@ -40,6 +40,9 @@ func WriteAppError(w http.ResponseWriter, err error) {
 	}
 	var ae *apperr.AppError
 	if stderrors.As(err, &ae) {
+		if ae.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(ae.RetryAfter))
+		}
 		WriteJSON(w, ae.Status, map[string]string{"error": ae.ClientMessage()})
 		return
 	}

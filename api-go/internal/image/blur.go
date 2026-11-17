@@ -7,21 +7,22 @@ import (
 	"golang.org/x/image/draw"
 )
 
-// blurImage returns a blurred copy of `img` using a true 3x3 Gaussian
-// convolution on a 1/divisor-downscaled copy, then upscaled back to the
-// original size. The downscale+blur+upscale combo keeps the per-pixel cost
-// bounded by O(W*H) on the small image and produces a visibly smooth result
-// (the upscale amplifies the blur strength so even a mild Gaussian reads as
-// a strong blur in the final image).
-//
-// The convolution uses the separable [1,2,1]/4 kernel (sigma ~0.707) applied
-// once horizontally then once vertically through a scratch buffer. No
-// third-party dependency; matches the visual intent of the Rust reference's
-// imageproc::gaussian_blur_f32 (sigma 3.0) without dragging in imageproc.
+// episodeBlurDivisor / episodeBlurPasses reproduce the Rust spoiler blur: a
+// 1/8 downscale, a Gaussian with sigma 3 on the small copy (each [1,2,1]/4
+// pass adds a variance of 0.5, so 18 passes give sigma² = 9), then an
+// upscale back to full size. Stills must be unreadable, not just soft.
+const (
+	episodeBlurDivisor = 8
+	episodeBlurPasses  = 18
+)
+
+// blurImage returns a blurred copy of img: downscaled to 1/divisor, blurred
+// with `passes` passes of the [1,2,1]/4 Gaussian, and scaled back up. The
+// work happens on the small copy, so the cost stays O(W*H/divisor²) per pass.
 //
 // If the input is smaller than 2*divisor on either axis, the original is
 // returned unchanged.
-func blurImage(img *image.RGBA, divisor int) *image.RGBA {
+func blurImage(img *image.RGBA, divisor, passes int) *image.RGBA {
 	if divisor < 2 {
 		divisor = 2
 	}
@@ -32,15 +33,16 @@ func blurImage(img *image.RGBA, divisor int) *image.RGBA {
 	}
 	small := image.NewRGBA(image.Rect(0, 0, cw/divisor, ch/divisor))
 	draw.ApproxBiLinear.Scale(small, small.Bounds(), img, b, draw.Src, nil)
-	gaussianBlurRGBA(small)
+	for range max(passes, 1) {
+		gaussianBlurRGBA(small)
+	}
 	out := image.NewRGBA(b)
 	draw.CatmullRom.Scale(out, out.Bounds(), small, small.Bounds(), draw.Src, nil)
 	return out
 }
 
 // gaussianBlurRGBA applies a 3x3 separable Gaussian (kernel [1,2,1] / 4) to
-// the RGBA image in-place. Operates on the alpha channel too so the blur
-// path produces identical pixel structure to the legacy downscale/upscale.
+// the RGBA image in-place, alpha included. Edge pixels repeat the border.
 func gaussianBlurRGBA(img *image.RGBA) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -61,7 +63,7 @@ func gaussianBlurRGBA(img *image.RGBA) {
 			if x < w-1 {
 				r = img.RGBAAt(sx+1, sy)
 			}
-			tmp.SetRGBA(sx, sy, gauss3(c, l, r))
+			tmp.SetRGBA(x, y, gauss3(c, l, r))
 		}
 	}
 	// Vertical pass: tmp -> img.
@@ -69,27 +71,31 @@ func gaussianBlurRGBA(img *image.RGBA) {
 		sy := y + b.Min.Y
 		for x := 0; x < w; x++ {
 			sx := x + b.Min.X
-			c := tmp.RGBAAt(sx, sy)
+			c := tmp.RGBAAt(x, y)
 			var t, bb color.RGBA = c, c
 			if y > 0 {
-				t = tmp.RGBAAt(sx, sy-1)
+				t = tmp.RGBAAt(x, y-1)
 			}
 			if y < h-1 {
-				bb = tmp.RGBAAt(sx, sy+1)
+				bb = tmp.RGBAAt(x, y+1)
 			}
 			img.SetRGBA(sx, sy, gauss3(c, t, bb))
 		}
 	}
 }
 
-// gauss3 returns the per-channel [1,2,1]/4 blend of (center, a, b). Works
-// on premultiplied color.RGBA the same way it would on NRGBA - the
-// per-channel weighted average commutes with alpha premultiplication.
+// gauss3 returns the per-channel [1,2,1]/4 blend of (center, a, b). The sum
+// is taken in uint16: in uint8, 2*255 + 255 + 255 wrapped around and turned
+// white into 63. Works on premultiplied color.RGBA the same way as on NRGBA
+// (the weighted average commutes with premultiplication).
 func gauss3(c, a, b color.RGBA) color.RGBA {
+	mix := func(c, a, b uint8) uint8 {
+		return uint8((uint16(c)*2 + uint16(a) + uint16(b) + 2) / 4)
+	}
 	return color.RGBA{
-		A: (c.A*2 + a.A + b.A) / 4,
-		R: (c.R*2 + a.R + b.R) / 4,
-		G: (c.G*2 + a.G + b.G) / 4,
-		B: (c.B*2 + a.B + b.B) / 4,
+		R: mix(c.R, a.R, b.R),
+		G: mix(c.G, a.G, b.G),
+		B: mix(c.B, a.B, b.B),
+		A: mix(c.A, a.A, b.A),
 	}
 }

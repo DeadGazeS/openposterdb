@@ -104,10 +104,12 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 			return
 		}
 
-		// CDN-cached for a long time; the settings hash is the cache key, so
-		// the CDN edge sees at most one entry per hash per image.
-		w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
-		w.Header().Set("Content-Type", served.ContentType)
-		w.Write(bytes)
+		// The settings hash is part of the URL, so the edge keeps at most one
+		// entry per hash per image; max-age follows the title's age.
+		releaseDate := served.ReleaseDate
+		if releaseDate == nil && d.DB != nil {
+			releaseDate, _ = services.ReadImageMetaCtx(r.Context(), d.DB, served.CacheKey)
+		}
+		writeImage(w, r, bytes, served.ContentType, releaseDate, d.Config)
 	}
 }

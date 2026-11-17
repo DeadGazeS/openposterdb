@@ -4,8 +4,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -46,6 +48,10 @@ type Config struct {
 	SecureCookies      bool
 	AdminUsername      string
 	AdminPassword      string
+	// RenderConcurrency caps simultaneous renders (default CPUs×2);
+	// CrossIDConcurrency caps alternate-id cache writers (default CPUs).
+	RenderConcurrency  int
+	CrossIDConcurrency int
 }
 
 func FromEnv() (*Config, error) {
@@ -55,7 +61,8 @@ func FromEnv() (*Config, error) {
 	_ = godotenv.Load()
 	// Validated after .env is loaded, so a value set only there is checked
 	// too (it used to be validated before, i.e. only from the real env).
-	if _, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES")); err != nil {
+	_, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
 		return nil, err
 	}
 
@@ -83,6 +90,13 @@ func FromEnv() (*Config, error) {
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
 		LogLevel:            envOrDefault("LOG_LEVEL", "info"),
+	}
+
+	if c.RenderConcurrency, err = envPositiveInt("RENDER_CONCURRENCY", runtime.NumCPU()*2); err != nil {
+		return nil, err
+	}
+	if c.CrossIDConcurrency, err = envPositiveInt("CROSS_ID_CONCURRENCY", runtime.NumCPU()); err != nil {
+		return nil, err
 	}
 
 	if v := os.Getenv("FREE_KEY_ENABLED"); v != "" {
@@ -194,8 +208,9 @@ func envUint64OrDefault(key string, def uint64) uint64 {
 	if v == "" {
 		return def
 	}
-	n, err := strconv.ParseUint(v, 10, 64)
+	n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
 	if err != nil {
+		slog.Warn("invalid value in environment, using the default", "var", key, "value", v, "default", def)
 		return def
 	}
 	return n
@@ -206,11 +221,31 @@ func envUint8OrDefault(key string, def uint8) uint8 {
 	if v == "" {
 		return def
 	}
-	n, err := strconv.ParseUint(v, 10, 8)
+	n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 8)
 	if err != nil {
+		slog.Warn("invalid value in environment, using the default", "var", key, "value", v, "default", def)
 		return def
 	}
 	return uint8(n)
+}
+
+// envPositiveInt reads a count that must be at least 1. Unset uses def; 0 is
+// an error (it would block every request); anything unparsable is logged and
+// replaced by def.
+func envPositiveInt(key string, def int) (int, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Warn("invalid value in environment, using the default", "var", key, "value", v, "default", def)
+		return def, nil
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("%s must be at least 1", key)
+	}
+	return n, nil
 }
 
 func envBool(key string) bool {

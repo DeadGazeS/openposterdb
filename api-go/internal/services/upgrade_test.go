@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -69,6 +70,9 @@ func TestRunUpgrades_CreatesUpgradesTable(t *testing.T) {
 		"v004_badge_size_int_columns",
 		"v005_rust_render_cache",
 	}
+	if RenderEpoch > 0 {
+		want = append(want, "render_epoch_"+strconv.Itoa(RenderEpoch))
+	}
 	var got []string
 	for rows.Next() {
 		var name string
@@ -101,8 +105,8 @@ func TestRunUpgrades_Idempotent(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM upgrades").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 5 {
-		t.Errorf("upgrades rows after rerun: got %d, want 5", count)
+	if count != upgradeCount() {
+		t.Errorf("upgrades rows after rerun: got %d, want %d", count, upgradeCount())
 	}
 }
 
@@ -518,8 +522,8 @@ func TestRunUpgrades_ConcurrentCallersRunFnOnce(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM upgrades").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 5 {
-		t.Errorf("upgrades rows after concurrent runs: got %d, want 5", count)
+	if count != upgradeCount() {
+		t.Errorf("upgrades rows after concurrent runs: got %d, want %d", count, upgradeCount())
 	}
 }
 
@@ -641,4 +645,13 @@ func TestUpgradeV004_PreservesIntegerValues(t *testing.T) {
 	if poster != 130 || logo != 120 || backdrop != 110 || episode != 90 {
 		t.Errorf("values changed: got %d/%d/%d/%d, want 130/120/110/90", poster, logo, backdrop, episode)
 	}
+}
+
+// upgradeCount is the number of upgrades rows a full RunUpgrades records:
+// v001…v005 plus the render-epoch sweep when the epoch is above 0.
+func upgradeCount() int {
+	if RenderEpoch > 0 {
+		return 6
+	}
+	return 5
 }

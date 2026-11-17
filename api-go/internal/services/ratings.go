@@ -123,6 +123,18 @@ func AvailableSourcesString(badges []RatingBadge) string {
 	return result.String()
 }
 
+// ValidSourcesString reports whether s is an AvailableSourcesString (every
+// byte a known source's cache char). The preview stores JSON badges in the
+// same table for its demo title; those never match.
+func ValidSourcesString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if SourceFromCacheChar(s[i]) == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // --- Exclude cache token ---
 
 func ExcludeCacheToken(exclude string) string {
@@ -434,6 +446,11 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 				if r, err := clients.MDBList.GetRatingsByTMDBCtx(ctx, q.ResolvedTMDbID, q.MediaType); err == nil {
 					resp = r
 				}
+			}
+			// A series without a TVDB id on TMDB can still get Fanart art
+			// through the id MDBList knows (SeriesTVDBID).
+			if resp != nil && q.MediaType == "tv" && resp.IDs.TVDB != nil {
+				RememberTVDBID(q.ResolvedTMDbID, *resp.IDs.TVDB)
 			}
 		}
 		mdblistCh <- mdblistResult{resp}

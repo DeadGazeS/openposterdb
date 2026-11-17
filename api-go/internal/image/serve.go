@@ -211,10 +211,13 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 
 // --- CDN helpers ---
 
-func ImageResponse(data []byte, contentType string) (int, map[string]string, []byte) {
+// ImageResponse returns the status, headers and body of an image response;
+// max-age comes from services.ComputeCDNMaxAge (handlers.writeImage adds the
+// ETag / If-None-Match handling).
+func ImageResponse(data []byte, contentType string, maxAge uint64) (int, map[string]string, []byte) {
 	return 200, map[string]string{
 		"Content-Type":  contentType,
-		"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+		"Cache-Control": fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", maxAge, maxAge*7),
 	}, data
 }
 
@@ -325,6 +328,88 @@ type ServeParams struct {
 	// freshRatings bypasses the ratings stale-while-revalidate (background
 	// refreshes must render with current badges).
 	freshRatings bool
+	// skipColdCache disables serveColdCache (the background warm-up after a
+	// cold hit runs the full pipeline).
+	skipColdCache bool
+}
+
+// serveColdCache answers a request whose id is not in the in-memory ID cache
+// (typically the first request after a restart) from the rendered cache,
+// without resolving the id or fetching ratings: the cache key is rebuilt from
+// the title's stored rating sources (available_ratings, written with every
+// render). On a hit the full pipeline runs in the background
+// (warmAfterColdHit), so new ratings or settings still reach the image.
+func (p ServeParams) serveColdCache(contentType string) ([]byte, bool) {
+	if p.skipColdCache || p.DB == nil || p.Caches == nil || p.Caches.IDs == nil {
+		return nil, false
+	}
+	idKey := p.IDType + "/" + p.IDValue
+	if _, warm := p.Caches.IDs.Peek(idKey); warm {
+		return nil, false
+	}
+	sources, _, releaseDate, err := services.ReadAvailableRatingsCtx(p.Context, p.DB, idKey)
+	if err != nil || !services.ValidSourcesString(sources) {
+		return nil, false
+	}
+	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
+	ratingsSuffix := services.BadgesSuffixFromAvailable(sources, p.Settings.RatingsOrder, p.Settings.RatingsExclude, limit)
+	cacheKey, cachePath, err := p.cacheKeyFor(p.IDType, p.IDValue, p.renderSuffixFromRatings(ratingsSuffix))
+	if err != nil {
+		return nil, false
+	}
+	var bytes []byte
+	if p.Caches.ImageMem != nil {
+		if v, ok := p.Caches.ImageMem.Get(cacheKey); ok {
+			bytes = v.([]byte)
+		}
+	}
+	if bytes == nil && !p.ExternalCacheOnly {
+		if entry, err := services.ReadCache(cachePath, 0); err == nil {
+			bytes = entry.Bytes
+			if p.Caches.ImageMem != nil {
+				p.Caches.ImageMem.Set(cacheKey, bytes, int64(len(bytes)))
+			}
+		}
+	}
+	if bytes == nil {
+		return nil, false
+	}
+	slog.Debug("image cold cache hit", "kind", p.Kind, "cache_key", cacheKey)
+	if p.Served != nil {
+		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType, ReleaseDate: releaseDate}
+	}
+	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+	}
+	go p.warmAfterColdHit(cacheKey)
+	return bytes, true
+}
+
+// warmAfterColdHit runs the full pipeline for a request served by
+// serveColdCache: it fills the ID and ratings caches and re-renders when the
+// ratings or the staleness say so. Shares the background refresh slots and
+// back-off with refreshStale.
+func (p ServeParams) warmAfterColdHit(staleKey string) {
+	if refreshFailures.blocked(staleKey, time.Now()) {
+		return
+	}
+	release, ok := refreshSlots.tryAcquire()
+	if !ok {
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	defer cancel()
+	bg := p
+	bg.Context = ctx
+	bg.Served = nil
+	bg.skipColdCache = true
+	if _, _, err := ServeImage(bg); err != nil {
+		slog.Debug("warm-up after cold cache hit failed", "cache_key", staleKey, "error", err)
+		refreshFailures.failed(staleKey, time.Now())
+		return
+	}
+	refreshFailures.succeeded(staleKey)
 }
 
 // resolveKitsuMalCtx resolves a kitsu:N or mal:N URL. The UseKitsu and
@@ -547,6 +632,12 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		p.Settings.EpisodeBadgeStyle = p.Settings.EpisodeBadgeStyle.Resolve(p.Settings.EpisodeBadgeDirection)
 	}
 
+	// Cold start: the rendered image may already be on disk while nothing
+	// about the id is in memory. Serve it without any upstream call.
+	if b, ok := p.serveColdCache(contentType); ok {
+		return b, contentType, nil
+	}
+
 	// Resolve the ID, uplifting episodes to their parent series for poster,
 	// logo, and backdrop endpoints. resolveWithFallback retries the same
 	// idValue under the other ID sources (imdb → tmdb → tvdb, skipping the
@@ -586,12 +677,12 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	resolved = p.withTitleIdentity(resolved)
 
 	// Fetch ratings, apply preferences, and build the cache key.
-	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := p.prepareRender(resolved)
 	if err != nil {
 		return nil, "", err
 	}
 	if p.Served != nil {
-		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType}
+		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType, ReleaseDate: releaseDate}
 	}
 
 	// Serve from the in-memory cache first (fast path; works even with
@@ -606,7 +697,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 				revalStaleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
 				if stale, err := services.CacheIsStale(cachePath, revalStaleSecs); err == nil && stale {
 					slog.Debug("image mem cache entry stale, background refresh", "kind", p.Kind, "cache_key", cacheKey)
-					go p.refreshStale(resolved, imageSize)
+					go p.refreshStale(resolved, imageSize, cacheKey)
 				}
 				p.Caches.ImageMem.Touch(cacheKey)
 			}
@@ -639,7 +730,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 			if p.Caches.ImageMem != nil {
 				p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
 			}
-			go p.refreshStale(resolved, imageSize)
+			go p.refreshStale(resolved, imageSize, cacheKey)
 			if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
 				slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
 			}
@@ -656,7 +747,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		defer cancel()
 		rp := p
 		rp.Context = ctx
-		return rp.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+		return rp.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, imageSize)
 	}
 	var rendered []byte
 	if p.Inflight != nil {
@@ -837,7 +928,11 @@ func derefUint(v *uint64) uint64 {
 // preferences, and computes the cache key/path for the request's ID form.
 // It is the first half of the render pipeline, shared by ServeImage and the
 // background-refresh path.
-func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, err error) {
+//
+// available is the title's full set of rating sources (before preferences)
+// when ratings were fetched, nil otherwise; renderArtwork stores it for
+// serveColdCache.
+func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, available *string, err error) {
 	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 
 	var rawBadges []services.RatingBadge
@@ -891,6 +986,8 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 			"badges", len(rawBadges),
 			"sources", badgeSourceString(rawBadges),
 		)
+		s := services.AvailableSourcesString(rawBadges)
+		available = &s
 	} else if limit > 0 {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "no imdb/tmdb match for kitsu/mal title")
 	} else {
@@ -903,13 +1000,16 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 	cacheKey, cachePath, err = p.cacheKeyFor(p.IDType, p.IDValue, suffix)
 	releaseDate = resolved.ReleaseDate
 	imageTypeChar = ImageDbValue(p.Kind)
-	return badges, cacheKey, cachePath, releaseDate, imageTypeChar, err
+	return badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err
 }
 
 // renderSuffix builds the settings+ratings cache suffix for the given badges.
 // It is ID-independent, so it can be reused for alternate-ID cache keys.
 func (p ServeParams) renderSuffix(badges []services.RatingBadge) string {
-	ratingsSuffix := services.BadgesCacheSuffix(badges)
+	return p.renderSuffixFromRatings(services.BadgesCacheSuffix(badges))
+}
+
+func (p ServeParams) renderSuffixFromRatings(ratingsSuffix string) string {
 	return services.SettingsCacheSuffixWithRatings(p.Settings, p.Kind, p.ImageSizeStr, ratingsSuffix)
 }
 
@@ -928,14 +1028,64 @@ func (p ServeParams) cacheKeyFor(idType, idValue, suffix string) (cacheKey, cach
 // the result (in-memory + filesystem + metadata, plus cross-ID copies). It is
 // the coalescable unit: concurrent requests for the same cache key share one
 // run via the inflight set.
-func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, imageSize services.ImageSize) ([]byte, error) {
-	// Fetch the base artwork. Three paths, tried in order:
-	//   1. Direct URL (kitsu/mal resolved) — Kitsu/AniList returned their own
-	//      posterImage.original / coverImage.original URLs; fetch them as-is.
-	//   2. Fanart.tv (when ImageSource=="f") — TMDB id may be 0 on the kitsu/mal
-	//      path, so fanart is skipped automatically via the resolved.MediaType
-	//      guard inside fetchFanartArtworkCtx.
-	//   3. TMDB poster_path/backdrop_path (the existing default).
+func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, available *string, imageSize services.ImageSize) ([]byte, error) {
+	imageBytes, err := p.fetchBaseArtwork(resolved, imageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Render badges onto the artwork, at most RENDER_CONCURRENCY at a time
+	// (the slot is taken after the upstream fetch, so a slow download never
+	// holds one). Declined with 503 + Retry-After when the queue is full.
+	release, err := currentRenderSlots().acquire(p.Context)
+	if err != nil {
+		return nil, err
+	}
+	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
+	release()
+	if err != nil {
+		return nil, apperr.NewImageError(err)
+	}
+
+	// Persist: in-memory + filesystem + metadata DB.
+	if p.Caches.ImageMem != nil {
+		p.Caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
+	}
+	if !p.ExternalCacheOnly {
+		if err := services.WriteCache(cachePath, rendered); err != nil {
+			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)
+		}
+	}
+	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar, resolved.TitleKey, resolved.Title); err != nil {
+		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
+	}
+	// The sources this render's key was built from, so serveColdCache can
+	// rebuild the key without fetching ratings (requested id form only).
+	if available != nil && p.DB != nil {
+		if err := services.UpsertAvailableRatingsCtx(p.Context, p.DB, p.IDType+"/"+p.IDValue, *available, releaseDate); err != nil {
+			slog.Warn("failed to upsert available ratings", "id", p.IDType+"/"+p.IDValue, "error", err)
+		}
+	}
+	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+	}
+
+	// Cross-ID cache writes (fire-and-forget, logged on failure).
+	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
+
+	return rendered, nil
+}
+
+// fetchBaseArtwork downloads the artwork to render on, trying in order:
+//  1. the direct Kitsu/AniList URL of a Kitsu/MAL-resolved title;
+//  2. TMDB in the requested language (selectImageRanked tiers) — or
+//     Fanart.tv first when it is the configured image source;
+//  3. Fanart.tv whenever a Fanart client exists (after TMDB);
+//  4. TMDB's default poster_path / backdrop_path.
+//
+// A failed step falls through to the next one; only a failure of the last
+// step is returned. (nil, nil) never happens: no artwork is a 404.
+func (p ServeParams) fetchBaseArtwork(resolved *services.ResolvedID, imageSize services.ImageSize) ([]byte, error) {
 	var imageBytes []byte
 	if resolved.SourceProvider != "" {
 		var directURL *string
@@ -958,58 +1108,46 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 			}
 		}
 	}
-	if imageBytes == nil && p.Settings.ImageSource.IsFanart() && p.Fanart != nil {
-		imageBytes = fetchFanartArtworkCtx(p.Context, p.Fanart, p.TMDB, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
+	if imageBytes != nil {
+		return imageBytes, nil
 	}
-	// Kitsu/MAL resolvers don't carry a TMDb id (AniList's externalLinks
-	// don't reliably expose IMDB either, and even when they do the
-	// translation produces an IMDB id without a corresponding TMDb id until
-	// TMDB /find runs). When we got here via Kitsu/MAL and the direct URL
-	// path produced nothing — e.g. logo/episode kinds, where Kitsu/MAL
-	// don't carry logo/episode artwork — calling TMDB /tv/0 or /movie/0
-	// is just going to surface a cryptic 404. Surface a clean error instead.
-	if imageBytes == nil && resolved.SourceProvider != "" && resolved.TMDbID == 0 {
+
+	fanartFirst := p.Settings.ImageSource.IsFanart() && p.Fanart != nil
+	tryFanart := func() []byte {
+		if p.Fanart == nil {
+			return nil
+		}
+		return fetchFanartArtworkCtx(p.Context, p.Fanart, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
+	}
+	if fanartFirst {
+		if b := tryFanart(); b != nil {
+			return b, nil
+		}
+	}
+	// Kitsu/MAL resolvers don't carry a TMDb id. When the direct URL produced
+	// nothing — e.g. logo/episode kinds, which Kitsu/MAL don't carry —
+	// calling TMDB /tv/0 or /movie/0 would only surface a cryptic 404.
+	if resolved.SourceProvider != "" && resolved.TMDbID == 0 {
 		slog.Warn("no artwork for kitsu/mal-resolved title", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "kitsu/mal don't carry this kind of art and no TMDB id was resolved")
 		return nil, apperr.NewIDNotFound(fmt.Sprintf("no %s artwork available for %s/%s: Kitsu / MAL don't carry %s artwork — use an imdb / tmdb / tvdb key instead", p.Kind, p.IDType, p.IDValue, p.Kind))
 	}
-	if imageBytes == nil {
-		var err error
-		imageBytes, err = fetchTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, p.Settings, imageSize)
-		if err != nil {
-			return nil, err
+	if b := selectedTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, p.Settings, imageSize); b != nil {
+		return b, nil
+	}
+	if !fanartFirst {
+		if b := tryFanart(); b != nil {
+			return b, nil
 		}
 	}
-	if imageBytes == nil {
+	b, err := defaultTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, imageSize)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
 		slog.Warn("no artwork available", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
 		return nil, apperr.NewIDNotFound("no " + p.Kind + " artwork available for this title")
 	}
-
-	// Render badges onto the artwork.
-	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
-	if err != nil {
-		return nil, apperr.NewImageError(err)
-	}
-
-	// Persist: in-memory + filesystem + metadata DB.
-	if p.Caches.ImageMem != nil {
-		p.Caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
-	}
-	if !p.ExternalCacheOnly {
-		if err := services.WriteCache(cachePath, rendered); err != nil {
-			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)
-		}
-	}
-	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar, resolved.TitleKey, resolved.Title); err != nil {
-		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
-	}
-	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
-		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
-	}
-
-	// Cross-ID cache writes (fire-and-forget, logged on failure).
-	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
-
-	return rendered, nil
+	return b, nil
 }
 
 // fetchDirectImageBytesCtx downloads a base artwork from a fully-qualified URL.
@@ -1043,20 +1181,35 @@ func fetchDirectImageBytesCtx(ctx context.Context, httpClient *http.Client, url 
 //
 // Runs with an independent background context so the work outlives the client
 // request that triggered it (this is server-side cache maintenance, not part
-// of the user's response).
-func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize) {
+// of the user's response). At most refreshSlotsMax run at once — a refresh
+// that finds no free slot is skipped (the next request for the stale entry
+// tries again) — and a key whose refresh failed is backed off
+// (refreshFailures) instead of being retried on every request.
+func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize, staleKey string) {
+	now := time.Now()
+	if refreshFailures.blocked(staleKey, now) {
+		return
+	}
+	release, ok := refreshSlots.tryAcquire()
+	if !ok {
+		slog.Debug("background refresh skipped: all refresh slots busy", "cache_key", staleKey)
+		return
+	}
+	defer release()
+
 	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
 	bgParams := p
 	bgParams.Context = ctx
 	bgParams.freshRatings = true
-	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := bgParams.prepareRender(resolved)
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := bgParams.prepareRender(resolved)
 	if err != nil {
 		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
+		refreshFailures.failed(staleKey, time.Now())
 		return
 	}
 	render := func() ([]byte, error) {
-		return bgParams.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+		return bgParams.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, imageSize)
 	}
 	var renderErr error
 	if p.Inflight != nil {
@@ -1066,7 +1219,10 @@ func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize servi
 	}
 	if renderErr != nil {
 		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", renderErr)
+		refreshFailures.failed(staleKey, time.Now())
+		return
 	}
+	refreshFailures.succeeded(staleKey)
 }
 
 func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary bool) string {
@@ -1095,91 +1251,105 @@ func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary 
 	return ""
 }
 
-// fetchTmdbArtworkCtx downloads the base artwork for the given kind from TMDB,
-// preferring the on-disk base cache. Returns nil bytes when no artwork exists.
-func fetchTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
-	tmdbSize := imageSize.TmdbSize()
-
-	var filePath string
-	if kind == "episode" {
+// selectedTmdbArtworkPath returns the TMDB image the settings ask for: the
+// episode still, the default poster for English posters with text, or the
+// best /images entry (selectImageRanked / SelectBackdrop). "" when there is
+// none or the /images list could not be fetched.
+func selectedTmdbArtworkPath(ctx context.Context, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings) string {
+	switch {
+	case kind == "episode":
 		if resolved.Episode != nil && resolved.Episode.StillPath != nil {
-			filePath = *resolved.Episode.StillPath
-		} else if resolved.PosterPath != nil {
-			filePath = *resolved.PosterPath
+			return *resolved.Episode.StillPath
 		}
-	} else if kind == "poster" && (settings.Lang == "en" && !settings.Textless) {
+		return ""
+	case kind == "poster" && settings.Lang == "en" && !settings.Textless:
 		if resolved.PosterPath != nil {
-			filePath = *resolved.PosterPath
+			return *resolved.PosterPath
 		}
-	} else {
-		mediaType := "tv"
-		if resolved.MediaType == services.MediaTypeMovie {
-			mediaType = "movie"
-		}
-		lang := settings.Lang
-		if kind == "backdrop" {
-			lang = ""
-		}
-		textless := settings.Textless && kind == "poster"
-		images, err := tmdb.GetImagesCtx(ctx, mediaType, resolved.TMDbID, lang)
-		if err != nil {
-			return nil, err
-		}
-		var candidates []services.TmdbImage
-		switch kind {
-		case "poster":
-			candidates = images.Posters
-		case "logo":
-			candidates = images.Logos
-		case "backdrop":
-			candidates = images.Backdrops
-		}
-		var selected *services.TmdbImage
-		if kind == "poster" {
-			selected = services.SelectPoster(candidates, lang, textless)
-		} else {
-			selected = services.SelectImage(candidates, lang, textless)
-		}
-		if selected != nil {
-			filePath = selected.FilePath
-		}
+		return ""
 	}
+	if resolved.TMDbID == 0 {
+		return ""
+	}
+	mediaType := "tv"
+	if resolved.MediaType == services.MediaTypeMovie {
+		mediaType = "movie"
+	}
+	images, err := tmdb.GetImagesCtx(ctx, mediaType, resolved.TMDbID, settings.Lang, resolved.OriginalLanguage)
+	if err != nil {
+		slog.Info("TMDB image list failed, trying the next artwork source", "kind", kind, "tmdb_id", resolved.TMDbID, "error", err)
+		return ""
+	}
+	var selected *services.TmdbImage
+	switch kind {
+	case "poster":
+		selected = services.SelectPoster(images.Posters, settings.Lang, resolved.OriginalLanguage, settings.Textless)
+	case "logo":
+		selected = services.SelectImage(images.Logos, settings.Lang, resolved.OriginalLanguage, false)
+	case "backdrop":
+		selected = services.SelectBackdrop(images.Backdrops, settings.Lang)
+	}
+	if selected == nil {
+		return ""
+	}
+	return selected.FilePath
+}
 
+// defaultTmdbArtworkPath is the last TMDB fallback: the title's own
+// poster_path (posters, episodes without a still) or backdrop_path.
+func defaultTmdbArtworkPath(resolved *services.ResolvedID, kind string) string {
+	var p *string
+	switch kind {
+	case "poster", "episode":
+		p = resolved.PosterPath
+	case "backdrop":
+		p = resolved.BackdropPath
+	}
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// selectedTmdbArtworkCtx downloads the selected TMDB artwork; nil when there
+// is none or the download failed (the caller moves on to the next source).
+func selectedTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) []byte {
+	filePath := selectedTmdbArtworkPath(ctx, tmdb, resolved, kind, settings)
+	if filePath == "" {
+		return nil
+	}
+	b, err := tmdb.FetchBaseImageCtx(ctx, cacheDir, filePath, imageSize.TmdbSize(), imageStaleSecs, externalCacheOnly)
+	if err != nil {
+		slog.Info("TMDB artwork download failed, trying the next artwork source", "kind", kind, "path", filePath, "error", err)
+		return nil
+	}
+	return b
+}
+
+// defaultTmdbArtworkCtx downloads defaultTmdbArtworkPath; (nil, nil) when the
+// title has none.
+func defaultTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, imageSize services.ImageSize) ([]byte, error) {
+	filePath := defaultTmdbArtworkPath(resolved, kind)
 	if filePath == "" {
 		return nil, nil
 	}
-
-	if externalCacheOnly {
-		return tmdb.FetchPosterBytesCtx(ctx, filePath, tmdbSize)
-	}
-
-	basePath, err := services.BasePosterPath(cacheDir, filePath, tmdbSize)
-	if err != nil {
-		return nil, err
-	}
-	if entry, err := services.ReadCache(basePath, imageStaleSecs); err == nil {
-		return entry.Bytes, nil
-	}
-	bytes, err := tmdb.FetchPosterBytesCtx(ctx, filePath, tmdbSize)
-	if err != nil {
-		return nil, err
-	}
-	if err := services.WriteCache(basePath, bytes); err != nil {
-		slog.Warn("failed to write base image cache", "path", basePath, "error", err)
-	}
-	return bytes, nil
+	return tmdb.FetchBaseImageCtx(ctx, cacheDir, filePath, imageSize.TmdbSize(), imageStaleSecs, externalCacheOnly)
 }
 
-// fetchTmdbArtwork downloads the base artwork for the given kind from TMDB,
-// preferring the on-disk base cache. Returns nil bytes when no artwork exists.
-func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
-	return fetchTmdbArtworkCtx(context.Background(), tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
+// fetchTmdbArtworkCtx is the TMDB part of the chain on its own (selected
+// artwork, then the default): used where Fanart doesn't apply.
+func fetchTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
+	if b := selectedTmdbArtworkCtx(ctx, tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize); b != nil {
+		return b, nil
+	}
+	return defaultTmdbArtworkCtx(ctx, tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, imageSize)
 }
 
-// fetchFanartArtworkCtx downloads the base artwork from fanart.tv when the
-// user's image source is fanart. Returns nil bytes when unavailable so the
-// caller falls through to TMDB.
-func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
+// fetchFanartArtworkCtx downloads the base artwork from fanart.tv. Movies are
+// looked up by TMDB id, series only by TVDB id (fanart.tv has no TMDB index
+// for TV) — a series without a known TVDB id is skipped. Returns nil when
+// unavailable so the caller moves on.
+func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
 	if kind == "episode" {
 		return nil
 	}
@@ -1188,13 +1358,17 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 	var err error
 	switch resolved.MediaType {
 	case services.MediaTypeMovie:
+		if resolved.TMDbID == 0 {
+			return nil
+		}
 		images, err = fanart.GetMovieImagesCtx(ctx, resolved.TMDbID)
 	default:
-		tvID := resolved.TMDbID
-		if resolved.TVDBID != nil && *resolved.TVDBID != 0 {
-			tvID = *resolved.TVDBID
+		tvdb := services.SeriesTVDBID(resolved)
+		if tvdb == nil {
+			slog.Debug("fanart skipped: series has no TVDB id", "tmdb_id", resolved.TMDbID)
+			return nil
 		}
-		images, err = fanart.GetTVImagesCtx(ctx, tvID)
+		images, err = fanart.GetTVImagesCtx(ctx, *tvdb)
 	}
 	if err != nil || images == nil {
 		return nil
@@ -1209,11 +1383,12 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 	case "backdrop":
 		candidates = images.Backdrops
 	}
-	lang := settings.Lang
+	// Backdrops prefer textless ("00") and untagged art, like on TMDB.
+	lang, textless := settings.Lang, settings.Textless && kind == "poster"
 	if kind == "backdrop" {
-		lang = ""
+		lang, textless = "", true
 	}
-	selected, _, ok := services.SelectFanartImage(candidates, lang, settings.Textless && kind == "poster")
+	selected, _, ok := services.SelectFanartImage(candidates, lang, textless)
 	if !ok {
 		return nil
 	}
@@ -1239,13 +1414,6 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 		return nil
 	}
 	return bytes
-}
-
-// fetchFanartArtwork downloads the base artwork from fanart.tv when the
-// user's image source is fanart. Returns nil bytes when unavailable so the
-// caller falls through to TMDB.
-func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
-	return fetchFanartArtworkCtx(context.Background(), fanart, tmdb, resolved, kind, settings, cacheDir, externalCacheOnly)
 }
 
 func derefStr(s *string) string {

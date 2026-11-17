@@ -25,6 +25,8 @@ The server needs two secrets to start: **`JWT_SECRET`** and **`SECRETS_KEY`** (`
 | `DB_DIR` | `./db` | SQLite database directory |
 | `IMAGE_QUALITY` | `85` | JPEG output quality (1-100; values outside are clamped) |
 | `IMAGE_MEM_CACHE_MB` | `512` | In-memory cache size in MB |
+| `RENDER_CONCURRENCY` | CPUs × 2 | Images rendered at the same time. A request that can't get a slot within ~3 s (or finds the wait queue full) gets `503` with `Retry-After`. `0` is rejected |
+| `CROSS_ID_CONCURRENCY` | CPUs | Background writers copying a render under the title's other ids (imdb/tmdb/tvdb); copies are skipped while all are busy. `0` is rejected |
 | `STATIC_DIR` | — | Directory of the built web UI (SPA) to serve; empty disables static serving |
 
 ## Auth & access

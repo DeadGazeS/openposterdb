@@ -105,18 +105,22 @@ type EpisodeInfo struct {
 // or AniList's coverImage.extraLarge / bannerImage — when populated, the
 // art fetch path skips TMDB entirely for that request.
 type ResolvedID struct {
-	IMDbID          *string
-	TMDbID          uint64
-	TVDBID          *uint64
-	KitsuID         *uint64
-	MALID           *uint64
-	MediaType       MediaType
-	PosterPath      *string
-	ReleaseDate     *string
-	Title           *string // display name from the resolving source (image_meta.title)
-	DirectPosterURL *string
-	DirectCoverURL  *string
-	SourceProvider  string // "" for TMDB/IMDB/TVDB, "kitsu" or "mal" for the new sources
+	IMDbID       *string
+	TMDbID       uint64
+	TVDBID       *uint64
+	KitsuID      *uint64
+	MALID        *uint64
+	MediaType    MediaType
+	PosterPath   *string
+	BackdropPath *string // TMDB default backdrop, the last backdrop fallback
+	// OriginalLanguage is TMDB's original_language ("ja", "ko", …): one of
+	// the artwork selection tiers.
+	OriginalLanguage string
+	ReleaseDate      *string
+	Title            *string // display name from the resolving source (image_meta.title)
+	DirectPosterURL  *string
+	DirectCoverURL   *string
+	SourceProvider   string // "" for TMDB/IMDB/TVDB, "kitsu" or "mal" for the new sources
 
 	// Set per request by image.ServeParams.withTitleIdentity on a copy (the
 	// resolver result itself is memcached and never carries them):
@@ -158,13 +162,61 @@ func FormatTMDbIDValue(tmdbID uint64, mediaType MediaType, episode *EpisodeInfo)
 }
 
 type findEntry struct {
-	ID          uint64  `json:"id"`
-	Title       *string `json:"title"` // movies
-	Name        *string `json:"name"`  // TV
-	PosterPath  *string `json:"poster_path"`
-	ReleaseDate *string `json:"release_date"`
-	FirstAir    *string `json:"first_air_date"`
-	Popularity  float64 `json:"popularity"`
+	ID               uint64  `json:"id"`
+	Title            *string `json:"title"` // movies
+	Name             *string `json:"name"`  // TV
+	PosterPath       *string `json:"poster_path"`
+	BackdropPath     *string `json:"backdrop_path"`
+	OriginalLanguage string  `json:"original_language"`
+	ReleaseDate      *string `json:"release_date"`
+	FirstAir         *string `json:"first_air_date"`
+	Popularity       float64 `json:"popularity"`
+}
+
+// tvDetails is the part of /tv/{id}?append_to_response=external_ids the
+// resolvers read.
+type tvDetails struct {
+	PosterPath       *string `json:"poster_path"`
+	BackdropPath     *string `json:"backdrop_path"`
+	OriginalLanguage string  `json:"original_language"`
+	FirstAir         *string `json:"first_air_date"`
+	Name             *string `json:"name"`
+	ExternalIDs      *struct {
+		IMDbID *string `json:"imdb_id"`
+		TVDBID *uint64 `json:"tvdb_id"`
+	} `json:"external_ids"`
+}
+
+func (d *tvDetails) tvdbID() *uint64 {
+	if d.ExternalIDs != nil && d.ExternalIDs.TVDBID != nil && *d.ExternalIDs.TVDBID != 0 {
+		return d.ExternalIDs.TVDBID
+	}
+	return nil
+}
+
+func (d *tvDetails) imdbID() *string {
+	if d.ExternalIDs != nil && d.ExternalIDs.IMDbID != nil && *d.ExternalIDs.IMDbID != "" {
+		return d.ExternalIDs.IMDbID
+	}
+	return nil
+}
+
+func getTVDetailsCtx(ctx context.Context, tmdb *TmdbClient, id uint64) (*tvDetails, error) {
+	var d tvDetails
+	if err := tmdb.GetCtx(ctx, fmt.Sprintf("/tv/%d", id), map[string]string{"append_to_response": "external_ids"}, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// firstPath returns the first non-empty image path.
+func firstPath(paths ...*string) *string {
+	for _, p := range paths {
+		if p != nil && *p != "" {
+			return p
+		}
+	}
+	return nil
 }
 
 type episodeFindEntry struct {
@@ -349,22 +401,34 @@ func resolveIMDBCtx(ctx context.Context, imdbID string, tmdb *TmdbClient) (*Reso
 	pickMovie := bestMovie != nil && (bestTV == nil || bestMovie.Popularity >= bestTV.Popularity)
 	if pickMovie && bestMovie != nil {
 		return &ResolvedID{
-			IMDbID:      &imdbID,
-			TMDbID:      bestMovie.ID,
-			MediaType:   MediaTypeMovie,
-			PosterPath:  bestMovie.PosterPath,
-			ReleaseDate: bestMovie.ReleaseDate,
-			Title:       titleOf(bestMovie.Title, bestMovie.Name),
+			IMDbID:           &imdbID,
+			TMDbID:           bestMovie.ID,
+			MediaType:        MediaTypeMovie,
+			PosterPath:       bestMovie.PosterPath,
+			BackdropPath:     bestMovie.BackdropPath,
+			OriginalLanguage: bestMovie.OriginalLanguage,
+			ReleaseDate:      bestMovie.ReleaseDate,
+			Title:            titleOf(bestMovie.Title, bestMovie.Name),
 		}, nil
 	}
 	if bestTV != nil {
+		// /find has no TVDB id; fanart.tv indexes series by it, so it is
+		// resolved here once (and cached with the id) instead of per render.
+		// The series' tvdb/ alternate cache key comes from it too.
+		details, err := getTVDetailsCtx(ctx, tmdb, bestTV.ID)
+		if err != nil {
+			return nil, err // not cached; a partial result would be
+		}
 		return &ResolvedID{
-			IMDbID:      &imdbID,
-			TMDbID:      bestTV.ID,
-			MediaType:   MediaTypeTV,
-			PosterPath:  bestTV.PosterPath,
-			ReleaseDate: bestTV.FirstAir,
-			Title:       titleOf(bestTV.Name, bestTV.Title),
+			IMDbID:           &imdbID,
+			TMDbID:           bestTV.ID,
+			TVDBID:           details.tvdbID(),
+			MediaType:        MediaTypeTV,
+			PosterPath:       firstPath(bestTV.PosterPath, details.PosterPath),
+			BackdropPath:     firstPath(bestTV.BackdropPath, details.BackdropPath),
+			OriginalLanguage: firstNonEmptyString(bestTV.OriginalLanguage, details.OriginalLanguage),
+			ReleaseDate:      bestTV.FirstAir,
+			Title:            titleOf(bestTV.Name, bestTV.Title),
 		}, nil
 	}
 
@@ -398,13 +462,15 @@ func resolveTMDBCtx(ctx context.Context, idValue string, tmdb *TmdbClient) (*Res
 		TVDBID *uint64 `json:"tvdb_id"`
 	}
 	type tmdbDetails struct {
-		IMDbID      *string          `json:"imdb_id"`
-		PosterPath  *string          `json:"poster_path"`
-		ReleaseDate *string          `json:"release_date"`
-		FirstAir    *string          `json:"first_air_date"`
-		Title       *string          `json:"title"`
-		Name        *string          `json:"name"`
-		ExternalIDs *tmdbExternalIDs `json:"external_ids"`
+		IMDbID           *string          `json:"imdb_id"`
+		PosterPath       *string          `json:"poster_path"`
+		BackdropPath     *string          `json:"backdrop_path"`
+		OriginalLanguage string           `json:"original_language"`
+		ReleaseDate      *string          `json:"release_date"`
+		FirstAir         *string          `json:"first_air_date"`
+		Title            *string          `json:"title"`
+		Name             *string          `json:"name"`
+		ExternalIDs      *tmdbExternalIDs `json:"external_ids"`
 	}
 
 	var path string
@@ -433,7 +499,7 @@ func resolveTMDBCtx(ctx context.Context, idValue string, tmdb *TmdbClient) (*Res
 	}
 
 	var tvdbID *uint64
-	if details.ExternalIDs != nil {
+	if details.ExternalIDs != nil && details.ExternalIDs.TVDBID != nil && *details.ExternalIDs.TVDBID != 0 {
 		tvdbID = details.ExternalIDs.TVDBID
 	}
 
@@ -448,13 +514,15 @@ func resolveTMDBCtx(ctx context.Context, idValue string, tmdb *TmdbClient) (*Res
 	}
 
 	return &ResolvedID{
-		IMDbID:      imdbID,
-		TMDbID:      tmdbID,
-		TVDBID:      tvdbID,
-		MediaType:   mediaType,
-		PosterPath:  details.PosterPath,
-		ReleaseDate: releaseDate,
-		Title:       titleOf(details.Title, details.Name),
+		IMDbID:           imdbID,
+		TMDbID:           tmdbID,
+		TVDBID:           tvdbID,
+		MediaType:        mediaType,
+		PosterPath:       details.PosterPath,
+		BackdropPath:     details.BackdropPath,
+		OriginalLanguage: details.OriginalLanguage,
+		ReleaseDate:      releaseDate,
+		Title:            titleOf(details.Title, details.Name),
 	}, nil
 }
 
@@ -474,57 +542,54 @@ func resolveTVDBCtx(ctx context.Context, tvdbIDVal string, tmdb *TmdbClient) (*R
 	}
 
 	tvdbNum, _ := strconv.ParseUint(tvdbIDVal, 10, 64)
+	var requestedTVDB *uint64
+	if tvdbNum != 0 {
+		requestedTVDB = &tvdbNum
+	}
 
 	if len(result.TVResults) > 0 {
 		tv := result.TVResults[0]
-		var details struct {
-			ExternalIDs *struct {
-				IMDbID *string `json:"imdb_id"`
-			} `json:"external_ids"`
-			PosterPath *string `json:"poster_path"`
-			FirstAir   *string `json:"first_air_date"`
-			Name       *string `json:"name"`
-		}
-		if err := tmdb.GetCtx(ctx, fmt.Sprintf("/tv/%d", tv.ID), map[string]string{"append_to_response": "external_ids"}, &details); err != nil {
+		details, err := getTVDetailsCtx(ctx, tmdb, tv.ID)
+		if err != nil {
 			return nil, err // not cached; a partial result would be
 		}
-
-		var imdb *string
-		if details.ExternalIDs != nil && details.ExternalIDs.IMDbID != nil {
-			imdb = details.ExternalIDs.IMDbID
-		}
-
 		return &ResolvedID{
-			IMDbID:      imdb,
-			TMDbID:      tv.ID,
-			TVDBID:      &tvdbNum,
-			MediaType:   MediaTypeTV,
-			PosterPath:  details.PosterPath,
-			ReleaseDate: details.FirstAir,
-			Title:       titleOf(details.Name, tv.Name),
+			IMDbID:           details.imdbID(),
+			TMDbID:           tv.ID,
+			TVDBID:           requestedTVDB,
+			MediaType:        MediaTypeTV,
+			PosterPath:       firstPath(details.PosterPath, tv.PosterPath),
+			BackdropPath:     firstPath(details.BackdropPath, tv.BackdropPath),
+			OriginalLanguage: firstNonEmptyString(details.OriginalLanguage, tv.OriginalLanguage),
+			ReleaseDate:      details.FirstAir,
+			Title:            titleOf(details.Name, tv.Name),
 		}, nil
 	}
 
 	if len(result.MovieResults) > 0 {
 		movie := result.MovieResults[0]
 		var details struct {
-			IMDbID      *string `json:"imdb_id"`
-			PosterPath  *string `json:"poster_path"`
-			ReleaseDate *string `json:"release_date"`
-			Title       *string `json:"title"`
+			IMDbID           *string `json:"imdb_id"`
+			PosterPath       *string `json:"poster_path"`
+			BackdropPath     *string `json:"backdrop_path"`
+			OriginalLanguage string  `json:"original_language"`
+			ReleaseDate      *string `json:"release_date"`
+			Title            *string `json:"title"`
 		}
 		if err := tmdb.GetCtx(ctx, fmt.Sprintf("/movie/%d", movie.ID), nil, &details); err != nil {
 			return nil, err // not cached; a partial result would be
 		}
 
 		return &ResolvedID{
-			IMDbID:      details.IMDbID,
-			TMDbID:      movie.ID,
-			TVDBID:      nil,
-			MediaType:   MediaTypeMovie,
-			PosterPath:  details.PosterPath,
-			ReleaseDate: details.ReleaseDate,
-			Title:       titleOf(details.Title, movie.Title),
+			IMDbID:           details.IMDbID,
+			TMDbID:           movie.ID,
+			TVDBID:           requestedTVDB, // the id this title was requested by
+			MediaType:        MediaTypeMovie,
+			PosterPath:       firstPath(details.PosterPath, movie.PosterPath),
+			BackdropPath:     firstPath(details.BackdropPath, movie.BackdropPath),
+			OriginalLanguage: firstNonEmptyString(details.OriginalLanguage, movie.OriginalLanguage),
+			ReleaseDate:      firstPath(details.ReleaseDate, movie.ReleaseDate),
+			Title:            titleOf(details.Title, movie.Title),
 		}, nil
 	}
 
@@ -625,15 +690,32 @@ func resolveTMDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbC
 		return nil, apperr.NewInvalidIDType(fullID)
 	}
 
-	seStr := upper[idx+2:]
-	seParts := strings.SplitN(seStr, "E", 2)
-	if len(seParts) != 2 {
+	season, episode, ok := parseSeasonEpisode(upper[idx+2:])
+	if !ok {
 		return nil, apperr.NewInvalidIDType(fullID)
 	}
-	season, _ := strconv.ParseUint(seParts[0], 10, 32)
-	episode, _ := strconv.ParseUint(seParts[1], 10, 32)
+	return resolveEpisodeDetailsCtx(ctx, tmdb, showID, season, episode, nil, nil)
+}
 
-	return resolveEpisodeDetailsCtx(ctx, tmdb, showID, uint32(season), uint32(episode), nil, nil)
+// Upper bounds for season/episode numbers in an episode id; anything larger
+// is a malformed id, not a TMDB lookup.
+const (
+	maxSeasonNumber  = 10000
+	maxEpisodeNumber = 100000
+)
+
+// parseSeasonEpisode parses "<season>E<episode>" (the part after "-S").
+func parseSeasonEpisode(se string) (uint32, uint32, bool) {
+	parts := strings.SplitN(se, "E", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	season, err1 := strconv.ParseUint(parts[0], 10, 32)
+	episode, err2 := strconv.ParseUint(parts[1], 10, 32)
+	if err1 != nil || err2 != nil || season > maxSeasonNumber || episode > maxEpisodeNumber {
+		return 0, 0, false
+	}
+	return uint32(season), uint32(episode), true
 }
 
 func resolveTVDBEpisodeCtx(ctx context.Context, rest, fullID string, tmdb *TmdbClient) (*ResolvedID, error) {
@@ -665,19 +747,51 @@ func parseEpisodeExternal(rest, idValue string) (string, uint32, uint32) {
 		return "", 0, 0
 	}
 
-	seStr := upper[idx+2:]
-	parts := strings.SplitN(seStr, "E", 2)
-	if len(parts) != 2 {
+	season, episode, ok := parseSeasonEpisode(upper[idx+2:])
+	if !ok {
 		return "", 0, 0
 	}
+	return externalID, season, episode
+}
 
-	season, _ := strconv.ParseUint(parts[0], 10, 32)
-	episode, _ := strconv.ParseUint(parts[1], 10, 32)
-	if season > 10000 || episode > 100000 {
-		return "", 0, 0
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
 	}
+	return ""
+}
 
-	return externalID, uint32(season), uint32(episode)
+// knownTVDBIDs remembers TVDB ids learned outside the ID resolver (the
+// MDBList "ids" block) for series whose TMDB entry has none, keyed by TMDB
+// id. Fanart.tv indexes series by TVDB id only.
+var knownTVDBIDs = NewMemCache(0, 50000, 7*24*time.Hour, 0)
+
+// RememberTVDBID records a series' TVDB id learned from another provider.
+func RememberTVDBID(tmdbID, tvdbID uint64) {
+	if tmdbID != 0 && tvdbID != 0 {
+		knownTVDBIDs.Set(strconv.FormatUint(tmdbID, 10), tvdbID, 1)
+	}
+}
+
+// SeriesTVDBID returns the TVDB id of a resolved series: its own, else one
+// learned from another provider, else nil.
+func SeriesTVDBID(r *ResolvedID) *uint64 {
+	if r == nil {
+		return nil
+	}
+	if r.TVDBID != nil && *r.TVDBID != 0 {
+		return r.TVDBID
+	}
+	if r.TMDbID == 0 {
+		return nil
+	}
+	if v, ok := knownTVDBIDs.Get(strconv.FormatUint(r.TMDbID, 10)); ok {
+		id := v.(uint64)
+		return &id
+	}
+	return nil
 }
 
 func findBestEntry(entries []findEntry) *findEntry {

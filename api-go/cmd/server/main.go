@@ -68,6 +68,7 @@ func main() {
 	}
 
 	app.SeedAdminIfNeeded(db, cfg.AdminUsername, cfg.AdminPassword)
+	image.ConfigureLimits(cfg.RenderConcurrency, cfg.CrossIDConcurrency)
 
 	// One shared transport for every upstream (TMDB API + image CDN, OMDb,
 	// MDBList, Trakt, Fanart, Kitsu, AniList). The default keeps only 2 idle

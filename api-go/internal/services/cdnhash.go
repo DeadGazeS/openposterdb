@@ -46,6 +46,7 @@ type CDNServed struct {
 	CacheKey    string
 	CachePath   string
 	ContentType string
+	ReleaseDate *string // drives the response max-age (ComputeCDNMaxAge)
 }
 
 // CDNServedKey identifies one /c/ URL: settings hash, id, kind and the

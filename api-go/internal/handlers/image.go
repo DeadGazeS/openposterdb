@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	stderrors "errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -204,16 +207,59 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 			}
 		}
 
-		bytes, contentType, err := image.ServeImage(d.serveParams(r.Context(), idTypeStr, idValue, kind, settings, query.RatingsLimit, query.ImageSize))
+		var served services.CDNServed
+		params := d.serveParams(r.Context(), idTypeStr, idValue, kind, settings, query.RatingsLimit, query.ImageSize)
+		params.Served = &served
+		bytes, contentType, err := image.ServeImage(params)
 		if err != nil {
 			writeServeError(w, err)
 			return
 		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
-		w.Write(bytes)
+		writeImage(w, r, bytes, contentType, served.ReleaseDate, d.Config)
 	}
+}
+
+// writeImage sends a rendered image. max-age follows the title's age
+// (services.ComputeCDNMaxAge: about a day for new releases, up to a year for
+// titles whose ratings no longer move), stale-while-revalidate is 7× that.
+// The ETag is a hash of the bytes; a matching If-None-Match gets a 304.
+func writeImage(w http.ResponseWriter, r *http.Request, bytes []byte, contentType string, releaseDate *string, cfg *ImageServeConfig) {
+	var minStale, maxAge uint64
+	if cfg != nil {
+		minStale, maxAge = cfg.RatingsMinStaleSecs, cfg.RatingsMaxAgeSecs
+	}
+	age := services.ComputeCDNMaxAge(releaseDate, minStale, maxAge)
+	etag := imageETag(bytes)
+	h := w.Header()
+	h.Set("Cache-Control", fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", age, age*7))
+	h.Set("ETag", etag)
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.Set("Content-Type", contentType)
+	w.Write(bytes)
+}
+
+// imageETag is a strong ETag over the image bytes.
+func imageETag(b []byte) string {
+	sum := sha256.Sum256(b)
+	return `"` + hex.EncodeToString(sum[:16]) + `"`
+}
+
+// etagMatches implements If-None-Match: "*" or any listed tag (weak
+// comparison, so W/"x" matches "x").
+func etagMatches(header, etag string) bool {
+	if header == "" {
+		return false
+	}
+	for part := range strings.SplitSeq(header, ",") {
+		part = strings.TrimPrefix(strings.TrimSpace(part), "W/")
+		if part == "*" || part == etag {
+			return true
+		}
+	}
+	return false
 }
 
 func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {

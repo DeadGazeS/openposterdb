@@ -9,6 +9,14 @@ type AppError struct {
 	Status  int
 	Message string
 	Err     error
+	// RetryAfter, when > 0, is sent as the Retry-After header (seconds).
+	RetryAfter int
+}
+
+// NewBusy is a 503 for a request the server declined to start because it is
+// at capacity; the client may retry after retryAfter seconds.
+func NewBusy(msg string, retryAfter int) *AppError {
+	return &AppError{Status: http.StatusServiceUnavailable, Message: msg, RetryAfter: retryAfter}
 }
 
 func (e *AppError) Error() string {
@@ -53,6 +61,9 @@ func NewOther(msg string) *AppError {
 // their request. Centralised here so httpx.WriteAppError produces identical
 // sanitisation.
 func (e *AppError) ClientMessage() string {
+	if e.RetryAfter > 0 {
+		return e.Message // capacity errors (NewBusy) carry no internal detail
+	}
 	if e.Status >= 500 {
 		return "Internal server error"
 	}
