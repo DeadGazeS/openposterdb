@@ -195,6 +195,19 @@ func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 
 	slog.Info("Admin login successful", "user", username)
 
+	// Rust-era installs stored PHC argon2id strings; replace them with the
+	// current format now that we know the plaintext. A failed rewrite is not
+	// fatal: the PHC hash keeps working and is retried on the next login.
+	if services.NeedsRehash(passwordHash) {
+		if newHash, herr := services.HashPassword(password); herr != nil {
+			slog.Warn("re-hashing legacy password failed", "error", herr)
+		} else if uerr := services.UpdateAdminPasswordHashCtx(ctx, db, userID, newHash); uerr != nil {
+			slog.Warn("storing re-hashed legacy password failed", "error", uerr)
+		} else {
+			slog.Info("legacy password hash upgraded", "user", username)
+		}
+	}
+
 	accessToken, rawRefresh, err := IssueTokenPairCtx(ctx, db, jwtSecret, userID, username)
 	if err != nil {
 		return 500, map[string]string{"error": "Authentication failed"}, nil

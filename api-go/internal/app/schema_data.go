@@ -8,6 +8,13 @@ package app
 // Keep these two variables in sync with the on-disk schema — RunSchema is
 // idempotent, but adding a new table or column means appending to this file.
 
+import (
+	"context"
+	"database/sql"
+
+	"openposterdb/internal/services"
+)
+
 var SchemaSQL = []string{
 	`CREATE TABLE IF NOT EXISTS image_meta (
 		cache_key TEXT PRIMARY KEY,
@@ -245,8 +252,14 @@ var Migrations = []Migration{
 		ExpectedError: "duplicate column",
 	},
 	{
-		// Migrate pre-alpha DBs: drop the old enum column (data replaced by the
-		// new alpha default).
+		// Rust-era *_badge_background enums → *_badge_alpha, before the DROPs
+		// below remove them. No-op once the columns are gone.
+		Func: func(db *sql.DB) error {
+			return services.ConvertLegacyBadgeBackgroundsCtx(context.Background(), db)
+		},
+	},
+	{
+		// Drop the old enum columns (converted to alpha just above).
 		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_badge_background",
 		ExpectedError: "no such column",
 	},
@@ -392,6 +405,13 @@ var Migrations = []Migration{
 	{
 		SQL:           `ALTER TABLE api_key_settings ADD COLUMN episode_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'`,
 		ExpectedError: "duplicate column",
+	},
+	{
+		// Rust-era position / direction / split → *_layout, before the DROPs
+		// below remove them. No-op once the columns are gone.
+		Func: func(db *sql.DB) error {
+			return services.ConvertLegacyBadgeLayoutsCtx(context.Background(), db)
+		},
 	},
 	{
 		SQL:           "ALTER TABLE api_key_settings DROP COLUMN poster_position",

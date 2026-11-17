@@ -246,7 +246,7 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 	}
 	defaults := DefaultRenderSettings()
 
-	return RenderSettings{
+	s := RenderSettings{
 		ImageSource:            ImageSource(stringOr(globals, "image_source", string(defaults.ImageSource))),
 		Lang:                   stringOr(globals, "lang", defaults.Lang),
 		Textless:               boolOr(globals, "textless", defaults.Textless),
@@ -309,6 +309,8 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		EpisodeBadgeAlpha:      ClampBadgeAlpha(int32Or(globals, "episode_badge_alpha", int32(defaults.EpisodeBadgeAlpha))),
 		Colors:                 parseSourceColors(globals),
 	}
+	applyLegacyGlobals(globals, &s)
+	return s
 }
 
 func stringOr(m map[string]string, key, def string) string {
