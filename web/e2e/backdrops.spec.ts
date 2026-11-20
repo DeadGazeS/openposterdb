@@ -49,7 +49,7 @@ test.describe('backdrops page', () => {
     await expect(modal.getByText('ID Type')).toBeVisible()
     await expect(modal.getByText('ID Value')).toBeVisible()
     await expect(modal.getByTestId('fetch-id-type-select')).toBeVisible()
-    await expect(modal.locator('input[placeholder="e.g. tt1234567"]')).toBeVisible()
+    await expect(modal.locator('input[placeholder="tt1234567"]')).toBeVisible()
   })
 
   test('fetch modal has correct id type options', async ({ page }) => {
@@ -71,7 +71,7 @@ test.describe('backdrops page', () => {
 
   test('fetch submit button is enabled when input has value', async ({ page }) => {
     await page.click('button:has-text("Fetch")')
-    await page.fill('input[placeholder="e.g. tt1234567"]', 'tt0111161')
+    await page.fill('input[placeholder="tt1234567"]', 'tt0111161')
     const submitButton = page.locator('button[type="submit"]:has-text("Fetch")')
     await expect(submitButton).toBeEnabled()
   })

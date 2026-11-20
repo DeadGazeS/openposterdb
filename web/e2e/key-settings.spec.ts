@@ -79,6 +79,8 @@ test.describe('key settings (self-service)', () => {
     await loginWithApiKey(page, request)
 
     await expect(page.getByTestId('lang-select')).toBeEnabled()
+    // Textless is a poster setting on the Poster tab.
+    await page.getByTestId('form-tab-poster').click()
     await expect(page.getByTestId('textless-checkbox')).toBeEnabled()
   })
 
@@ -98,12 +100,12 @@ test.describe('key settings (self-service)', () => {
     await expect(page.getByTestId('fanart-checkbox')).toBeChecked()
   })
 
-  test('rating display section is visible', async ({ page, request }) => {
+  test('rating order and colour tabs are visible', async ({ page, request }) => {
     await loginWithApiKey(page, request)
-    await page.getByTestId('form-tab-ratings').click()
-
-    await expect(page.locator('text=Rating Display')).toBeVisible()
-    await expect(page.locator('text=Rating order')).toBeVisible()
+    await page.getByTestId('form-tab-rating-order').click()
+    await expect(page.getByRole('tabpanel').getByText('Rating Order', { exact: true })).toBeVisible()
+    await page.getByTestId('form-tab-rating-colours').click()
+    await expect(page.getByRole('tabpanel').getByText('Rating Colours', { exact: true })).toBeVisible()
   })
 
   test('ratings count is driven by the layout grid', async ({ page, request }) => {
@@ -122,9 +124,8 @@ test.describe('key settings (self-service)', () => {
 
   test('rating order list has an eye toggle per source', async ({ page, request }) => {
     await loginWithApiKey(page, request)
-    await page.getByTestId('form-tab-ratings').click()
+    await page.getByTestId('form-tab-rating-order').click()
 
-    await expect(page.locator('text=Rating order')).toBeVisible()
     await expect(page.getByTestId('exclude-rt-eye')).toBeVisible()
   })
 
@@ -145,14 +146,14 @@ test.describe('key settings (self-service)', () => {
     await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
 
-    // Wait for "Using defaults" badge to disappear (confirms custom settings saved)
-    await expect(page.locator('text=Using defaults')).toBeHidden()
+    // Wait for "Using Global Settings" badge to disappear (confirms custom settings saved)
+    await expect(page.locator('text=Using Global Settings')).toBeHidden()
 
     // Reset to defaults
     await page.locator('button:has-text("Reset to defaults")').click()
 
     // Should be back to global default (fanart unchecked) and not dirty.
-    await expect(page.locator('text=Using defaults')).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('text=Using Global Settings')).toBeVisible({ timeout: 10000 })
     await expect(page.getByTestId('fanart-checkbox')).not.toBeChecked()
     await expect(page.getByTestId('discard-settings-button')).toBeHidden()
   })

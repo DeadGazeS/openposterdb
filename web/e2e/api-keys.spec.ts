@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import { resetGlobalSettings } from './helpers'
 
 test.describe('api keys', () => {
   test.beforeEach(async ({ page, request }) => {
@@ -13,10 +14,9 @@ test.describe('api keys', () => {
     const { token } = await loginRes.json()
 
     // Reset global settings to defaults so tests start from a known state
-    await request.put('/api/admin/settings', {
-      headers: { Authorization: `Bearer ${token}` },
-      data: { image_source: 't' },
-    })
+    // (settings.spec.ts changes e.g. the poster label style, which new keys
+    // inherit).
+    await resetGlobalSettings(request, token)
 
     await page.goto('/login')
     await page.fill('#username', 'admin')
@@ -24,35 +24,35 @@ test.describe('api keys', () => {
     await page.click('button[type="submit"]')
     await expect(page).toHaveURL(/\/admin/)
 
-    // Navigate to API Keys page
-    await page.click('text=API Keys')
-    await expect(page).toHaveURL(/\/admin\/keys/)
+    // API keys live under Settings → API, tab "API Keys".
+    await page.goto('/admin/settings/api?tab=api-keys')
+    await expect(page.locator('input[placeholder*="Key name"]')).toBeVisible()
   })
 
-  test('create a new API key and see its value', async ({ page }) => {
-    await page.fill('input[placeholder*="Key name"]', 'test-key')
+  async function createKey(page: Page, name: string) {
+    await page.fill('input[placeholder*="Key name"]', name)
     await page.click('button:has-text("Create")')
+    await expect(page.getByTestId('key-row').filter({ hasText: name })).toBeVisible()
+  }
+
+  test('create a new API key and see its value', async ({ page }) => {
+    await createKey(page, 'test-key')
 
     // Key value banner should appear
-    await expect(page.locator('text=Copy your API key now')).toBeVisible()
+    await expect(page.locator("text=Here's your API key")).toBeVisible()
     await expect(page.locator('code')).toBeVisible()
   })
 
   test('dismiss key banner', async ({ page }) => {
-    await page.fill('input[placeholder*="Key name"]', 'dismiss-test')
-    await page.click('button:has-text("Create")')
+    await createKey(page, 'dismiss-test')
 
-    await expect(page.locator('text=Copy your API key now')).toBeVisible()
+    await expect(page.locator("text=Here's your API key")).toBeVisible()
     await page.click('button:has-text("Dismiss")')
-    await expect(page.locator('text=Copy your API key now')).not.toBeVisible()
+    await expect(page.locator("text=Here's your API key")).not.toBeVisible()
   })
 
   test('key appears in list with correct name', async ({ page }) => {
-    await page.fill('input[placeholder*="Key name"]', 'my-prod-key')
-    await page.click('button:has-text("Create")')
-
-    // Key should appear in the list
-    await expect(page.locator('text=my-prod-key')).toBeVisible()
+    await createKey(page, 'my-prod-key')
   })
 
   test('refresh button is visible and clickable', async ({ page }) => {
@@ -65,116 +65,107 @@ test.describe('api keys', () => {
     await expect(refreshButton).toBeVisible()
   })
 
-  /** Helper: create a key with a unique name and expand its settings panel. */
+  /**
+   * Create a key with a unique name and expand its settings panel. Returns
+   * the key's row; every lookup is scoped to it, since the free-key card on
+   * the same page uses some of the same test ids.
+   */
   let settingsKeyCounter = 0
-  async function createKeyAndOpenSettings(page: any) {
+  async function createKeyAndOpenSettings(page: Page): Promise<Locator> {
     const keyName = `settings-key-${++settingsKeyCounter}-${Date.now()}`
-    await page.fill('input[placeholder*="Key name"]', keyName)
-    await page.click('button:has-text("Create")')
-    await expect(page.getByText(keyName)).toBeVisible()
+    await createKey(page, keyName)
 
-    // Dismiss the key banner if present
     const dismissBtn = page.locator('button:has-text("Dismiss")')
     if (await dismissBtn.isVisible()) await dismissBtn.click()
 
-    // Click the settings gear button (the outline button with no text, next to Delete)
-    const keyRow = page.getByText(keyName).locator('..').locator('..')
-    await keyRow.locator('button:not(:has-text("Delete"))').first().click()
-
-    // Wait for settings form to load
-    await expect(page.locator('text=Rating Display')).toBeVisible()
-
-    return keyName
+    const row = page.getByTestId('key-row').filter({ hasText: keyName })
+    await toggleSettings(row)
+    await expect(row.getByTestId('form-tab-image-settings')).toBeVisible()
+    return row
   }
 
-  test('per-key settings panel shows rating display section', async ({ page }) => {
-    await createKeyAndOpenSettings(page)
+  async function toggleSettings(row: Locator) {
+    await row.locator('[data-testid^="key-settings-"]').click()
+  }
 
-    await expect(page.locator('text=Max ratings').first()).toBeVisible()
-    await expect(page.locator('text=Rating order')).toBeVisible()
-  })
-
-  test('per-key rating limit defaults to 3', async ({ page }) => {
-    await createKeyAndOpenSettings(page)
-
-    // Target the poster max ratings input (first number input in the settings panel)
-    const limitInput = page.locator('input[type="number"]').first()
-    await expect(limitInput).toBeVisible()
-    await expect(limitInput).toHaveValue('3')
-  })
-
-  test('per-key rating settings persist after auto-save', async ({ page }) => {
-    const keyName = await createKeyAndOpenSettings(page)
-
-    // Change limit to a non-default value (first number input = poster max ratings)
-    const limitInput = page.locator('input[type="number"]').first()
-    await limitInput.fill('5')
-
-    // Wait for auto-save confirmation
+  /** Per-key settings are saved with the page header's Save button. */
+  async function saveAll(page: Page) {
+    await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
+  }
+
+  test('per-key settings panel shows the rating order', async ({ page }) => {
+    const row = await createKeyAndOpenSettings(page)
+
+    await row.getByTestId('form-tab-rating-order').click()
+    await expect(row.getByTestId('exclude-rt-eye')).toBeVisible()
+  })
+
+  test('per-key poster layout defaults to 3 ratings', async ({ page }) => {
+    const row = await createKeyAndOpenSettings(page)
+
+    await row.getByTestId('form-tab-poster').click()
+    await expect(row.getByTestId('poster-layout-editor')).toContainText('3 ratings shown')
+  })
+
+  test('per-key layout persists after save', async ({ page }) => {
+    const row = await createKeyAndOpenSettings(page)
+
+    await row.getByTestId('form-tab-poster').click()
+    await row.getByTestId('poster-top-per-row').fill('2')
+    await row.getByTestId('poster-top-rows').fill('1')
+    await saveAll(page)
 
     // Collapse and re-expand settings to verify persistence
-    const keyRow = page.getByText(keyName).locator('..').locator('..')
-    await keyRow.locator('button:not(:has-text("Delete"))').first().click()
-    await expect(page.locator('text=Rating Display')).not.toBeVisible()
+    await toggleSettings(row)
+    await expect(row.getByTestId('form-tab-image-settings')).not.toBeVisible()
+    await toggleSettings(row)
+    await row.getByTestId('form-tab-poster').click()
 
-    await keyRow.locator('button:not(:has-text("Delete"))').first().click()
-    await expect(page.locator('text=Rating Display')).toBeVisible()
-
-    await expect(page.locator('input[type="number"]').first()).toHaveValue('5')
+    await expect(row.getByTestId('poster-top-per-row')).toHaveValue('2')
+    await expect(row.getByTestId('poster-top-rows')).toHaveValue('1')
   })
 
   test('per-key label style dropdowns are visible with default official', async ({ page }) => {
-    await createKeyAndOpenSettings(page)
+    const row = await createKeyAndOpenSettings(page)
 
-    // Check poster, logo, and backdrop label style selects via data-testid
-    for (const testId of ['poster-label-style-select', 'logo-label-style-select', 'backdrop-label-style-select']) {
-      const select = page.getByTestId(testId)
+    for (const kind of ['poster', 'logo', 'backdrop'] as const) {
+      await row.getByTestId(`form-tab-${kind}`).click()
+      const select = row.getByTestId(`${kind}-label-style-select`)
       await expect(select).toBeVisible()
       await expect(select).toContainText('Official')
     }
   })
 
-  test('per-key label style persists after auto-save', async ({ page }) => {
-    const keyName = await createKeyAndOpenSettings(page)
+  test('per-key label style persists after save', async ({ page }) => {
+    const row = await createKeyAndOpenSettings(page)
 
-    // Change poster label style to text (default is icon)
-    const labelSelect = page.getByTestId('poster-label-style-select')
-    await labelSelect.click()
+    await row.getByTestId('form-tab-poster').click()
+    await row.getByTestId('poster-label-style-select').click()
     await page.getByRole('option', { name: 'Text', exact: true }).click()
-
-    // Wait for auto-save confirmation
-    await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
+    await saveAll(page)
 
     // Collapse and re-expand settings to verify persistence
-    const keyRow = page.getByText(keyName).locator('..').locator('..')
-    await keyRow.locator('button:not(:has-text("Delete"))').first().click()
-    await expect(page.locator('text=Rating Display')).not.toBeVisible()
+    await toggleSettings(row)
+    await expect(row.getByTestId('form-tab-image-settings')).not.toBeVisible()
+    await toggleSettings(row)
+    await row.getByTestId('form-tab-poster').click()
 
-    await keyRow.locator('button:not(:has-text("Delete"))').first().click()
-    await expect(page.locator('text=Rating Display')).toBeVisible()
-
-    await expect(page.getByTestId('poster-label-style-select')).toContainText('Text')
+    await expect(row.getByTestId('poster-label-style-select')).toContainText('Text')
   })
 
   test('delete a key removes it from list', async ({ page }) => {
-    // Create a key
-    await page.fill('input[placeholder*="Key name"]', 'to-delete')
-    await page.click('button:has-text("Create")')
-    await expect(page.getByText('to-delete', { exact: true })).toBeVisible()
+    await createKey(page, 'to-delete')
 
-    // Dismiss the key banner if present
     const dismissBtn = page.locator('button:has-text("Dismiss")')
     if (await dismissBtn.isVisible()) await dismissBtn.click()
 
     // Accept the confirm dialog
     page.on('dialog', (dialog) => dialog.accept())
 
-    // Click delete on the key's row
-    const keyRow = page.getByText('to-delete', { exact: true }).locator('xpath=ancestor::div[contains(@class,"rounded-md")]')
-    await keyRow.locator('button:has-text("Delete")').click()
+    const row = page.getByTestId('key-row').filter({ hasText: 'to-delete' })
+    await row.locator('button:has-text("Delete")').click()
 
-    // Key should be gone
-    await expect(page.getByText('to-delete', { exact: true })).not.toBeVisible()
+    await expect(row).toHaveCount(0)
   })
 })

@@ -290,7 +290,7 @@ defineExpose({ saveExpanded, discardExpanded, refreshExpanded, expandedDirty })
       <h4 class="text-sm font-semibold">Existing keys</h4>
       <p v-if="revealError" class="text-sm text-destructive">{{ revealError }}</p>
       <p v-if="keys.length === 0" class="text-sm text-muted-foreground">No API keys yet.</p>
-      <div v-for="key in keys" :key="key.id" class="rounded-md border">
+      <div v-for="key in keys" :key="key.id" class="rounded-md border" data-testid="key-row">
         <div class="flex items-center justify-between p-3">
           <div class="space-y-1">
             <p class="font-medium text-sm">{{ key.name }}</p>

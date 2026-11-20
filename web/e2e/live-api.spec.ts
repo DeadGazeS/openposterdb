@@ -376,7 +376,7 @@ test.describe('live API - UI poster fetch', () => {
 
     // Fill in IMDb ID (The Dark Knight — different from other tests)
     const modal = page.getByRole('dialog')
-    await modal.locator('input[placeholder="e.g. tt1234567"]').fill('tt0468569')
+    await modal.locator('input[placeholder="tt1234567"]').fill('tt0468569')
     const submitButton = modal.locator('button[type="submit"]:has-text("Fetch")')
     await expect(submitButton).toBeEnabled()
     await submitButton.click()
@@ -412,7 +412,7 @@ test.describe('live API - UI fetch shows preview immediately', () => {
   async function fetchAndExpectPreview(page: any, imdbId: string) {
     await page.click('button:has-text("Fetch")')
     const modal = page.getByRole('dialog')
-    await modal.locator('input[placeholder="e.g. tt1234567"]').fill(imdbId)
+    await modal.locator('input[placeholder="tt1234567"]').fill(imdbId)
     await modal.locator('button[type="submit"]:has-text("Fetch")').click()
 
     // Preview dialog should open with a visible image — not "Failed to load"

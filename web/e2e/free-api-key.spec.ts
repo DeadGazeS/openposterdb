@@ -67,7 +67,7 @@ test.describe('free API key', () => {
   test('free API key toggle appears on settings page', async ({ page, request }) => {
     await loginAndGoToSettings(page, request)
 
-    await expect(page.locator('text=Free API Key')).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Free API Key' })).toBeVisible()
     await expect(page.locator('button[role="switch"]')).toBeVisible()
   })
 

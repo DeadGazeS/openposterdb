@@ -40,7 +40,7 @@ test.describe('settings', () => {
     // The Image section holds the actual settings form.
     await goToImage(page)
     await expect(page.getByTestId('page-title')).toContainText('Image')
-    await expect(page.locator('text=Global Image Settings')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Global Image Settings' })).toBeVisible()
   })
 
   test('fanart checkbox is visible', async ({ page }) => {
@@ -52,6 +52,8 @@ test.describe('settings', () => {
     await goToImage(page)
     await expect(page.getByTestId('lang-select')).toBeVisible()
     await expect(page.getByTestId('lang-select')).toBeEnabled()
+    // Textless is a poster setting on the Poster tab.
+    await page.getByTestId('form-tab-poster').click()
     await expect(page.getByTestId('textless-checkbox')).toBeVisible()
     await expect(page.getByTestId('textless-checkbox')).toBeEnabled()
   })
@@ -73,8 +75,9 @@ test.describe('settings', () => {
   test('fanart options persist after save and reload', async ({ page }) => {
     await goToImage(page)
 
-    // Enable fanart and textless
+    // Enable fanart and textless (Poster tab)
     await page.getByTestId('fanart-checkbox').check()
+    await page.getByTestId('form-tab-poster').click()
     await page.getByTestId('textless-checkbox').check()
     await page.getByTestId('save-settings-button').click()
     await expect(page.locator('text=Saved')).toBeVisible({ timeout: 5000 })
@@ -85,6 +88,7 @@ test.describe('settings', () => {
 
     // Fanart and textless should be checked
     await expect(page.getByTestId('fanart-checkbox')).toBeChecked()
+    await page.getByTestId('form-tab-poster').click()
     await expect(page.getByTestId('textless-checkbox')).toBeChecked()
   })
 
@@ -96,11 +100,12 @@ test.describe('settings', () => {
     await expect(refreshButton).toBeVisible()
   })
 
-  test('rating display section is visible', async ({ page }) => {
+  test('rating order and colour tabs are visible', async ({ page }) => {
     await goToImage(page)
-    await page.getByTestId('form-tab-ratings').click()
-    await expect(page.locator('text=Rating Display')).toBeVisible()
-    await expect(page.locator('text=Rating order')).toBeVisible()
+    await page.getByTestId('form-tab-rating-order').click()
+    await expect(page.getByRole('tabpanel').getByText('Rating Order', { exact: true })).toBeVisible()
+    await page.getByTestId('form-tab-rating-colours').click()
+    await expect(page.getByRole('tabpanel').getByText('Rating Colours', { exact: true })).toBeVisible()
   })
 
   test('ratings count is driven by the layout grid', async ({ page }) => {
@@ -120,9 +125,8 @@ test.describe('settings', () => {
 
   test('all rating sources are listed with an eye toggle', async ({ page }) => {
     await goToImage(page)
-    await page.getByTestId('form-tab-ratings').click()
+    await page.getByTestId('form-tab-rating-order').click()
 
-    await expect(page.locator('text=Rating order')).toBeVisible()
     for (const key of ['imdb', 'tmdb', 'rt', 'rta', 'mc', 'trakt', 'lb', 'mal', 'mdblist', 'ebert']) {
       await expect(page.getByTestId(`exclude-${key}-eye`)).toBeVisible()
     }
@@ -149,7 +153,7 @@ test.describe('settings', () => {
 
   test('excluding a rating via the eye persists after save and reload', async ({ page }) => {
     await goToImage(page)
-    await page.getByTestId('form-tab-ratings').click()
+    await page.getByTestId('form-tab-rating-order').click()
 
     const excludeRt = page.getByTestId('exclude-rt-eye')
     await expect(excludeRt).toHaveAttribute('aria-pressed', 'false')
@@ -172,7 +176,7 @@ test.describe('settings', () => {
 
     await page.reload()
     await expect(page.getByTestId('page-title')).toContainText('Image')
-    await page.getByTestId('form-tab-ratings').click()
+    await page.getByTestId('form-tab-rating-order').click()
 
     // Exclusion should be preserved across reload
     await expect(page.getByTestId('exclude-rt-eye')).toHaveAttribute('aria-pressed', 'true')

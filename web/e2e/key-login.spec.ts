@@ -88,9 +88,10 @@ test.describe('API key login flow', () => {
     await page.click('button[type="submit"]')
     await expect(page).toHaveURL(/\/individual-image-settings/)
 
-    // Try to navigate to admin area
+    // Try to navigate to admin area. page.goto reloads, and key sessions
+    // live in memory only, so this lands on the login page — never /admin.
     await page.goto('/admin')
-    await expect(page).toHaveURL(/\/individual-image-settings/)
+    await expect(page).toHaveURL(/\/login/)
   })
 
   test('logout from key-settings redirects to login', async ({ page, request }) => {
@@ -102,7 +103,7 @@ test.describe('API key login flow', () => {
     await page.click('button[type="submit"]')
     await expect(page).toHaveURL(/\/individual-image-settings/)
 
-    await page.click('button:has-text("Logout")')
+    await page.getByRole('button', { name: 'Sign out' }).click()
     await expect(page).toHaveURL(/\/login/)
   })
 })
