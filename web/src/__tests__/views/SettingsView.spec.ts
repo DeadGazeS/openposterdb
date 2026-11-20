@@ -81,10 +81,7 @@ const defaultSettings = {
   episode_blur: false,
 }
 
-function mountView() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+function mountView(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return mount(SettingsView, {
     global: {
       plugins: [createPinia(), [VueQueryPlugin, { queryClient }]],
@@ -599,5 +596,96 @@ describe('SettingsView', () => {
     await remove[1]!.trigger('click')
     await flushPromises()
     expect(mockAdminApi.updateServiceKeys).toHaveBeenCalledWith({ omdb: 'ref:aaa111' })
+  })
+
+  // TheTVDB is a source key like the others: editable, or shown masked and
+  // locked when set in the environment.
+  it('source API keys: TheTVDB key can be entered, env-set one is locked', async () => {
+    const empty = { locked: false, has_key: false, masked: null }
+    mockAdminApi.getServiceKeys.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ tmdb: empty, mdblist: empty, fanart: empty, trakt: empty, omdb: empty, tvdb: empty }),
+    })
+    mockAdminApi.updateServiceKeys.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
+    mockRoute.query = { tab: 'source-api-keys' }
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('TheTVDB')
+    const input = wrapper.find('#key-tvdb')
+    expect(input.exists()).toBe(true)
+    await input.setValue('tvdbkey000001')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(mockAdminApi.updateServiceKeys).toHaveBeenCalledWith({ tvdb: 'tvdbkey000001' })
+
+    mockAdminApi.getServiceKeys.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ tmdb: empty, mdblist: empty, fanart: empty, trakt: empty, omdb: empty,
+        tvdb: { locked: true, has_key: true, masked: 'tvdb...0001' } }),
+    })
+    const locked = mountView()
+    await flushPromises()
+    expect(locked.find('#key-tvdb').exists()).toBe(false)
+    expect(locked.text()).toContain('tvdb...0001')
+  })
+
+  it('source API keys: grouped into Artwork and Ratings', async () => {
+    const empty = { locked: false, has_key: false, masked: null }
+    mockAdminApi.getServiceKeys.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ tmdb: empty, mdblist: empty, fanart: empty, trakt: empty, omdb: empty, tvdb: empty }),
+    })
+    mockRoute.query = { tab: 'source-api-keys' }
+    const wrapper = mountView()
+    await flushPromises()
+    const ids = (group: string) =>
+      wrapper.find(`[data-testid="service-group-${group}"]`).findAll('input').map((i) => i.attributes('id'))
+    expect(ids('artwork')).toEqual(['key-tmdb', 'key-tvdb', 'key-fanart'])
+    expect(ids('ratings')).toEqual(['key-mdblist', 'key-omdb', 'key-trakt'])
+    expect(wrapper.find('[data-testid="service-label-tmdb"]').text()).toContain('+ TMDB ratings')
+    for (const svc of ['tmdb', 'tvdb', 'fanart', 'mdblist', 'omdb', 'trakt']) {
+      const btn = wrapper.find(`[data-testid="service-label-${svc}"]`)
+      expect(btn.element.tagName).toBe('BUTTON')
+      expect(btn.attributes('aria-label')).toMatch(/^More about /)
+    }
+  })
+
+  // The key list is already cached when the view mounts (logout + login, or
+  // leaving and reopening settings, without a reload): the chips must be
+  // seeded from it. The seeding watcher used to throw on a not-yet-declared
+  // const in that case and the identical refetch never re-ran it.
+  it('source API keys: chips are shown when the key list is already cached', async () => {
+    const empty = { locked: false, has_key: false, masked: null }
+    const withKey = { tmdb: { locked: false, has_key: true, masked: 'abcd...wxyz', keys: [{ id: 'f1', masked: 'abcd...wxyz' }] },
+      mdblist: empty, fanart: empty, trakt: empty, omdb: empty, tvdb: empty }
+    mockAdminApi.getServiceKeys.mockResolvedValue({ ok: true, json: () => Promise.resolve(withKey) })
+    mockRoute.query = { tab: 'source-api-keys' }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['service-keys'], withKey)
+    const wrapper = mountView(queryClient)
+    await flushPromises()
+    expect(wrapper.text()).toContain('abcd...wxyz')
+  })
+
+  // A settings import invalidates ['service-keys']; the chips must follow the
+  // refetched keys without a page reload.
+  it('source API keys: chips update after the service-keys query is invalidated', async () => {
+    const empty = { locked: false, has_key: false, masked: null }
+    const none = { tmdb: empty, mdblist: empty, fanart: empty, trakt: empty, omdb: empty, tvdb: empty }
+    mockAdminApi.getServiceKeys.mockResolvedValue({ ok: true, json: () => Promise.resolve(none) })
+    mockRoute.query = { tab: 'source-api-keys' }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = mountView(queryClient)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('abcd...wxyz')
+
+    mockAdminApi.getServiceKeys.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ...none,
+        tmdb: { locked: false, has_key: true, masked: 'abcd...wxyz', keys: [{ id: 'f1', masked: 'abcd...wxyz' }] } }),
+    })
+    await queryClient.invalidateQueries({ queryKey: ['service-keys'] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('abcd...wxyz')
   })
 })
