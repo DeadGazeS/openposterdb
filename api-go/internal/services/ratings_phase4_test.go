@@ -285,3 +285,23 @@ func TestParseGlobalRenderSettings_InvalidEnumsFallBack(t *testing.T) {
 		t.Errorf("got %q %q %q %q %q", s.ImageSource, s.PosterLabelStyle, s.PosterBadgeDirection, s.PosterFit, s.PosterBadgeShape)
 	}
 }
+
+// MDBList's batch endpoint (POST) reports Letterboxd's value on a 0–10 scale
+// while the single GET uses 0–5; the 0–100 score is the same on both
+// (checked live 2026-11-20: GET value 4.2 / score 84, POST value 8.4 /
+// score 84). The badge is taken from the score so both paths agree.
+func TestMdblistBadges_LetterboxdFromScore(t *testing.T) {
+	for name, tc := range map[string]struct {
+		r    MdblistRating
+		want string
+	}{
+		"single GET (0-5 value)":  {MdblistRating{Source: "letterboxd", Value: f64(4.2), Score: f64(84)}, "lb=4.2"},
+		"batch POST (0-10 value)": {MdblistRating{Source: "letterboxd", Value: f64(8.4), Score: f64(84)}, "lb=4.2"},
+		"no score: value is used": {MdblistRating{Source: "letterboxd", Value: f64(3.9)}, "lb=3.9"},
+	} {
+		got := badgeKeys(MdblistBadges(&MdblistResponse{Ratings: []MdblistRating{tc.r}}))
+		if got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}

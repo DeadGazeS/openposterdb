@@ -32,6 +32,7 @@ var adminImageKinds = []struct {
 var previewKinds = []string{"poster", "logo", "backdrop", "episode"}
 
 func (r *Router) registerRoutes() {
+	r.registerHealthRoutes()
 	r.registerAuthRoutes()
 	r.registerKeyRoutes()
 	r.registerAdminRoutes()
@@ -271,7 +272,7 @@ func (r *Router) registerAdminRoutes() {
 			for _, f := range []struct {
 				name  string
 				value **string
-			}{{"tmdb", &update.TMDB}, {"mdblist", &update.MDBList}, {"omdb", &update.OMDB}, {"fanart", &update.Fanart}, {"trakt", &update.Trakt}} {
+			}{{"tmdb", &update.TMDB}, {"mdblist", &update.MDBList}, {"omdb", &update.OMDB}, {"fanart", &update.Fanart}, {"trakt", &update.Trakt}, {"tvdb", &update.TVDB}} {
 				if *f.value == nil {
 					continue
 				}
@@ -292,6 +293,7 @@ func (r *Router) registerAdminRoutes() {
 				{"omdb", update.OMDB},
 				{"fanart", update.Fanart},
 				{"trakt", update.Trakt},
+				{"tvdb", update.TVDB},
 			}
 			for _, v := range validators {
 				if v.value == nil || strings.TrimSpace(*v.value) == "" {

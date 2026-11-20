@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestParseByteSize(t *testing.T) {
+	for in, want := range map[string]int64{
+		"": 0, "0": 0, "1024": 1024, "10GB": 10 << 30, "500 MiB": 500 << 20, "1.5t": 3 << 39, "2k": 2048,
+	} {
+		if got, err := ParseByteSize(in); err != nil || got != want {
+			t.Errorf("ParseByteSize(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"GB", "-1", "10XB", "ten"} {
+		if _, err := ParseByteSize(bad); err == nil {
+			t.Errorf("ParseByteSize(%q): want an error", bad)
+		}
+	}
+}
+
 func setEnv(t *testing.T, key, value string) {
 	t.Helper()
 	os.Setenv(key, value)

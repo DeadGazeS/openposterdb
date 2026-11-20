@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -336,7 +337,14 @@ func MdblistBadges(resp *MdblistResponse) []RatingBadge {
 				badge = &RatingBadge{Source: SourceTrakt, Value: fmt.Sprintf("%.0f%%", *r.Score)}
 			}
 		case "letterboxd":
-			if r.Value != nil && *r.Value > 0 && !fewVotes(r) {
+			// From the 0–100 score: MDBList's batch POST reports the value
+			// on a 0–10 scale, the single GET on Letterboxd's own 0–5.
+			if fewVotes(r) {
+				break
+			}
+			if r.Score != nil && *r.Score > 0 {
+				badge = &RatingBadge{Source: SourceLetterboxd, Value: fmt.Sprintf("%.1f", *r.Score/20)}
+			} else if r.Value != nil && *r.Value > 0 {
 				badge = &RatingBadge{Source: SourceLetterboxd, Value: fmt.Sprintf("%.1f", *r.Value)}
 			}
 		case "popcorn":
@@ -517,7 +525,38 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 	}
 
 	result.Badges = mergeRatings(tmdbBadge, omdbBadges(omdbResp), mdbResp, traktBadge)
+	if hasIMDb {
+		result.Badges = withDatasetIMDb(result.Badges, imdbDataset.Load().Badge(*q.IMDbID))
+	}
+	// Keyless fallback for the critic sources MDBList / OMDb didn't fill.
+	if pmdb := publicMetaDB.Load(); pmdb != nil && q.ResolvedTMDbID != 0 && (q.MediaType == "movie" || q.MediaType == "tv") && pmdbFills(result.Badges) {
+		result.Attempted++
+		scores, err := pmdb.ScoresCtx(ctx, q.ResolvedTMDbID, q.MediaType)
+		if err != nil {
+			result.Failed++
+			if !errors.Is(err, errPublicMetaDBPaused) {
+				slog.Warn("rating provider failed", "provider", "publicmetadb", "media_type", q.MediaType, "tmdb_id", q.ResolvedTMDbID, "error", err)
+			}
+		}
+		result.Badges = fillFromPublicMetaDB(result.Badges, scores)
+	}
 	return result
+}
+
+// withDatasetIMDb makes the IMDb dataset's rating (when it has the title)
+// the IMDb badge: it is IMDb's own number, ahead of MDBList's and OMDb's
+// copies. IMDb is first in the merge order.
+func withDatasetIMDb(badges []RatingBadge, dataset *RatingBadge) []RatingBadge {
+	if dataset == nil {
+		return badges
+	}
+	for i := range badges {
+		if badges[i].Source == SourceImdb {
+			badges[i] = *dataset
+			return badges
+		}
+	}
+	return append([]RatingBadge{*dataset}, badges...)
 }
 
 // mergeRatings builds the badge list in the Rust order — IMDb, TMDB, RT,

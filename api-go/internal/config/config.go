@@ -21,7 +21,20 @@ type Config struct {
 	MDBListAPIKeys      []string
 	FanartAPIKey        string
 	TraktClientID       string
+	TVDBAPIKey          string
+	// FanartClientKey is an optional personal fanart.tv key, sent with the
+	// project key for newer images.
+	FanartClientKey string
+	// IMDbRatingsDataset enables IMDb's ratings dataset (non-commercial
+	// use only, hence opt-in) as the first IMDb rating source.
+	IMDbRatingsDataset bool
+	// PublicMetaDBRatings enables the keyless PublicMetaDB fallback for
+	// RT / Metacritic / Letterboxd / Roger Ebert (opt-in: it sends TMDB
+	// ids to a third-party service).
+	PublicMetaDBRatings bool
 	CacheDir            string
+	// CacheMaxBytes caps the disk cache (CACHE_MAX_SIZE); 0 = unlimited.
+	CacheMaxBytes       int64
 	DBDir               string
 	ListenAddr          string
 	RatingsMinStaleSecs uint64
@@ -72,7 +85,11 @@ func FromEnv() (*Config, error) {
 		MDBListAPIKeys:      optionalSecrets("MDBLIST_API_KEY"),
 		FanartAPIKey:        optionalSecret("FANART_API_KEY"),
 		TraktClientID:       optionalSecret("TRAKT_CLIENT_ID"),
-		CacheDir:            envOrDefault("CACHE_DIR", "./cache"),
+		TVDBAPIKey:          optionalSecret("TVDB_API_KEY"),
+		FanartClientKey:     optionalSecret("FANART_CLIENT_KEY"),
+		IMDbRatingsDataset:  envBool("IMDB_RATINGS_DATASET"),
+		PublicMetaDBRatings: envBool("PUBLICMETADB_RATINGS"),
+		CacheDir:           envOrDefault("CACHE_DIR", "./cache"),
 		DBDir:               envOrDefault("DB_DIR", "./db"),
 		ListenAddr:          envOrDefault("LISTEN_ADDR", "0.0.0.0:3000"),
 		RatingsMinStaleSecs: envUint64OrDefault("RATINGS_STALE_SECS", 86400),
@@ -90,6 +107,10 @@ func FromEnv() (*Config, error) {
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
 		LogLevel:            envOrDefault("LOG_LEVEL", "info"),
+	}
+
+	if c.CacheMaxBytes, err = ParseByteSize(os.Getenv("CACHE_MAX_SIZE")); err != nil {
+		return nil, fmt.Errorf("CACHE_MAX_SIZE: %w", err)
 	}
 
 	if c.RenderConcurrency, err = envPositiveInt("RENDER_CONCURRENCY", runtime.NumCPU()*2); err != nil {
@@ -214,6 +235,29 @@ func envUint64OrDefault(key string, def uint64) uint64 {
 		return def
 	}
 	return n
+}
+
+// ParseByteSize parses a size like "20GB", "500 MiB", "1.5T" or plain bytes
+// ("1073741824"). Units are binary (1 GB = 1024³ bytes). "" or "0" is 0.
+func ParseByteSize(s string) (int64, error) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if s == "" {
+		return 0, nil
+	}
+	i := 0
+	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.') {
+		i++
+	}
+	num, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil || num < 0 {
+		return 0, fmt.Errorf("invalid size %q", s)
+	}
+	unit := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(s[i:]), "B"), "I")
+	mult := map[string]float64{"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}[unit]
+	if mult == 0 {
+		return 0, fmt.Errorf("invalid size unit in %q", s)
+	}
+	return int64(num * mult), nil
 }
 
 func envUint8OrDefault(key string, def uint8) uint8 {

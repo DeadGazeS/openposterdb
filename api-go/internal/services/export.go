@@ -425,6 +425,9 @@ func ApplyImportPayloadCtx(ctx context.Context, db *sql.DB, keys *ServiceKeyMana
 		if v, ok := p.ServiceKeys["trakt"]; ok {
 			update.Trakt = &v
 		}
+		if v, ok := p.ServiceKeys["tvdb"]; ok {
+			update.TVDB = &v
+		}
 		if err := keys.UpdateKeys(update); err != nil {
 			// Settings and API keys are committed; report the service-key
 			// failure together with what was applied.

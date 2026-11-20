@@ -126,7 +126,7 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 		slog.Debug("cross-id cache write skipped: writers busy", "id", p.IDType+"/"+p.IDValue)
 		return
 	}
-	go func() {
+	started := goBackground(func() {
 		defer release()
 		// A background context: the copies survive a client disconnect on
 		// the originating request (server-side cache maintenance).
@@ -144,5 +144,8 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 				slog.Warn("cross-id meta write failed", "cache_key", altKey, "error", err)
 			}
 		}
-	}()
+	})
+	if !started { // shutting down
+		release()
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"openposterdb/internal/config"
 	"openposterdb/internal/handlers"
@@ -26,7 +27,8 @@ type AppState struct {
 	Trakt           *services.TraktClient
 	Kitsu           *services.KitsuClient
 	AniList         *services.AniListClient
-	KitsuIMDbMapper *services.KitsuIMDbMapper
+	Mappings        *services.IDMappings
+	TVDB            *services.TVDBClient
 	ServiceKeys     *services.ServiceKeyManager
 	SecureCookies   bool
 	Caches          *services.MemCacheSet
@@ -35,6 +37,8 @@ type AppState struct {
 	JWTSecret       []byte
 	SecretsKey      []byte
 	LastUsedFlusher *services.LastUsedFlusher
+	// Draining is set when shutdown begins: /api/ready answers 503.
+	Draining atomic.Bool
 
 	// clientsMu protects the rating-provider client fields (TMDB/OMDB/MDBList/
 	// Fanart/Trakt). Setup* and RefreshClientsFromKeys write; imageDeps() and

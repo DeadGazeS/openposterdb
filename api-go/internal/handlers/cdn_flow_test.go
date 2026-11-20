@@ -186,3 +186,27 @@ func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
 		t.Fatalf("/c/ must serve the authed render: code %d, equal=%v", cdn.Code, bytes.Equal(cdn.Body.Bytes(), direct.Body.Bytes()))
 	}
 }
+
+// An id no type takes is a 400 before any upstream call. (An id of another
+// type's form, such as tvdb/movie-2, is served as that type: see
+// services.EffectiveIDType.)
+func TestImageRoute_RejectsInvalidIDForm(t *testing.T) {
+	deps, apiKey := newCDNFlowDeps(t)
+	deps.Config.EnableCDNRedirects = false
+	var calls atomic.Int32
+	deps.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: countingCDNStub{&calls}})
+	get := func() ImageDeps { return deps }
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+
+	for _, p := range []string{"tvdb/poster-default/foo-2.jpg", "imdb/poster-default/abc.jpg", "imdb/poster-default/81189.jpg", "tmdb/poster-default/550.jpg", "mal/poster-default/x1.jpg"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+apiKey+"/"+p, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d want 400", p, rec.Code)
+		}
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("%d upstream calls for invalid ids", n)
+	}
+}

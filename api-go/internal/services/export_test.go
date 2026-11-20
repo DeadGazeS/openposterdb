@@ -51,7 +51,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "", "")
 	keys.Init()
 	if err := keys.UpdateKeys(&ServiceKeysUpdate{TMDB: strP("abc123def456ghi789")}); err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	// Import into a fresh instance.
 	db2 := newExportTestDB(t)
 	defer db2.Close()
-	keys2 := NewServiceKeyManager(db2, []byte("other-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	keys2 := NewServiceKeyManager(db2, []byte("other-secret"), nil, &http.Client{}, "", nil, "", "", "", "")
 	keys2.Init()
 
 	result, err := ApplyImportPayload(db2, keys2, payload)
@@ -244,7 +244,7 @@ func TestPreFixImportMergesOntoExisting(t *testing.T) {
 	db := newExportTestDB(t)
 	defer db.Close()
 
-	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "", "")
 	keys.Init()
 
 	// Seed: an api key with stored per-key settings carrying non-default
@@ -361,7 +361,7 @@ func TestCurrentVersionImportUpsertsNormally(t *testing.T) {
 	db := newExportTestDB(t)
 	defer db.Close()
 
-	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	keys := NewServiceKeyManager(db, []byte("test-secret"), nil, &http.Client{}, "", nil, "", "", "", "")
 	keys.Init()
 
 	_, hash, prefix := GenerateAPIKey()
@@ -414,7 +414,7 @@ func TestCreateAPIKey_StoresEncryptedKey_ReadableOnList(t *testing.T) {
 	defer db.Close()
 
 	secretsKey := []byte("end-to-end-encrypt-test-32-bytes")
-	keys := NewServiceKeyManager(db, secretsKey, nil, &http.Client{}, "", nil, "", "", "")
+	keys := NewServiceKeyManager(db, secretsKey, nil, &http.Client{}, "", nil, "", "", "", "")
 	keys.Init()
 
 	raw, hash, prefix := GenerateAPIKey()
@@ -455,7 +455,7 @@ func TestExportImportAPIKey_RoundTripEncryptedKey_OnSameSecretsKey(t *testing.T)
 	defer db.Close()
 
 	secretsKey := []byte("roundtrip-same-secrets-key-32-byte")
-	keys := NewServiceKeyManager(db, secretsKey, nil, &http.Client{}, "", nil, "", "", "")
+	keys := NewServiceKeyManager(db, secretsKey, nil, &http.Client{}, "", nil, "", "", "", "")
 	keys.Init()
 
 	// Source: create an API key with encrypted_key populated.
@@ -541,7 +541,7 @@ func TestExportImportAPIKey_CarriesHashAcrossSecretsKey(t *testing.T) {
 
 	sourceKey := []byte("source-secrets-key-32-bytes-aaaa")
 	targetKey := []byte("target-secrets-key-32-bytes-bbbb")
-	src := NewServiceKeyManager(db, sourceKey, nil, &http.Client{}, "", nil, "", "", "")
+	src := NewServiceKeyManager(db, sourceKey, nil, &http.Client{}, "", nil, "", "", "", "")
 	src.Init()
 
 	raw, hash, prefix := GenerateAPIKey()
@@ -562,7 +562,7 @@ func TestExportImportAPIKey_CarriesHashAcrossSecretsKey(t *testing.T) {
 	if err := DeleteAPIKey(db, 1); err != nil {
 		t.Fatal(err)
 	}
-	tgt := NewServiceKeyManager(db, targetKey, nil, &http.Client{}, "", nil, "", "", "")
+	tgt := NewServiceKeyManager(db, targetKey, nil, &http.Client{}, "", nil, "", "", "", "")
 	tgt.Init()
 	if _, err := ApplyImportPayload(db, tgt, payload); err != nil {
 		t.Fatal(err)

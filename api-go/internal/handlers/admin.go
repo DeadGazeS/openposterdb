@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"openposterdb/internal/httpx"
+	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
 
@@ -298,6 +299,7 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 		}
 
 		// Drop every in-memory entry so a purge is immediately visible.
+		image.ResetRenderFailures()
 		if caches != nil {
 			if caches.ImageMem != nil {
 				caches.ImageMem.Clear()

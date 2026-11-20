@@ -4,7 +4,7 @@
 
 OpenPosterDB is a self-hosted service that generates custom movie and TV posters, logos, backdrops, and episode stills with rating overlays. It's designed as a drop-in replacement for RPDB (Rating Poster Database) and plugs directly into your media server.
 
-Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings from IMDb, Rotten Tomatoes, Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert — all rendered into clean, branded image overlays you control.
+Pull artwork from TMDB (or optionally Fanart.tv and TheTVDB) and combine it with ratings from IMDb, Rotten Tomatoes, Metacritic, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert — all rendered into clean, branded image overlays you control.
 
 - [Website](https://openposterdb.com)
 - [GitHub](https://github.com/DeadGazeS/openposterdb)
@@ -37,6 +37,7 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - Aggregates ratings from the MDBList, OMDb, Trakt, and TMDB APIs across all ten rating sources: IMDb, Rotten Tomatoes (critics and audience), Metacritic, TMDB, Trakt, Letterboxd, MyAnimeList, MDBList, and Roger Ebert.
 - Configurable **rating order and per-source exclusion** — reorder with the arrows, hide a source with the eye toggle. The number of ratings shown is driven by the layout grid.
 - Ratings are cached so repeated requests are fast and don't hammer the providers.
+- **Optional keyless sources** (off by default): IMDb's ratings dataset as the first IMDb source (`IMDB_RATINGS_DATASET=true`, personal / non-commercial use only) and [PublicMetaDB](https://publicmetadb.com) to fill missing Rotten Tomatoes, Metacritic, Letterboxd and Roger Ebert ratings (`PUBLICMETADB_RATINGS=true`). See [Configuration](docs/configuration.md#api-keys).
 
 ### Configuration & keys
 - **Per-key settings** — override image source, language, textless, and badge settings for each API key.
@@ -46,7 +47,9 @@ Pull artwork from TMDB (or optionally Fanart.tv) and combine it with ratings fro
 - **Free key mode** — optionally enable a shared free API key so the public image endpoints work without per-user keys.
 
 ### Operations
-- **Multi-layer caching** — in-memory (TTL/weight-bounded), filesystem, and SQLite with staleness-aware refresh.
+- **Multi-layer caching** — in-memory (TTL/weight-bounded), filesystem, and SQLite with staleness-aware refresh. An optional disk cap (`CACHE_MAX_SIZE`) deletes the least recently served images.
+- **Offline ID mapping** — IMDb ↔ TMDB ↔ TVDB and anime (MAL / Kitsu / AniList) cross-references come from public mapping lists, refreshed daily and kept on disk, so most lookups need no API call.
+- **Health checks** — `/api/health` (process up) and `/api/ready` (database reachable) for Docker and orchestrators; a shutdown waits for running renders to finish.
 - **Full admin UI** — a Vue 3 dashboard covering stats, global and per-key image settings, API key management, and cache purging (all / per-kind / per-title).
 - **Secure auth** — Argon2 password hashing, JWT access tokens, rotating refresh tokens, and API-key auth.
 
@@ -67,7 +70,7 @@ Then open **http://localhost:3000** and create your admin account.
 > `http://` on anything other than `localhost` (e.g. `http://192.168.1.10:3000`), set `COOKIE_SECURE=false` in
 > `.env` — otherwise the browser drops the session cookie and login silently does nothing.
 
-TMDB is required for artwork — it can be set in `.env` or later via the admin UI (Settings → External API Keys) without restarting. MDBList is recommended (a single key covers all nine rating sources). Fanart.tv, OMDb, and Trakt keys can also be added through the admin UI without restarting.
+TMDB is required for artwork — it can be set in `.env` or later via the admin UI (Settings → Source API Keys) without restarting. MDBList is recommended (a single key covers all nine rating sources). Fanart.tv, TheTVDB, OMDb, and Trakt keys can also be added through the admin UI without restarting.
 
 ## Connect your media server
 

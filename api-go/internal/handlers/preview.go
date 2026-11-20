@@ -124,7 +124,8 @@ type PreviewConfig struct {
 	Trakt             *services.TraktClient
 	Kitsu             *services.KitsuClient
 	AniList           *services.AniListClient
-	KitsuIMDbMapper   *services.KitsuIMDbMapper
+	Mappings          *services.IDMappings
+	TVDB              *services.TVDBClient
 	// Caches (IDs, Ratings) back the demo-ratings lookup, so a preview with
 	// nothing stored doesn't hit TMDB and every rating provider on each edit.
 	Caches *services.MemCacheSet
@@ -596,6 +597,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			}
 		}
 
+		image.ResetRenderFailures() // remembered "no artwork" results go with the cache
 		metaDeleted, err := services.DeleteImageMetaByKindCtx(r.Context(), db, imageType)
 		if err != nil {
 			errs = append(errs, "image metadata: "+err.Error())
@@ -659,6 +661,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 				errs = append(errs, what+": "+err.Error())
 			}
 		}
+		image.ResetRenderFailures() // remembered "no artwork" results go with the cache
 		var filesDeleted int64 = 0
 		if !externalCacheOnly {
 			subdir := services.ImageSubdir(imageType)

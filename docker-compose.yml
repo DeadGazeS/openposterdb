@@ -16,7 +16,7 @@ services:
     volumes:
       - openposterdb-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/auth/status"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/health"]
       interval: 5s
       timeout: 3s
       retries: 20

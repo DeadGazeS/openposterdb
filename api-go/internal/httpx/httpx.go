@@ -3,10 +3,12 @@
 package httpx
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 
@@ -43,10 +45,32 @@ func WriteAppError(w http.ResponseWriter, err error) {
 		if ae.RetryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(ae.RetryAfter))
 		}
+		if ae.Status == http.StatusInternalServerError {
+			if status, msg := upstreamFailure(err); status != 0 {
+				WriteJSON(w, status, map[string]string{"error": msg})
+				return
+			}
+		}
 		WriteJSON(w, ae.Status, map[string]string{"error": ae.ClientMessage()})
 		return
 	}
 	WriteError(w, http.StatusInternalServerError, "Internal server error")
+}
+
+// upstreamFailure tells a provider that could not be reached (502) or did not
+// answer in time (504) from a failure of our own (0: stays 500), by the
+// network error the 500 wraps.
+func upstreamFailure(err error) (int, string) {
+	var ne net.Error
+	if stderrors.Is(err, context.DeadlineExceeded) || (stderrors.As(err, &ne) && ne.Timeout()) {
+		return http.StatusGatewayTimeout, "Upstream provider did not answer in time"
+	}
+	var opErr *net.OpError
+	var dnsErr *net.DNSError
+	if stderrors.As(err, &opErr) || stderrors.As(err, &dnsErr) || stderrors.As(err, &ne) {
+		return http.StatusBadGateway, "Upstream provider could not be reached"
+	}
+	return 0, ""
 }
 
 // MaxJSONBody bounds a JSON request body. Every JSON body the API accepts

@@ -3,12 +3,14 @@ package image
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"net/http"
 	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
 
+	apperr "openposterdb/internal/errors"
 	"openposterdb/internal/services"
 )
 
@@ -122,17 +124,25 @@ func TestResolveWithFallback_IMDBSourceFromTMDB(t *testing.T) {
 	}
 }
 
-// TestResolveWithFallback_TVDBSourceBareNumeric verifies a bare numeric id
-// falls through imdb + tmdb (both reject the format) and hits tvdb via
-// /find/{id}?external_source=tvdb_id.
-func TestResolveWithFallback_TVDBSourceBareNumeric(t *testing.T) {
-	tmdb := newResolveTestTMDB(t)
-	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "81189", services.IDClients{TMDB: tmdb}, true, true)
-	if err != nil {
-		t.Fatalf("fallback to tvdb failed: %v", err)
+// TestResolveWithFallback_BareNumberNeedsItsType: a plain number is no IMDb
+// id, and whether TVDB, Kitsu or MAL is meant can't be told from the form,
+// so imdb/81189 is a 400 without any lookup (the old blind chain guessed
+// TVDB after two wasted lookups). tvdb/81189 resolves.
+func TestResolveWithFallback_BareNumberNeedsItsType(t *testing.T) {
+	var hits []string
+	tmdb := services.NewTmdbClient("test-key", &http.Client{Transport: &orderTrackingStub{hits: &hits}})
+	_, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "81189", services.IDClients{TMDB: tmdb}, true, true)
+	var appErr *apperr.AppError
+	if !stderrors.As(err, &appErr) || appErr.Status != http.StatusBadRequest {
+		t.Fatalf("imdb/81189: got %v, want a 400", err)
 	}
-	if resolved == nil || resolved.TMDbID != 1396 {
-		t.Errorf("resolved = %+v, want TMDbID=1396 from tvdb /find", resolved)
+	if len(hits) != 0 {
+		t.Errorf("imdb/81189 made lookups: %v", hits)
+	}
+
+	resolved, err := resolveWithFallback(context.Background(), nil, services.IDTypeTVDB, "81189", services.IDClients{TMDB: newResolveTestTMDB(t)}, true, true)
+	if err != nil || resolved == nil || resolved.TMDbID != 1396 {
+		t.Errorf("tvdb/81189: resolved = %+v, err %v; want TMDbID=1396", resolved, err)
 	}
 }
 
@@ -150,20 +160,17 @@ func TestResolveWithFallback_AllMiss(t *testing.T) {
 	}
 }
 
-// TestResolveWithFallback_OrderIsIMDBThenTMDBThenTVDB verifies the fallback
-// chain priority by recording every HTTP attempt: with idValue "movie-99"
-// (movie- prefix so the tmdb resolver actually issues an HTTP call) and
-// strict source = imdb, we expect imdb (miss), tmdb (miss via /movie/99),
-// tvdb (miss via /find/.../tvdb_id) in that exact order. tmdb without a
-// prefix would silently fail validation, so the prefix forces a third
-// recorded attempt that proves tmdb is between imdb and tvdb.
-func TestResolveWithFallback_OrderIsIMDBThenTMDBThenTVDB(t *testing.T) {
+// TestResolveWithFallback_OneLookupByForm: imdb/movie-99 is resolved as the
+// TMDB id its form names, with exactly one lookup. A miss is not retried as
+// other id types (the old chain tried imdb, tmdb and tvdb in turn, which
+// doubled the wait while a provider was unreachable).
+func TestResolveWithFallback_OneLookupByForm(t *testing.T) {
 	var hits []string
 	tracker := &orderTrackingStub{hits: &hits}
 	tmdb := services.NewTmdbClient("test-key", &http.Client{Transport: tracker})
 
 	_, _ = resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "movie-99", services.IDClients{TMDB: tmdb}, true, true)
-	want := []string{"imdb_id", "movie/series", "tvdb_id"}
+	want := []string{"movie/series"}
 	if len(hits) != len(want) {
 		t.Fatalf("expected %d hits %v, got %d: %v", len(want), want, len(hits), hits)
 	}
@@ -204,16 +211,20 @@ func (o *orderTrackingStub) RoundTrip(req *http.Request) (*http.Response, error)
 	return jsonResp(`{}`), nil
 }
 
-// crossRefStub serves the three hosts ratingsTargetFor touches: the
-// TheBeastLT Kitsu→IMDb table (one row, kitsu 3936 → tt0000278), Kitsu's
-// /mappings endpoint (MAL 5114 → kitsu 3936, anything else → no rows), and
-// TMDB (delegated to fallbackStub: /find tt… → movie 278).
+// crossRefAnimeList is the offline anime list (Fribb format) the cross-ref
+// tests use: kitsu 3936 = MAL 5114 → tt0000278; kitsu 5000 → tt7777777.
+const crossRefAnimeList = `[
+ {"kitsu_id":3936,"mal_id":5114,"imdb_id":"tt0000278","type":"TV"},
+ {"kitsu_id":5000,"imdb_id":"tt7777777","type":"MOVIE"}
+]`
+
+// crossRefStub serves the hosts ratingsTargetFor touches: Kitsu's /mappings
+// endpoint (MAL 5114 → kitsu 3936, anything else → no rows), and TMDB
+// (delegated to fallbackStub: /find tt… → movie 278).
 type crossRefStub struct{}
 
 func (crossRefStub) RoundTrip(req *http.Request) (*http.Response, error) {
 	switch {
-	case req.URL.Host == "raw.githubusercontent.com":
-		return jsonResp(`[{"kitsu_id":3936,"imdb_id":"tt0000278","title":"FMA:B"},{"kitsu_id":5000,"imdb_id":"tt7777777","title":"Anime Movie"}]`), nil
 	case req.URL.Host == "kitsu.io" && strings.HasSuffix(req.URL.Path, "/mappings"):
 		q := req.URL.Query()
 		if q.Get("filter[externalId]") != "5114" {
@@ -244,23 +255,23 @@ func (crossRefStub) RoundTrip(req *http.Request) (*http.Response, error) {
 func newCrossRefParams(t *testing.T) ServeParams {
 	t.Helper()
 	httpClient := &http.Client{Transport: crossRefStub{}}
-	mapper := services.NewKitsuIMDbMapper(httpClient)
-	if err := mapper.Load(context.Background()); err != nil {
-		t.Fatalf("mapper load: %v", err)
+	mappings := services.NewIDMappings(httpClient, "")
+	if err := mappings.LoadAnimeList([]byte(crossRefAnimeList)); err != nil {
+		t.Fatalf("anime list load: %v", err)
 	}
 	return ServeParams{
-		Context:         context.Background(),
-		TMDB:            services.NewTmdbClient("test-key", httpClient),
-		Kitsu:           services.NewKitsuClient(httpClient),
-		KitsuIMDbMapper: mapper,
-		Caches:          &services.MemCacheSet{},
-		IDType:          "kitsu",
-		IDValue:         "3936",
+		Context:  context.Background(),
+		TMDB:     services.NewTmdbClient("test-key", httpClient),
+		Kitsu:    services.NewKitsuClient(httpClient),
+		Mappings: mappings,
+		Caches:   &services.MemCacheSet{},
+		IDType:   "kitsu",
+		IDValue:  "3936",
 	}
 }
 
-// TestRatingsTargetFor_KitsuMapped: a kitsu-resolved title in the TheBeastLT
-// table cross-references to its TMDB title so rating badges can be fetched.
+// TestRatingsTargetFor_KitsuMapped: a kitsu-resolved title in the anime
+// list cross-references to its TMDB title so rating badges can be fetched.
 func TestRatingsTargetFor_KitsuMapped(t *testing.T) {
 	p := newCrossRefParams(t)
 	kitsuID := uint64(3936)
@@ -271,7 +282,7 @@ func TestRatingsTargetFor_KitsuMapped(t *testing.T) {
 }
 
 // TestRatingsTargetFor_MALViaKitsuMapping: a mal-resolved title (no Kitsu id)
-// goes MAL → Kitsu (/mappings) → IMDb → TMDB.
+// goes MAL → anime list → IMDb → TMDB.
 func TestRatingsTargetFor_MALViaKitsuMapping(t *testing.T) {
 	p := newCrossRefParams(t)
 	malID := uint64(5114)
@@ -505,7 +516,7 @@ func TestResolverTitles(t *testing.T) {
 // (previously only numeric ids translated; slugs fell back to Kitsu art).
 func TestKitsuSlugTranslatesWithToggleOff(t *testing.T) {
 	p := newCrossRefParams(t)
-	clients := services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, KitsuIMDbMapper: p.KitsuIMDbMapper}
+	clients := services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, Mappings: p.Mappings}
 	for _, id := range []string{"3936", "fmab"} {
 		r, err := resolveKitsuMalCtx(context.Background(), nil, services.IDTypeKitsu, id, clients, false, true)
 		if err != nil {
@@ -523,7 +534,7 @@ func TestKitsuSlugTranslatesWithToggleOff(t *testing.T) {
 // Kitsu entry (artwork) and the IMDb id is kept for ratings.
 func TestIMDbNotOnTMDB_FallsBackToAnimeTable(t *testing.T) {
 	p := newCrossRefParams(t)
-	clients := services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, KitsuIMDbMapper: p.KitsuIMDbMapper}
+	clients := services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, Mappings: p.Mappings}
 	r, err := resolveWithFallback(context.Background(), nil, services.IDTypeIMDB, "tt7777777", clients, true, true)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)

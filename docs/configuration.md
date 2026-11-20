@@ -15,6 +15,12 @@ The server needs two secrets to start: **`JWT_SECRET`** and **`SECRETS_KEY`** (`
 | `OMDB_API_KEY` | — | [OMDb](https://www.omdbapi.com/apikey.aspx) key (IMDb, RT Critics, Metacritic only). Also required for IMDB episode ratings |
 | `TRAKT_CLIENT_ID` | — | [Trakt](https://trakt.tv/oauth/applications) Client ID — Trakt community ratings for movies, shows, and episodes |
 | `FANART_API_KEY` | — | [Fanart.tv](https://fanart.tv/get-an-api-key/) key — enables Fanart.tv as an alternative or preferred image source for posters, logos, and backdrops |
+| `FANART_CLIENT_KEY` | — | Optional personal [Fanart.tv](https://fanart.tv/get-an-api-key/) key, sent alongside the project key above so newer images are returned. Env only |
+| `TVDB_API_KEY` | — | [TheTVDB](https://thetvdb.com/api-information) v4 key — resolves `tvdb` ids TMDB has no cross-link for (often movies), finds the TVDB id Fanart.tv needs for a series, and is the last artwork fallback |
+| `IMDB_RATINGS_DATASET` | `false` | Use [IMDb's ratings dataset](https://developer.imdb.com/non-commercial-datasets/) (`title.ratings.tsv.gz`, ~1.5 M titles, episodes included) as the first IMDb rating source — no API call per title. Downloaded at startup, kept in `DB_DIR/mappings/imdb-ratings.bin` and refreshed daily (titles with fewer than 20 votes are skipped). **IMDb licenses this dataset for personal and non-commercial use only** — enable it only if that applies to your instance |
+| `PUBLICMETADB_RATINGS` | `false` | Use [PublicMetaDB](https://publicmetadb.com) (no key needed) to fill Rotten Tomatoes (critics and audience), Metacritic, Letterboxd and Roger Ebert ratings that MDBList / OMDb didn't provide. Lookups send TMDB ids to that service, batched up to 150 titles per request |
+
+ID cross-references (IMDb ↔ TMDB ↔ TVDB, and MAL / Kitsu / AniList ↔ IMDb / TMDB for anime) come from public mapping lists ([dins](https://github.com/0xConstant1/dins-mappings), [Wikidata](https://github.com/0xConstant1/Wikidata-Fetcher), [Fribb's anime-lists](https://github.com/Fribb/anime-lists)). They are downloaded at startup, kept as a snapshot in `DB_DIR/mappings` (so a restart works offline) and refreshed every 24 hours.
 
 ## Server & storage
 
@@ -22,6 +28,7 @@ The server needs two secrets to start: **`JWT_SECRET`** and **`SECRETS_KEY`** (`
 |---|---|---|
 | `LISTEN_ADDR` | `0.0.0.0:3000` | Server bind address |
 | `CACHE_DIR` | `./cache` | Poster and metadata cache directory |
+| `CACHE_MAX_SIZE` | — (unlimited) | Size cap for the disk cache, e.g. `20GB` or `500MB` (binary units). Checked every 10 minutes; when the cache is over the cap, the least recently served images (and the oldest downloaded artwork) are deleted until it is at 90 % of the cap. Renders orphaned by settings changes and downloaded artwork otherwise accumulate forever |
 | `DB_DIR` | `./db` | SQLite database directory |
 | `IMAGE_QUALITY` | `85` | JPEG output quality (1-100; values outside are clamped) |
 | `IMAGE_MEM_CACHE_MB` | `512` | In-memory cache size in MB |

@@ -36,7 +36,7 @@ func newServiceKeysManager(t *testing.T, db *sql.DB, secret string,
 	envTMDB string, envMDBList []string, envOMDB, envFanart, envTrakt string) *ServiceKeyManager {
 	t.Helper()
 	mgr := NewServiceKeyManager(db, []byte(secret), nil, &http.Client{},
-		envTMDB, envMDBList, envOMDB, envFanart, envTrakt)
+		envTMDB, envMDBList, envOMDB, envFanart, envTrakt, "")
 	mgr.Init()
 	return mgr
 }
@@ -170,7 +170,7 @@ func TestDecryptLegacy_V1Ciphertext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr := NewServiceKeyManager(db, secretsKey, jwtSecret, &http.Client{}, "", nil, "", "", "")
+	mgr := NewServiceKeyManager(db, secretsKey, jwtSecret, &http.Client{}, "", nil, "", "", "", "")
 	mgr.Init()
 
 	// Init must have decrypted the legacy value...
@@ -238,7 +238,7 @@ func TestInit_LoadsFromDB(t *testing.T) {
 	}
 
 	// Fresh manager reads from the DB.
-	mgr2 := NewServiceKeyManager(db, []byte("init-secret"), nil, &http.Client{}, "", nil, "", "", "")
+	mgr2 := NewServiceKeyManager(db, []byte("init-secret"), nil, &http.Client{}, "", nil, "", "", "", "")
 	mgr2.Init()
 	if got := mgr2.TMDBKey(); got != tmdbVal {
 		t.Errorf("TMDBKey after Init: got %q, want %q", got, tmdbVal)
@@ -256,7 +256,7 @@ func TestInit_EnvOverridesDB(t *testing.T) {
 	}
 
 	// Fresh manager with envTMDB set.
-	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "tmdb-from-env", nil, "", "", "")
+	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "tmdb-from-env", nil, "", "", "", "")
 	mgr2.Init()
 	if got := mgr2.TMDBKey(); got != "tmdb-from-env" {
 		t.Errorf("TMDBKey: got %q, want tmdb-from-env (env must win)", got)
@@ -318,7 +318,7 @@ func TestClearKeys_RemovesAll(t *testing.T) {
 	}
 
 	// Fresh manager reads — must be empty.
-	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "", nil, "", "", "")
+	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "", nil, "", "", "", "")
 	mgr2.Init()
 	if got := mgr2.TMDBKey(); got != "" {
 		t.Errorf("TMDBKey after clear: got %q, want \"\"", got)
@@ -478,5 +478,38 @@ func TestServiceKeys_RefsRevealExpand(t *testing.T) {
 	}
 	if _, err := mgr.ExpandKeyRefs("omdb", "ref:deadbeef"); err == nil {
 		t.Fatal("unknown ref must be an error")
+	}
+}
+
+// TVDB is a source key like the others: stored encrypted, reloaded by a fresh
+// manager, listed in the status, and locked (DB ignored) when set in the env.
+func TestTVDBKey_StoredAndEnvLocked(t *testing.T) {
+	db := newServiceKeysTestDB(t)
+	mgr := newServiceKeysManager(t, db, "secret", "", nil, "", "", "")
+	v := "tvdb-key-from-ui"
+	if err := mgr.UpdateKeys(&ServiceKeysUpdate{TVDB: &v}); err != nil {
+		t.Fatal(err)
+	}
+	if st := mgr.GetStatus().TVDB; !st.HasKey || st.Locked || len(st.Keys) != 1 {
+		t.Errorf("status = %+v", st)
+	}
+	if _, ok := mgr.PlaintextKeys()["tvdb"]; !ok {
+		t.Error("TVDB key missing from the export")
+	}
+
+	mgr2 := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "", nil, "", "", "", "")
+	mgr2.Init()
+	if got := mgr2.TVDBKey(); got != v {
+		t.Errorf("TVDBKey after Init = %q, want %q", got, v)
+	}
+
+	env := NewServiceKeyManager(db, []byte("secret"), nil, &http.Client{}, "", nil, "", "", "", "tvdb-from-env")
+	env.Init()
+	other := "ignored"
+	if err := env.UpdateKeys(&ServiceKeysUpdate{TVDB: &other}); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.TVDBKey(); got != "tvdb-from-env" || !env.GetStatus().TVDB.Locked {
+		t.Errorf("env-locked: key %q locked %v", got, env.GetStatus().TVDB.Locked)
 	}
 }

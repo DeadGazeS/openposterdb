@@ -37,6 +37,6 @@ ENV DB_DIR=/data/db
 WORKDIR /app
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
-    CMD curl -sf http://localhost:3000/api/auth/status || exit 1
+    CMD curl -sf http://localhost:3000/api/health || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["openposterdb"]

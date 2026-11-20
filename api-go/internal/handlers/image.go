@@ -48,17 +48,18 @@ type ImageServeConfig struct {
 
 // ImageDeps bundles the dependencies shared by the image-serving handlers.
 type ImageDeps struct {
-	DB              *sql.DB
-	Config          *ImageServeConfig
-	TMDB            *services.TmdbClient
-	OMDB            *services.OmdbClient
-	MDBList         *services.MdblistClient
-	Trakt           *services.TraktClient
-	Fanart          *services.FanartClient
-	Kitsu           *services.KitsuClient
-	AniList         *services.AniListClient
-	KitsuIMDbMapper *services.KitsuIMDbMapper
-	CDNHashes       *services.HashRegistry
+	DB        *sql.DB
+	Config    *ImageServeConfig
+	TMDB      *services.TmdbClient
+	OMDB      *services.OmdbClient
+	MDBList   *services.MdblistClient
+	Trakt     *services.TraktClient
+	Fanart    *services.FanartClient
+	Kitsu     *services.KitsuClient
+	AniList   *services.AniListClient
+	Mappings  *services.IDMappings
+	TVDB      *services.TVDBClient
+	CDNHashes *services.HashRegistry
 	// LastUsed records which keys serve images (admin "last used"); nil-safe.
 	LastUsed KeyRecorder
 }
@@ -128,6 +129,12 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 
 		if err := services.ValidateIDValue(idValue); err != nil {
 			httpx.WriteError(w, 400, "invalid id value")
+			return
+		}
+		// Before any cache lookup: a render stored under an invalid id
+		// (e.g. tvdb/movie-2) must not be served.
+		if err := services.ValidateIDFormat(idTypeStr, idValue); err != nil {
+			httpx.WriteError(w, 400, err.Error())
 			return
 		}
 
@@ -313,7 +320,7 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool, lastUsed KeyReco
 func (d ImageDeps) serveParams(ctx context.Context, idType, idValue, kind string, settings *services.RenderSettings, ratingsLimit *int32, imageSize *string) image.ServeParams {
 	return image.ServeParams{
 		Context: ctx, DB: d.DB, TMDB: d.TMDB, OMDB: d.OMDB, MDBList: d.MDBList, Trakt: d.Trakt, Fanart: d.Fanart,
-		Kitsu: d.Kitsu, AniList: d.AniList, KitsuIMDbMapper: d.KitsuIMDbMapper,
+		Kitsu: d.Kitsu, AniList: d.AniList, Mappings: d.Mappings, TVDB: d.TVDB,
 		IDType: idType, IDValue: idValue, Kind: kind,
 		Settings: settings, RatingsLimit: ratingsLimit,
 		CacheDir: d.Config.CacheDir, ExternalCacheOnly: d.Config.ExternalCacheOnly,

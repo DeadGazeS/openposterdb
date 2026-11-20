@@ -71,6 +71,10 @@ func HandleCDNImage(deps func() ImageDeps, registry CDNLookup) http.HandlerFunc 
 			httpx.WriteError(w, http.StatusBadRequest, "invalid id value")
 			return
 		}
+		if err := services.ValidateIDFormat(idTypeStr, idValue); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		// Serve only what an authenticated request rendered for this URL
 		// (recorded by HandleImage before its redirect): no id resolution,

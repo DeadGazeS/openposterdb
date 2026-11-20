@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"strconv"
@@ -137,13 +138,14 @@ type ResolvedID struct {
 // poster_path / backdrop_path fetches); Kitsu and AniList are optional —
 // when nil, the resolver returns NewOther for that source, and the
 // fallback chain in image/serve.go simply moves on to the next source.
-// KitsuIMDbMapper is optional too — when nil, the "find IMDB equivalent
-// via TheBeastLT cross-ref" step is silently skipped.
+// Mappings (the offline id lists) and TVDB are optional too: when nil, the
+// steps that use them are skipped.
 type IDClients struct {
-	TMDB            *TmdbClient
-	Kitsu           *KitsuClient
-	AniList         *AniListClient
-	KitsuIMDbMapper *KitsuIMDbMapper
+	TMDB     *TmdbClient
+	Kitsu    *KitsuClient
+	AniList  *AniListClient
+	Mappings *IDMappings
+	TVDB     *TVDBClient
 }
 
 func FormatTMDbIDValue(tmdbID uint64, mediaType MediaType, episode *EpisodeInfo) string {
@@ -235,11 +237,13 @@ type findResult struct {
 func ResolveIDCtx(ctx context.Context, idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
 	switch idType {
 	case IDTypeIMDB:
-		return resolveIMDBCtx(ctx, idValue, clients.TMDB)
+		r, err := resolveIMDBCtx(ctx, idValue, clients.TMDB)
+		return backfillSeriesTVDB(r, clients.Mappings), err
 	case IDTypeTMDB:
-		return resolveTMDBCtx(ctx, idValue, clients.TMDB)
+		r, err := resolveTMDBCtx(ctx, idValue, clients.TMDB)
+		return backfillSeriesTVDB(r, clients.Mappings), err
 	case IDTypeTVDB:
-		return resolveTVDBCtx(ctx, idValue, clients.TMDB)
+		return resolveTVDBWithFallbacksCtx(ctx, idValue, clients)
 	case IDTypeKitsu:
 		if clients.Kitsu == nil {
 			return nil, apperr.NewOther("Kitsu client not configured")
@@ -596,6 +600,112 @@ func resolveTVDBCtx(ctx context.Context, tvdbIDVal string, tmdb *TmdbClient) (*R
 	return nil, apperr.NewIDNotFound(fmt.Sprintf("%s (not found on TMDB via TVDB lookup)", tvdbIDVal))
 }
 
+// resolveTVDBWithFallbacksCtx resolves a tvdb: id: first through the
+// offline id lists (no /find call), then TMDB /find, and when /find knows
+// nothing, through the TVDB API (its record's IMDb / TMDB cross-links, else
+// the TVDB record itself).
+func resolveTVDBWithFallbacksCtx(ctx context.Context, idValue string, clients IDClients) (*ResolvedID, error) {
+	if strings.HasPrefix(idValue, "episode-") {
+		return resolveTVDBCtx(ctx, idValue, clients.TMDB)
+	}
+	tvdbNum, parseErr := strconv.ParseUint(idValue, 10, 64)
+	if parseErr == nil && tvdbNum != 0 && clients.Mappings != nil {
+		for _, kind := range []MediaType{MediaTypeTV, MediaTypeMovie} {
+			if e, ok := clients.Mappings.Lookup(kind, IDTypeTVDB, idValue); ok {
+				if r := resolveMappedCtx(ctx, clients.TMDB, kind, e); r != nil {
+					r.TVDBID = &tvdbNum
+					return r, nil
+				}
+			}
+		}
+	}
+	r, err := resolveTVDBCtx(ctx, idValue, clients.TMDB)
+	if err == nil {
+		return backfillSeriesTVDB(r, clients.Mappings), nil
+	}
+	if !isIDNotFound(err) || clients.TVDB == nil || parseErr != nil || tvdbNum == 0 {
+		return nil, err
+	}
+	viaTVDB, tvdbErr := resolveViaTVDBRecordCtx(ctx, tvdbNum, clients)
+	if tvdbErr != nil {
+		if isIDNotFound(tvdbErr) {
+			return nil, err // TVDB doesn't know it either: the /find answer stands
+		}
+		slog.Info("TVDB lookup failed", "tvdb_id", tvdbNum, "error", tvdbErr)
+		return nil, tvdbErr // transient: not cached as a miss
+	}
+	return viaTVDB, nil
+}
+
+// resolveMappedCtx resolves a title of the given kind through the TMDB (else
+// IMDb) id the mapping lists or TVDB cross-link it to. nil when that fails.
+func resolveMappedCtx(ctx context.Context, tmdb *TmdbClient, kind MediaType, e IDMap) *ResolvedID {
+	if tmdb == nil {
+		return nil
+	}
+	if e.TMDB != 0 {
+		if r, err := resolveTMDBCtx(ctx, FormatTMDbIDValue(e.TMDB, kind, nil), tmdb); err == nil {
+			if r.IMDbID == nil && e.IMDb != "" {
+				imdb := e.IMDb
+				r.IMDbID = &imdb
+			}
+			return r
+		}
+	}
+	if e.IMDb != "" {
+		if r, err := resolveIMDBCtx(ctx, e.IMDb, tmdb); err == nil && r.MediaType == kind {
+			return r
+		}
+	}
+	return nil
+}
+
+// resolveViaTVDBRecordCtx looks a TVDB id up on TVDB itself (series first,
+// as TMDB /find does, then movies). A record cross-linked to a title TMDB
+// knows resolves to that title; otherwise the TVDB record is served on its
+// own (TMDbID 0: artwork from Fanart / TVDB, ratings by IMDb id if any).
+func resolveViaTVDBRecordCtx(ctx context.Context, tvdbNum uint64, clients IDClients) (*ResolvedID, error) {
+	rec, err := clients.TVDB.SeriesCtx(ctx, tvdbNum)
+	if isIDNotFound(err) {
+		rec, err = clients.TVDB.MovieCtx(ctx, tvdbNum)
+	}
+	if err != nil {
+		return nil, err
+	}
+	kind := MediaTypeTV
+	if rec.IsMovie {
+		kind = MediaTypeMovie
+	}
+	if r := resolveMappedCtx(ctx, clients.TMDB, kind, IDMap{IMDb: rec.IMDbID, TMDB: rec.TMDbID}); r != nil {
+		slog.Info("tvdb id not found by TMDB /find; resolved through its TVDB cross-link", "tvdb_id", tvdbNum, "tmdb_id", r.TMDbID)
+		r.TVDBID = &tvdbNum
+		return r, nil
+	}
+	out := &ResolvedID{TVDBID: &tvdbNum, MediaType: kind, Title: titleOf(&rec.Name, nil)}
+	if rec.IMDbID != "" {
+		imdb := rec.IMDbID
+		out.IMDbID = &imdb
+	}
+	if rec.ReleaseDate != "" {
+		d := rec.ReleaseDate
+		out.ReleaseDate = &d
+	}
+	slog.Info("tvdb id not on TMDB; serving it from TVDB", "tvdb_id", tvdbNum, "kind", kind.String())
+	return out, nil
+}
+
+// backfillSeriesTVDB fills a freshly resolved series' missing TVDB id from
+// the offline lists (Fanart indexes series by TVDB id only).
+func backfillSeriesTVDB(r *ResolvedID, m *IDMappings) *ResolvedID {
+	if r == nil || m == nil || r.MediaType != MediaTypeTV || (r.TVDBID != nil && *r.TVDBID != 0) {
+		return r
+	}
+	if id := m.SeriesTVDB(r.IMDbID, r.TMDbID); id != 0 {
+		r.TVDBID = &id
+	}
+	return r
+}
+
 func resolveEpisodeDetailsCtx(ctx context.Context, tmdb *TmdbClient, showID uint64, season, episode uint32, hintStillPath, hintIMDbID *string) (*ResolvedID, error) {
 	type epDetails struct {
 		StillPath   *string `json:"still_path"`
@@ -792,6 +902,29 @@ func SeriesTVDBID(r *ResolvedID) *uint64 {
 		return &id
 	}
 	return nil
+}
+
+// SeriesTVDBIDCtx is SeriesTVDBID plus the TVDB API: a series whose TVDB id
+// is still unknown is looked up by IMDb id via /search/remoteid (a bare
+// TMDB number is ambiguous across sources there), and the answer
+// remembered. nil when TVDB has none, or the lookup failed.
+func SeriesTVDBIDCtx(ctx context.Context, r *ResolvedID, tvdb *TVDBClient) *uint64 {
+	if id := SeriesTVDBID(r); id != nil || r == nil || tvdb == nil || r.MediaType == MediaTypeMovie {
+		return id
+	}
+	if r.IMDbID == nil || *r.IMDbID == "" {
+		return nil
+	}
+	id, err := tvdb.RemoteIDCtx(ctx, *r.IMDbID, MediaTypeTV)
+	if err != nil {
+		slog.Debug("TVDB remote-id lookup failed", "imdb_id", *r.IMDbID, "error", err)
+		return nil
+	}
+	if id == 0 {
+		return nil
+	}
+	RememberTVDBID(r.TMDbID, id)
+	return &id
 }
 
 func findBestEntry(entries []findEntry) *findEntry {

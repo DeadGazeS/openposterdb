@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"slices"
 	"strconv"
 	"time"
@@ -16,8 +17,33 @@ import (
 type FanartClient struct {
 	KeyPool *APIKeyPool
 	HTTP    *http.Client
+	// ClientKey is an optional personal fanart.tv key (FANART_CLIENT_KEY):
+	// sent alongside the project key, it unlocks images newer than the
+	// project key alone sees.
+	ClientKey string
 	// images caches movie/TV image lists across renders. nil disables it.
 	images *MemCache
+}
+
+
+// do GETs url with the client's User-Agent.
+func (c *FanartClient) do(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", UserAgent())
+	return c.HTTP.Do(req)
+}
+
+// apiURL is a fanart.tv v3 API URL for path ("movies/550"), with the
+// project key and the optional personal client key.
+func (c *FanartClient) apiURL(path string) string {
+	u := "https://webservice.fanart.tv/v3/" + path + "?api_key=" + neturl.QueryEscape(c.KeyPool.ActiveKeyRaw())
+	if c.ClientKey != "" {
+		u += "&client_key=" + neturl.QueryEscape(c.ClientKey)
+	}
+	return u
 }
 
 func NewFanartClient(keys []string, httpClient *http.Client) *FanartClient {
@@ -81,16 +107,11 @@ func (c *FanartClient) GetMovieImagesCtx(ctx context.Context, tmdbID uint64) (*F
 }
 
 func (c *FanartClient) fetchMovieImages(ctx context.Context, tmdbID uint64) (*FanartImages, error) {
-	apiKey := c.KeyPool.ActiveKeyRaw()
-	url := fmt.Sprintf("https://webservice.fanart.tv/v3/movies/%d?api_key=%s", tmdbID, apiKey)
+	url := c.apiURL(fmt.Sprintf("movies/%d", tmdbID))
 
 	start := time.Now()
 	resp, err := SendWithRetryCtx(ctx, &FanartRetry, func() (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		return c.HTTP.Do(req)
+		return c.do(ctx, url)
 	})
 	logSlow("Fanart movie images", time.Since(start).Milliseconds())
 	if err != nil {
@@ -126,16 +147,11 @@ func (c *FanartClient) GetTVImagesCtx(ctx context.Context, id uint64) (*FanartIm
 }
 
 func (c *FanartClient) fetchTVImages(ctx context.Context, id uint64) (*FanartImages, error) {
-	apiKey := c.KeyPool.ActiveKeyRaw()
-	url := fmt.Sprintf("https://webservice.fanart.tv/v3/tv/%d?api_key=%s", id, apiKey)
+	url := c.apiURL(fmt.Sprintf("tv/%d", id))
 
 	start := time.Now()
 	resp, err := SendWithRetryCtx(ctx, &FanartRetry, func() (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		return c.HTTP.Do(req)
+		return c.do(ctx, url)
 	})
 	logSlow("Fanart TV images", time.Since(start).Milliseconds())
 	if err != nil {
@@ -169,11 +185,7 @@ func (c *FanartClient) GetTVImages(id uint64) (*FanartImages, error) {
 func (c *FanartClient) FetchPosterBytesCtx(ctx context.Context, url string) ([]byte, error) {
 	start := time.Now()
 	resp, err := SendWithRetryCtx(ctx, &FanartRetry, func() (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		return c.HTTP.Do(req)
+		return c.do(ctx, url)
 	})
 	logSlow("Fanart CDN", time.Since(start).Milliseconds())
 	if err != nil {
