@@ -97,13 +97,26 @@ func isAPIPath(path string) bool {
 	if strings.HasPrefix(rest, "/") {
 		rest = rest[1:]
 	}
-	parts := strings.SplitN(rest, "/", 2)
+	parts := strings.SplitN(rest, "/", 3)
 	first := parts[0]
 	if len(first) == 64 && isHex(first) {
 		return true
 	}
 	// The public free key isn't hex; without this its URLs got the SPA.
-	return first == handlers.FreeAPIKey && len(parts) == 2
+	if first == handlers.FreeAPIKey && len(parts) >= 2 {
+		return true
+	}
+	// Any other key with an isValid or /{key}/{idType}/... shape: the image
+	// handler answers an unknown key with a JSON 401. These used to get the
+	// SPA's index.html with a 200, which media servers took as an image.
+	if len(parts) < 2 || first == "" || first == "assets" {
+		return false
+	}
+	if parts[1] == "isValid" && len(parts) == 2 {
+		return true
+	}
+	_, err := services.ParseIDType(parts[1])
+	return err == nil
 }
 
 func isHex(s string) bool {

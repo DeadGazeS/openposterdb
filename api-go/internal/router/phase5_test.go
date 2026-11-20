@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,6 +67,29 @@ func TestUnknownAPIPath_JSON404(t *testing.T) {
 	// Known routes are unaffected.
 	if rec := serve(r, "GET", "/api/auth/status", "", nil); rec.Code != 200 {
 		t.Errorf("/api/auth/status: %d", rec.Code)
+	}
+}
+
+// With the SPA served (STATIC_DIR, as in the Docker image) an image or
+// isValid URL with an unknown key is a JSON 401, not index.html with a 200;
+// SPA routes still get index.html.
+func TestUnknownKey_JSON401WithSPA(t *testing.T) {
+	static := t.TempDir()
+	if err := os.WriteFile(filepath.Join(static, "index.html"), []byte("<!doctype html><title>spa</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := phase5Router(t, func(c *config.Config) { c.StaticDir = static })
+	for _, p := range []string{"/invalid-key-here/imdb/poster-default/tt0111161.jpg", "/invalid-key-here/isValid"} {
+		rec := serve(r, "GET", p, "", nil)
+		if rec.Code != 401 || !strings.Contains(rec.Header().Get("Content-Type"), "json") {
+			t.Errorf("%s: %d %q %s", p, rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+		}
+	}
+	for _, p := range []string{"/admin/keys", "/key-settings"} {
+		rec := serve(r, "GET", p, "", nil)
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<title>spa</title>") {
+			t.Errorf("%s: %d %s", p, rec.Code, rec.Body.String())
+		}
 	}
 }
 

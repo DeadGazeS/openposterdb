@@ -81,10 +81,6 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 		}
 
 		d := deps()
-		if d.TMDB == nil {
-			httpx.WriteError(w, 503, "TMDB API key not configured — image generation unavailable")
-			return
-		}
 
 		apiKey := r.PathValue("apiKey")
 		rest := r.PathValue("rest")
@@ -163,6 +159,13 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 			recordKey(d.LastUsed, k.ID)
 			s := services.EffectiveRenderSettingsCachedCtx(r.Context(), d.DB, k.ID)
 			settings = &s
+		}
+
+		// After the key check, so an unknown key is a 401 whether or not
+		// provider keys are configured.
+		if d.TMDB == nil {
+			httpx.WriteError(w, 503, "TMDB API key not configured — image generation unavailable")
+			return
 		}
 
 		// Apply lang override from query

@@ -653,8 +653,10 @@ func TestHandleImage_HeadAllowed(t *testing.T) {
 		method string
 		want   int
 	}{
-		{"GET", http.StatusServiceUnavailable},
-		{"HEAD", http.StatusServiceUnavailable},
+		// No mux, so no path values: GET and HEAD both get past the method
+		// check and stop at the same 400; only POST is a 405.
+		{"GET", http.StatusBadRequest},
+		{"HEAD", http.StatusBadRequest},
 		{"POST", http.StatusMethodNotAllowed},
 	} {
 		req := httptest.NewRequest(tc.method, "/key/imdb/poster-default/tt0000001.jpg", nil)
