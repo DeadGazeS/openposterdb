@@ -60,6 +60,17 @@ GET /{api_key}/isValid
 
 Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 
+### Errors
+
+Image and key-validation errors are JSON (`{"error": "..."}`). The key and the request are checked before the server configuration, so an unknown key is a `401` and a bad request a `400` even without provider keys.
+
+- `401 Unauthorized`: unknown API key (any key, also one that isn't 64 hex characters); `403 Forbidden`: the free key is disabled
+- `400 Bad Request`: invalid path, an ID form the ID type doesn't take (e.g. `imdb/81189`), or an invalid `imageSize`
+- `503 Service Unavailable`: no TMDB key configured, or the render queue is full (with `Retry-After`)
+- `404 Not Found`: no artwork for the title
+- `502 Bad Gateway` / `504 Gateway Timeout`: a provider is unreachable / didn't answer in time
+- `429 Too Many Requests`: rate limit (with `Retry-After`)
+
 ## Common parameters
 
 - `id_type`: `imdb`, `tmdb`, `tvdb`, `kitsu`, `mal` (see [Anime IDs](#anime-ids-kitsu--mal))
@@ -158,4 +169,4 @@ Heights are representative for a standard ~2:3 source under the default `native`
 | `large` | 1280 × 720 |
 | `very-large` / `verylarge` | 1920 × 1080 |
 
-`small` is only valid for backdrops and episodes — the admin/key **preview** endpoints reject it for posters or logos with `400 Bad Request` (the public image endpoint silently falls back to the default 580/780 width). `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.
+`small` is only valid for backdrops and episodes — requesting it for posters or logos returns `400 Bad Request`, as does an unknown size. `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.

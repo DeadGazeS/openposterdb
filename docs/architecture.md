@@ -167,6 +167,14 @@ When a cached entry is stale, the Go implementation serves the stale bytes immed
 
 When `ENABLE_CDN_REDIRECTS=true`, the public image endpoint registers the effective render settings under a stable content hash via the in-memory `HashRegistry` and issues a 302 to `/c/{hash}/...` (`internal/handlers/image.go`, `internal/handlers/cdn.go`). The authenticated request renders (or serves from cache) before redirecting and records which cache entry the `/c/` URL maps to; `/c/` serves only those recorded entries from the memory/disk caches and never resolves ids, fetches ratings or renders, so a settings hash cannot be used to make the server do work without an API key. A `/c/` miss is a `404` with `Cache-Control: no-store`. `?imageSize` is carried on the redirect. This lets a CDN deduplicate cache entries across all users with identical settings (only the settings hash matters for the cache key, not the API key or path). Image responses carry `Cache-Control: public, max-age=3600, stale-while-revalidate=86400`; preview responses use `private, max-age=60` (they answer authenticated admin requests). The redirect is skipped for the free key (settings are public and would leak) and when CDN redirects are disabled.
 
+### Failed renders
+
+A render that found no artwork for the title (`404`) is remembered for 10 minutes, an upstream failure (`5xx` / timeout) for 1 minute, per cache key (`internal/image/negcache.go`); repeats within that time get the same error without contacting the providers again. Media servers re-request missing images constantly, so this keeps the provider quotas intact. The memory is cleared when provider keys are saved and when the cache is cleared.
+
+### Disk cap
+
+With `CACHE_MAX_SIZE` set, a background sweep (first after one minute, then every 10 minutes) deletes the least recently served files until the cache directory is under the cap, together with their `image_meta` rows (`internal/services/cachecap.go`). A file's age is its last serve time, or its render time when it was never served. Without the cap the cache only grows.
+
 ### External cache only
 
 When `EXTERNAL_CACHE_ONLY=true`, the server skips image file writes to disk (rendered posters and base source images from TMDB/Fanart.tv). This is useful when deployed behind a CDN like Cloudflare that caches responses at the edge.

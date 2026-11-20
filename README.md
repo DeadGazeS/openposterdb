@@ -94,7 +94,7 @@ Any client that fetches images by URL works — see the [API Reference](docs/api
 
 **Original project**: [PNRxA/openposterdb](https://github.com/PNRxA/openposterdb) — OpenPosterDB was originally developed in Rust by [PNRxA](https://github.com/PNRxA). This fork reimplements it in Go with a Vue web frontend; most of the code was AI-generated.
 
-**Data & image providers**: [TMDB](https://www.themoviedb.org/) (this product uses the TMDB API but is not endorsed or certified by TMDB), [MDBList](https://mdblist.com/), [OMDb](https://www.omdbapi.com/), [Fanart.tv](https://fanart.tv/), [RPDB](https://ratingposterdb.com/) (API design inspiration), [Simple Icons](https://simpleicons.org/).
+**Data & image providers**: [TMDB](https://www.themoviedb.org/) (this product uses the TMDB API but is not endorsed or certified by TMDB), [MDBList](https://mdblist.com/), [OMDb](https://www.omdbapi.com/), [Fanart.tv](https://fanart.tv/), [TheTVDB](https://thetvdb.com/), [PublicMetaDB](https://publicmetadb.com/), [RPDB](https://ratingposterdb.com/) (API design inspiration), [Simple Icons](https://simpleicons.org/).
 
 **Rating sources**: [IMDb](https://www.imdb.com/), [Rotten Tomatoes](https://www.rottentomatoes.com/), [Metacritic](https://www.metacritic.com/), [Trakt](https://trakt.tv/), [Letterboxd](https://letterboxd.com/), [MyAnimeList](https://myanimelist.net/).
 
