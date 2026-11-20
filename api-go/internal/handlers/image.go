@@ -161,8 +161,15 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 			settings = &s
 		}
 
-		// After the key check, so an unknown key is a 401 whether or not
-		// provider keys are configured.
+		if query.ImageSize != nil {
+			if _, err := services.ValidateImageSize(*query.ImageSize, kind); err != nil {
+				httpx.WriteError(w, 400, err.Error())
+				return
+			}
+		}
+
+		// After the key and request checks, so an unknown key is a 401 and a
+		// bad request a 400 whether or not provider keys are configured.
 		if d.TMDB == nil {
 			httpx.WriteError(w, 503, "TMDB API key not configured — image generation unavailable")
 			return

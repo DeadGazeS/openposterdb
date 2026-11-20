@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -101,9 +100,9 @@ func parsePreviewImageSize(raw *string, kind string) (*services.ImageSize, error
 	if raw == nil {
 		return nil, nil
 	}
-	s := services.ParseImageSize(*raw)
-	if s == services.ImageSizeSmall && kind != "backdrop" && kind != "episode" {
-		return nil, fmt.Errorf("imageSize 'small' is only valid for backdrops and episodes")
+	s, err := services.ValidateImageSize(*raw, kind)
+	if err != nil {
+		return nil, err
 	}
 	return &s, nil
 }
