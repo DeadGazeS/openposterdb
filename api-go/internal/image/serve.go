@@ -332,10 +332,10 @@ func (p ServeParams) serveColdCache(contentType string) ([]byte, bool) {
 	if p.DB == nil || p.Caches == nil || p.Caches.IDs == nil {
 		return nil, false
 	}
-	idKey := p.IDType + "/" + p.IDValue
-	if _, warm := p.Caches.IDs.Peek(idKey); warm {
+	if p.idCacheWarm() {
 		return nil, false
 	}
+	idKey := p.IDType + "/" + p.IDValue
 	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 	sources, _, releaseDate, err := services.ReadAvailableRatingsCtx(p.Context, p.DB, idKey)
 	// No row: the sources are unknown — unless no ratings are shown at all
@@ -374,6 +374,40 @@ func (p ServeParams) serveColdCache(contentType string) ([]byte, bool) {
 	}
 	goBackground(func() { p.warmAfterColdHit(cacheKey) })
 	return bytes, true
+}
+
+// idCacheWarm reports whether the in-memory ID cache holds the request's id
+// under a key its resolution caches: the type the id's form names
+// (services.EffectiveIDType: imdb/movie-123 is cached as tmdb/movie-123) and,
+// for a kitsu/mal id translated to the standard pipeline (toggle off), the
+// translated id — from the offline anime list only, no lookups here.
+func (p ServeParams) idCacheWarm() bool {
+	idType := p.IDType
+	if eff, err := services.EffectiveIDType(p.IDType, p.IDValue); err == nil {
+		idType = eff
+	}
+	if _, warm := p.Caches.IDs.Peek(idType + "/" + p.IDValue); warm {
+		return true
+	}
+	var entry services.AnimeIDs
+	found := false
+	if id, err := strconv.ParseUint(p.IDValue, 10, 64); err == nil {
+		switch {
+		case idType == "kitsu" && !p.Settings.UseKitsu:
+			entry, found = p.Mappings.AnimeByKitsu(id)
+		case idType == "mal" && !p.Settings.UseMAL:
+			entry, found = p.Mappings.AnimeByMAL(id)
+		}
+	}
+	if !found {
+		return false
+	}
+	t, v, ok := standardIDFor(entry)
+	if !ok {
+		return false
+	}
+	_, warm := p.Caches.IDs.Peek(t.String() + "/" + v)
+	return warm
 }
 
 // warmAfterColdHit follows up a request served by serveColdCache: it resolves
@@ -457,35 +491,33 @@ func resolveKitsuMalCtx(ctx context.Context, cache *services.MemCache, idType se
 		if useKitsu {
 			return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
 		}
-		// UseKitsu=false: try to find an IMDB equivalent via the offline
-		// anime list.
+		// UseKitsu=false: try to find an IMDb/TMDB equivalent via the
+		// offline anime list.
 		if clients.Mappings != nil {
-			if imdbID := lookupKitsuIMDb(ctx, cache, idValue, clients); imdbID != nil {
-				slog.Debug("kitsu→imdb equivalent translation hit",
+			if t, v, ok := lookupKitsuStandard(ctx, cache, idValue, clients); ok {
+				slog.Debug("kitsu equivalent translation hit",
 					"kitsu_id_or_slug", idValue,
-					"imdb_id", *imdbID)
-				if r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeIMDB, *imdbID, clients); err == nil {
+					"id", t.String()+"/"+v)
+				if r, err := services.ResolveIDCachedCtx(ctx, cache, t, v, clients); err == nil {
 					return r, nil
 				}
-				slog.Debug("kitsu→imdb translation resolve failed, falling back to direct", "imdb_id", *imdbID)
+				slog.Debug("kitsu translation resolve failed, falling back to direct", "id", t.String()+"/"+v)
 			}
 		}
 	case services.IDTypeMAL:
 		if useMAL {
 			return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
 		}
-		// UseMAL=false: try the offline anime list for an IMDB cross-ref.
-		{
-			if malID, parseErr := strconv.ParseUint(idValue, 10, 64); parseErr == nil && malID > 0 {
-				if imdbID := imdbForMAL(ctx, clients, malID); imdbID != nil {
-					slog.Debug("mal→imdb equivalent translation hit",
-						"mal_id", malID,
-						"imdb_id", *imdbID)
-					if r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeIMDB, *imdbID, clients); err == nil {
-						return r, nil
-					}
-					slog.Debug("mal→imdb translation resolve failed, falling back to direct", "imdb_id", *imdbID)
+		// UseMAL=false: try the offline anime list for an IMDb/TMDB cross-ref.
+		if malID, parseErr := strconv.ParseUint(idValue, 10, 64); parseErr == nil && malID > 0 {
+			if t, v, ok := malStandardID(ctx, clients, malID); ok {
+				slog.Debug("mal equivalent translation hit",
+					"mal_id", malID,
+					"id", t.String()+"/"+v)
+				if r, err := services.ResolveIDCachedCtx(ctx, cache, t, v, clients); err == nil {
+					return r, nil
 				}
+				slog.Debug("mal translation resolve failed, falling back to direct", "id", t.String()+"/"+v)
 			}
 		}
 	}
@@ -525,28 +557,66 @@ func kitsuForMAL(ctx context.Context, m *services.IDMappings, kitsu *services.Ki
 	return nil
 }
 
-// lookupKitsuIMDb accepts either a numeric Kitsu id or a slug. Numeric
-// values are looked up directly; slug values are first resolved to a
-// numeric id via the Kitsu slug-filter endpoint.
-func lookupKitsuIMDb(ctx context.Context, cache *services.MemCache, idOrSlug string, clients services.IDClients) *string {
+// standardIDFor returns the id an anime-list entry translates to in the
+// standard pipeline: its IMDb id, else its TMDB id of known kind — the pair
+// AnimeIDs.RatingsIDs gives the ratings path (ratingsTargetFor), so artwork
+// and ratings come from the same title. ok is false when neither is usable.
+func standardIDFor(a services.AnimeIDs) (services.IDType, string, bool) {
+	imdbID, tmdbID, kind := a.RatingsIDs()
+	if imdbID != nil {
+		return services.IDTypeIMDB, *imdbID, true
+	}
+	if tmdbID != 0 {
+		return services.IDTypeTMDB, services.FormatTMDbIDValue(tmdbID, kind, nil), true
+	}
+	return 0, "", false
+}
+
+// lookupKitsuStandard accepts either a numeric Kitsu id or a slug and
+// returns its standard id (standardIDFor). Numeric values are looked up
+// directly; slug values are first resolved to a numeric id via the Kitsu
+// slug-filter endpoint.
+func lookupKitsuStandard(ctx context.Context, cache *services.MemCache, idOrSlug string, clients services.IDClients) (services.IDType, string, bool) {
 	mapper := clients.Mappings
 	if mapper == nil || idOrSlug == "" {
-		return nil
+		return 0, "", false
 	}
-	if kitsuID, parseErr := strconv.ParseUint(idOrSlug, 10, 64); parseErr == nil && kitsuID > 0 {
-		return mapper.IMDbForKitsu(kitsuID)
+	kitsuID, parseErr := strconv.ParseUint(idOrSlug, 10, 64)
+	if parseErr != nil || kitsuID == 0 {
+		// Slug (e.g. "fairy-tail-2018"): the anime list is keyed by the
+		// numeric id, so resolve the slug through the cached Kitsu lookup
+		// first. The direct-artwork fallback after a miss reuses the same
+		// cache entry.
+		if clients.Kitsu == nil {
+			return 0, "", false
+		}
+		r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeKitsu, idOrSlug, clients)
+		if err != nil || r == nil || r.KitsuID == nil {
+			return 0, "", false
+		}
+		kitsuID = *r.KitsuID
 	}
-	// Slug (e.g. "fairy-tail-2018"): the anime list is keyed by the
-	// numeric id, so resolve the slug through the cached Kitsu lookup first.
-	// The direct-artwork fallback after a miss reuses the same cache entry.
-	if clients.Kitsu == nil {
-		return nil
+	a, ok := mapper.AnimeByKitsu(kitsuID)
+	if !ok {
+		return 0, "", false
 	}
-	r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeKitsu, idOrSlug, clients)
-	if err != nil || r == nil || r.KitsuID == nil {
-		return nil
+	return standardIDFor(a)
+}
+
+// malStandardID returns the standard id (standardIDFor) of a MAL anime from
+// the offline anime list; while the list hasn't loaded, AniList's IMDb link
+// (imdbForMAL) stands in.
+func malStandardID(ctx context.Context, clients services.IDClients, malID uint64) (services.IDType, string, bool) {
+	if clients.Mappings.AnimeReady() {
+		if a, ok := clients.Mappings.AnimeByMAL(malID); ok {
+			return standardIDFor(a)
+		}
+		return 0, "", false
 	}
-	return mapper.IMDbForKitsu(*r.KitsuID)
+	if imdbID := imdbForMAL(ctx, clients, malID); imdbID != nil {
+		return services.IDTypeIMDB, *imdbID, true
+	}
+	return 0, "", false
 }
 
 // resolveWithFallback resolves an id as the type its form names

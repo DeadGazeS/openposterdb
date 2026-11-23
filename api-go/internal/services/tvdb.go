@@ -222,7 +222,7 @@ func (c *TVDBClient) doLogin(ctx context.Context) (string, time.Duration, error)
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
 			retryAfter = tvdbLoginRejectedRetryAfter
 		}
-		return "", retryAfter, apperr.NewOther(fmt.Sprintf("TVDB login returned %d: %s", status, errSnippet(respBody)))
+		return "", retryAfter, apperr.NewUpstreamStatus(fmt.Sprintf("TVDB login returned %d: %s", status, errSnippet(respBody)), status)
 	}
 	var out struct {
 		Data struct {
@@ -302,7 +302,7 @@ func (c *TVDBClient) getJSON(ctx context.Context, path string, out any) error {
 		case status == http.StatusNotFound:
 			return apperr.NewIDNotFound("TVDB " + path)
 		case status != http.StatusOK:
-			return apperr.NewOther(fmt.Sprintf("TVDB returned %d: %s", status, errSnippet(body)))
+			return apperr.NewUpstreamStatus(fmt.Sprintf("TVDB returned %d: %s", status, errSnippet(body)), status)
 		}
 		if err := json.Unmarshal(body, out); err != nil {
 			return apperr.NewAPIError(err)

@@ -59,7 +59,7 @@ func (c *TmdbClient) GetCtx(ctx context.Context, path string, params map[string]
 		return errors.NewIDNotFound(fmt.Sprintf("TMDB: %s not found", path))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return errors.NewOther(fmt.Sprintf("TMDB API returned %d: %s", resp.StatusCode, upstreamErrorSnippet(resp.Body)))
+		return errors.NewUpstreamStatus(fmt.Sprintf("TMDB API returned %d: %s", resp.StatusCode, upstreamErrorSnippet(resp.Body)), resp.StatusCode)
 	}
 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxUpstreamJSON)).Decode(target); err != nil {
@@ -83,7 +83,7 @@ func (c *TmdbClient) FetchImageBytesCtx(ctx context.Context, filePath, size stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("TMDB CDN returned %d for %s", resp.StatusCode, filePath))
+		return nil, errors.NewUpstreamStatus(fmt.Sprintf("TMDB CDN returned %d for %s", resp.StatusCode, filePath), resp.StatusCode)
 	}
 	return ReadAllLimited(resp.Body, MaxArtworkBytes)
 }
@@ -131,7 +131,7 @@ func (c *TmdbClient) FetchPosterBytesConditionalCtx(ctx context.Context, posterP
 		return nil, resp.Header.Get("ETag"), true, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", false, errors.NewOther(fmt.Sprintf("TMDB CDN returned %d for %s", resp.StatusCode, posterPath))
+		return nil, "", false, errors.NewUpstreamStatus(fmt.Sprintf("TMDB CDN returned %d for %s", resp.StatusCode, posterPath), resp.StatusCode)
 	}
 	bytes, err = ReadAllLimited(resp.Body, MaxArtworkBytes)
 	if err != nil {
@@ -228,7 +228,7 @@ func storeBaseImage(basePath, etagPath string, bytes []byte, etag string) {
 }
 
 // imageLanguages is the include_image_language list for one /images call:
-// the requested language, English, untagged images and the title's original
+// the requested language, English, untagged images ("null" and "xx") and the title's original
 // language, so every selection tier can match without a second request.
 func imageLanguages(lang, originalLang string) string {
 	var out []string
@@ -240,6 +240,7 @@ func imageLanguages(lang, originalLang string) string {
 	add(LangBase(lang))
 	add("en")
 	add("null")
+	add("xx") // TMDB's explicit "no language" tag (isUntaggedImage)
 	add(LangBase(originalLang))
 	return strings.Join(out, ",")
 }

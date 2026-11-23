@@ -68,9 +68,11 @@ func (c *MdblistClient) lookup(ctx context.Context, k mdblistKey) (*MdblistRespo
 
 // fetchBatch answers a gathered batch: one POST per provider/kind group
 // (a group of one keeps the plain GET). Items are matched back to the
-// requested ids by their "ids" block; a title missing from the answer is
-// MDBList's not-found (no ratings, no error). Should no item match at all (an unexpected response
-// shape), the group falls back to one GET per title.
+// requested ids by their "ids" block. A title missing from the answer is
+// ambiguous (not found, or dropped), so it is asked for alone: the GET's 404
+// is no ratings, its failure a failure. Should no item match at all (an
+// unexpected response shape), the whole group falls back to one GET per
+// title.
 func (c *MdblistClient) fetchBatch(ctx context.Context, keys []mdblistKey) (map[mdblistKey]mdblistResult, error) {
 	groups := map[[2]string][]mdblistKey{}
 	for _, k := range keys {
@@ -115,11 +117,15 @@ func (c *MdblistClient) fetchBatch(ctx context.Context, keys []mdblistKey) (map[
 			singles(ks)
 			continue
 		}
+		var missing []mdblistKey
 		for _, k := range ks {
-			// A title missing from the answer is MDBList's not-found: no
-			// ratings, not a failure (as on the single GET).
-			out[k] = mdblistResult{resp: byID[k.id]}
+			if it, ok := byID[k.id]; ok {
+				out[k] = mdblistResult{resp: it}
+			} else {
+				missing = append(missing, k)
+			}
 		}
+		singles(missing)
 	}
 	return out, nil
 }

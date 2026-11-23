@@ -57,13 +57,18 @@ func WriteAppError(w http.ResponseWriter, err error) {
 	WriteError(w, http.StatusInternalServerError, "Internal server error")
 }
 
-// upstreamFailure tells a provider that could not be reached (502) or did not
-// answer in time (504) from a failure of our own (0: stays 500), by the
-// network error the 500 wraps.
+// upstreamFailure tells a provider that could not be reached or answered
+// with a server error (502), or did not answer in time (504), from a failure
+// of our own (0: stays 500), by the network error or provider status the 500
+// wraps.
 func upstreamFailure(err error) (int, string) {
 	var ne net.Error
 	if stderrors.Is(err, context.DeadlineExceeded) || (stderrors.As(err, &ne) && ne.Timeout()) {
 		return http.StatusGatewayTimeout, "Upstream provider did not answer in time"
+	}
+	var us *apperr.UpstreamStatusError
+	if stderrors.As(err, &us) && us.Status >= 500 {
+		return http.StatusBadGateway, "Upstream provider returned an error"
 	}
 	var opErr *net.OpError
 	var dnsErr *net.DNSError

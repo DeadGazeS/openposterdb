@@ -1,6 +1,9 @@
 package services
 
 import (
+	"net/http"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -17,15 +20,32 @@ func timg(path, lang, region string, vote, ratio float64) TmdbImage {
 
 func TestImageLanguages(t *testing.T) {
 	cases := map[[2]string]string{
-		{"de", "ja"}:    "de,en,null,ja",
-		{"en", ""}:      "en,null",
-		{"pt-BR", "pt"}: "pt,en,null",
-		{"", "ko"}:      "en,null,ko",
+		{"de", "ja"}:    "de,en,null,xx,ja",
+		{"en", ""}:      "en,null,xx",
+		{"pt-BR", "pt"}: "pt,en,null,xx",
+		{"", "ko"}:      "en,null,xx,ko",
 	}
 	for in, want := range cases {
 		if got := imageLanguages(in[0], in[1]); got != want {
 			t.Errorf("imageLanguages(%q, %q) = %q, want %q", in[0], in[1], got, want)
 		}
+	}
+}
+
+// TMDB filters /images by include_image_language, so "xx" (no language),
+// which isUntaggedImage accepts, must be requested.
+func TestGetImages_RequestsXXImages(t *testing.T) {
+	var got *http.Request
+	c := NewTmdbClient("k", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		got = req
+		return jsonResponse(200, `{"posters":[]}`), nil
+	})})
+	if _, err := c.GetImagesCtx(t.Context(), "movie", 550, "de", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	langs := strings.Split(got.URL.Query().Get("include_image_language"), ",")
+	if !slices.Contains(langs, "xx") || !slices.Contains(langs, "null") {
+		t.Errorf("include_image_language = %v, want xx and null", langs)
 	}
 }
 

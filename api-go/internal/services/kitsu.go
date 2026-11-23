@@ -169,7 +169,7 @@ func (c *KitsuClient) fetchAnime(ctx context.Context, idOrSlug string) (*KitsuAn
 		return nil, nil, apperr.NewIDNotFound(fmt.Sprintf("kitsu anime %q not found", idOrSlug))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, apperr.NewOther(fmt.Sprintf("Kitsu returned %d: %s", resp.StatusCode, errSnippet(body)))
+		return nil, nil, apperr.NewUpstreamStatus(fmt.Sprintf("Kitsu returned %d: %s", resp.StatusCode, errSnippet(body)), resp.StatusCode)
 	}
 
 	var idNum uint64

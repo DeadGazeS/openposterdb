@@ -114,3 +114,35 @@ func TestLegacyQuery_LogoIgnoresPlacementSplitPosterOnly(t *testing.T) {
 		t.Errorf("backdrop layout %+v, want unsplit %+v", b.BackdropLayout, want)
 	}
 }
+
+// As in the Rust version, ?position= without ?badge_direction= keeps the
+// key's stored direction instead of the kind's old default.
+func TestLegacyQuery_PositionKeepsStoredDirection(t *testing.T) {
+	base := services.DefaultRenderSettings()
+	base.PosterBadgeDirection = services.BadgeDirectionHorizontal
+	s := overridesFor(t, "position=tl", "poster", base)
+	if want := services.LayoutFromLegacy("poster", "tl", "h", false, base.PosterLayout.Total()); !reflect.DeepEqual(s.PosterLayout, want) {
+		t.Errorf("layout %+v, want stored direction h %+v", s.PosterLayout, want)
+	}
+	base.EpisodeBadgeDirection = services.BadgeDirectionHorizontal
+	e := overridesFor(t, "position=bl&ratings_limit=3", "episode", base)
+	if want := services.LayoutFromLegacy("episode", "bl", "h", false, 3); !reflect.DeepEqual(e.EpisodeLayout, want) {
+		t.Errorf("episode layout %+v, want stored direction h %+v", e.EpisodeLayout, want)
+	}
+}
+
+// ?split=false alone only turns split off (Rust): it never rebuilds, and so
+// never wipes, a stored layout.
+func TestLegacyQuery_SplitFalseAloneKeepsLayout(t *testing.T) {
+	base := services.DefaultRenderSettings()
+	base.PosterLayout = services.ImageLayout{Top: services.SideSlot{PerRow: 2, Rows: 1, Start: "l"}, Order: []string{"top"}}
+	s := overridesFor(t, "split=false", "poster", base)
+	if !reflect.DeepEqual(s.PosterLayout, base.PosterLayout) {
+		t.Errorf("split=false alone replaced the layout: %+v", s.PosterLayout)
+	}
+	// With position it still feeds the conversion (unsplit).
+	s = overridesFor(t, "split=false&position=tl&badge_direction=h", "poster", base)
+	if want := services.LayoutFromLegacy("poster", "tl", "h", false, 2); !reflect.DeepEqual(s.PosterLayout, want) {
+		t.Errorf("layout %+v, want %+v", s.PosterLayout, want)
+	}
+}
