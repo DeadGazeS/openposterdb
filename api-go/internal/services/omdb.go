@@ -49,7 +49,7 @@ func omdbLimited(status int, body []byte) bool {
 
 func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbResponse, error) {
 	start := time.Now()
-	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+	status, body, key, err := pooledDo(ctx, c.KeyPool, pooledCall{
 		service: "OMDb",
 		retry:   &OMDBRetry,
 		do: func(key string) (*http.Response, error) {
@@ -66,15 +66,15 @@ func (c *OmdbClient) GetRatingsCtx(ctx context.Context, imdbID string) (*OmdbRes
 	})
 	logSlow("OMDb", time.Since(start).Milliseconds())
 	if err != nil {
-		return nil, err
+		return nil, withKey(err, key)
 	}
 	if status != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("OMDb returned %d: %s", status, errSnippet(body)))
+		return nil, withKey(errors.NewOther(fmt.Sprintf("OMDb returned %d: %s", status, errSnippet(body))), key)
 	}
 
 	var result OmdbResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, withKey(errors.NewAPIError(err), key)
 	}
 	return &result, nil
 }

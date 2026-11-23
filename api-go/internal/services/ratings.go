@@ -339,13 +339,18 @@ func MdblistBadges(resp *MdblistResponse) []RatingBadge {
 		case "letterboxd":
 			// From the 0–100 score: MDBList's batch POST reports the value
 			// on a 0–10 scale, the single GET on Letterboxd's own 0–5.
+			// Without a score the value is brought to 0–5.
 			if fewVotes(r) {
 				break
 			}
 			if r.Score != nil && *r.Score > 0 {
 				badge = &RatingBadge{Source: SourceLetterboxd, Value: fmt.Sprintf("%.1f", *r.Score/20)}
 			} else if r.Value != nil && *r.Value > 0 {
-				badge = &RatingBadge{Source: SourceLetterboxd, Value: fmt.Sprintf("%.1f", *r.Value)}
+				v := *r.Value
+				if resp.fromBatch {
+					v /= 2
+				}
+				badge = &RatingBadge{Source: SourceLetterboxd, Value: fmt.Sprintf("%.1f", v)}
 			}
 		case "popcorn":
 			if r.Score != nil && *r.Score > 0 && !fewVotes(r) {
@@ -471,7 +476,7 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 		run(1, func() (string, error) {
 			var err error
 			omdbResp, err = clients.OMDB.GetRatingsCtx(ctx, *q.IMDbID)
-			return clients.OMDB.KeyPool.ActiveKeyHash(), err
+			return failedKeyHash(err), err
 		})
 	}
 	if clients.MDBList != nil && q.MediaType != "episode" {
@@ -487,14 +492,14 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 			if mdbResp != nil && q.MediaType == "tv" && mdbResp.IDs.TVDB != nil {
 				RememberTVDBID(q.ResolvedTMDbID, *mdbResp.IDs.TVDB)
 			}
-			return clients.MDBList.KeyPool.ActiveKeyHash(), err
+			return failedKeyHash(err), err
 		})
 	}
 	if clients.Trakt != nil && (hasIMDb || q.MediaType == "episode") {
 		run(3, func() (string, error) {
 			var err error
 			traktBadge, err = fetchTraktRatingCtx(ctx, clients, q)
-			return clients.Trakt.KeyPool.ActiveKeyHash(), err
+			return failedKeyHash(err), err
 		})
 	}
 	wg.Wait()
@@ -508,7 +513,12 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 		result.Attempted++
 		if o.err != nil {
 			result.Failed++
-			attrs := []any{"provider", names[i], "media_type", q.MediaType, "tmdb_id", q.ResolvedTMDbID, "error", apperr.RedactURLSecrets(o.err)}
+			name := names[i]
+			var pe *providerError
+			if errors.As(o.err, &pe) {
+				name = pe.provider
+			}
+			attrs := []any{"provider", name, "media_type", q.MediaType, "tmdb_id", q.ResolvedTMDbID, "error", apperr.RedactURLSecrets(o.err)}
 			if hasIMDb {
 				attrs = append(attrs, "imdb_id", *q.IMDbID)
 			}
@@ -643,8 +653,11 @@ func fetchTraktRatingCtx(ctx context.Context, clients RatingsClients, q RatingsQ
 			return nil, nil
 		}
 		showIMDb, lookupErr := showIMDbIDCtx(ctx, clients.TMDB, q.EpisodeShowTMDbID)
-		if lookupErr != nil || showIMDb == "" {
-			return nil, lookupErr
+		if lookupErr != nil {
+			return nil, &providerError{provider: "tmdb", err: lookupErr}
+		}
+		if showIMDb == "" {
+			return nil, nil
 		}
 		r, err = clients.Trakt.GetEpisodeRatingCtx(ctx, showIMDb, q.EpisodeSeason, q.EpisodeEpisode)
 	default:
@@ -655,6 +668,16 @@ func fetchTraktRatingCtx(ctx context.Context, clients RatingsClients, q RatingsQ
 	}
 	return TraktBadge(r.Rating, r.Votes), nil
 }
+
+// providerError is a failure of another provider than the one asked (the
+// TMDB lookup on the Trakt episode path), logged under that provider.
+type providerError struct {
+	provider string
+	err      error
+}
+
+func (e *providerError) Error() string { return e.err.Error() }
+func (e *providerError) Unwrap() error { return e.err }
 
 // showIMDbIDs caches a show's IMDb id by TMDB id for the Trakt episode path
 // (every episode of a show would otherwise look it up again).

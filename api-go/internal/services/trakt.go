@@ -49,7 +49,7 @@ func (c *TraktClient) request(url string) (*http.Request, error) {
 
 func (c *TraktClient) getRatingCtx(ctx context.Context, url string) (*TraktRatingsResponse, error) {
 	start := time.Now()
-	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+	status, body, key, err := pooledDo(ctx, c.KeyPool, pooledCall{
 		service: "Trakt",
 		retry:   &TraktRetry,
 		do: func(key string) (*http.Response, error) {
@@ -63,18 +63,18 @@ func (c *TraktClient) getRatingCtx(ctx context.Context, url string) (*TraktRatin
 	})
 	logSlow("Trakt", time.Since(start).Milliseconds())
 	if err != nil {
-		return nil, err
+		return nil, withKey(err, key)
 	}
 	if status == http.StatusNotFound {
 		return nil, nil
 	}
 	if status != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("Trakt returned %d: %s", status, errSnippet(body)))
+		return nil, withKey(errors.NewOther(fmt.Sprintf("Trakt returned %d: %s", status, errSnippet(body))), key)
 	}
 
 	var result TraktRatingsResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, withKey(errors.NewAPIError(err), key)
 	}
 	return &result, nil
 }

@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
 
 // Concurrent lookups go out as one POST per provider/kind, matched back by
-// the items' ids; a title MDBList doesn't return gets its not-found.
+// the items' ids; a title MDBList doesn't return has no ratings (its
+// not-found), which is not an error.
 func TestMdblist_BatchesConcurrentLookups(t *testing.T) {
 	var posts, gets atomic.Int32
 	c := NewMdblistClient([]string{"k"}, &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -35,6 +35,7 @@ func TestMdblist_BatchesConcurrentLookups(t *testing.T) {
 	ids := []string{"tt1", "tt2", "tt3"}
 	scores := make([]*float64, 3)
 	errs := make([]error, 3)
+	found := make([]bool, 3)
 	var wg sync.WaitGroup
 	for i, id := range ids {
 		wg.Add(1)
@@ -44,6 +45,7 @@ func TestMdblist_BatchesConcurrentLookups(t *testing.T) {
 			errs[i] = err
 			if r != nil {
 				scores[i] = r.Score
+				found[i] = true
 			}
 		}()
 	}
@@ -54,8 +56,8 @@ func TestMdblist_BatchesConcurrentLookups(t *testing.T) {
 	if scores[0] == nil || *scores[0] != 71 || scores[1] == nil || *scores[1] != 72 {
 		t.Errorf("scores = %v %v", scores[0], scores[1])
 	}
-	if errs[2] == nil || !strings.Contains(errs[2].Error(), "404") {
-		t.Errorf("tt3: err = %v, want not found", errs[2])
+	if errs[2] != nil || found[2] {
+		t.Errorf("tt3: err = %v found = %v, want no ratings and no error", errs[2], found[2])
 	}
 
 	// A lone lookup keeps the plain GET.

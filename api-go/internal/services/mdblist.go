@@ -68,8 +68,8 @@ func (c *MdblistClient) lookup(ctx context.Context, k mdblistKey) (*MdblistRespo
 
 // fetchBatch answers a gathered batch: one POST per provider/kind group
 // (a group of one keeps the plain GET). Items are matched back to the
-// requested ids by their "ids" block; a title missing from the answer gets
-// MDBList's not-found. Should no item match at all (an unexpected response
+// requested ids by their "ids" block; a title missing from the answer is
+// MDBList's not-found (no ratings, no error). Should no item match at all (an unexpected response
 // shape), the group falls back to one GET per title.
 func (c *MdblistClient) fetchBatch(ctx context.Context, keys []mdblistKey) (map[mdblistKey]mdblistResult, error) {
 	groups := map[[2]string][]mdblistKey{}
@@ -116,11 +116,9 @@ func (c *MdblistClient) fetchBatch(ctx context.Context, keys []mdblistKey) (map[
 			continue
 		}
 		for _, k := range ks {
-			if r, ok := byID[k.id]; ok {
-				out[k] = mdblistResult{resp: r}
-			} else {
-				out[k] = mdblistResult{err: errors.NewOther("MDBList returned 404: not found")}
-			}
+			// A title missing from the answer is MDBList's not-found: no
+			// ratings, not a failure (as on the single GET).
+			out[k] = mdblistResult{resp: byID[k.id]}
 		}
 	}
 	return out, nil
@@ -133,7 +131,7 @@ func (c *MdblistClient) postBatch(ctx context.Context, provider, kind string, ks
 	}
 	payload, _ := json.Marshal(map[string]any{"ids": ids})
 	start := time.Now()
-	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+	status, body, key, err := pooledDo(ctx, c.KeyPool, pooledCall{
 		service: "MDBList",
 		retry:   &MDBListRetry,
 		do: func(key string) (*http.Response, error) {
@@ -150,14 +148,17 @@ func (c *MdblistClient) postBatch(ctx context.Context, provider, kind string, ks
 	})
 	logSlow("MDBList batch", time.Since(start).Milliseconds())
 	if err != nil {
-		return nil, err
+		return nil, withKey(err, key)
 	}
 	if status != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", status, errSnippet(body)))
+		return nil, withKey(errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", status, errSnippet(body))), key)
 	}
 	var items []MdblistResponse
 	if err := json.Unmarshal(body, &items); err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, withKey(errors.NewAPIError(err), key)
+	}
+	for i := range items {
+		items[i].fromBatch = true
 	}
 	return items, nil
 }
@@ -170,6 +171,10 @@ type MdblistResponse struct {
 	Ratings []MdblistRating `json:"ratings"`
 	IDs     MdblistIDs      `json:"ids"`
 	Score   *float64        `json:"score"`
+	// fromBatch: the answer came from the batch POST, which reports some
+	// values on another scale than the single GET (Letterboxd: 0–10, not
+	// 0–5).
+	fromBatch bool
 }
 
 type MdblistIDs struct {
@@ -211,7 +216,7 @@ func (c *MdblistClient) GetRatingsByTMDB(tmdbID uint64, mediaType string) (*Mdbl
 
 func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistResponse, error) {
 	start := time.Now()
-	status, body, _, err := pooledDo(ctx, c.KeyPool, pooledCall{
+	status, body, key, err := pooledDo(ctx, c.KeyPool, pooledCall{
 		service: "MDBList",
 		retry:   &MDBListRetry,
 		do: func(key string) (*http.Response, error) {
@@ -226,15 +231,19 @@ func (c *MdblistClient) fetchCtx(ctx context.Context, url string) (*MdblistRespo
 	})
 	logSlow("MDBList", time.Since(start).Milliseconds())
 	if err != nil {
-		return nil, err
+		return nil, withKey(err, key)
+	}
+	// A title MDBList doesn't know has no MDBList ratings: not a failure.
+	if status == http.StatusNotFound {
+		return nil, nil
 	}
 	if status != http.StatusOK {
-		return nil, errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", status, errSnippet(body)))
+		return nil, withKey(errors.NewOther(fmt.Sprintf("MDBList returned %d: %s", status, errSnippet(body))), key)
 	}
 
 	var result MdblistResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, errors.NewAPIError(err)
+		return nil, withKey(errors.NewAPIError(err), key)
 	}
 	return &result, nil
 }
