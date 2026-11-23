@@ -317,9 +317,9 @@ func (c *KitsuClient) fetchAnime(ctx context.Context, idOrSlug string) (*KitsuAn
 
 // AnimeIDByMALCtx returns the Kitsu anime id mapped to a MAL anime id via
 // Kitsu's /mappings endpoint, or nil when Kitsu has no mapping or the call
-// fails. Used to cross-reference mal:N titles to IMDb (through the
-// TheBeastLT Kitsu→IMDb table) purely for rating badges — AniList's
-// externalLinks rarely carry IMDb. Response shape verified 2026-09-24:
+// fails. Stands in for the offline anime list (MAL → Kitsu) while it hasn't
+// loaded, to cross-reference mal:N titles to IMDb purely for rating badges —
+// AniList's externalLinks rarely carry IMDb. Response shape verified 2026-09-24:
 // with include=item, data[0].relationships.item.data = {type:"anime",
 // id:"3936"} for MAL 5114. Without include=item Kitsu returns only
 // relationships.item.links (no data), so the include is required.

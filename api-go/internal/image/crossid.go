@@ -106,7 +106,10 @@ func (p ServeParams) filterAnimeAlternates(resolved *services.ResolvedID, alts [
 // Fire-and-forget: writes run in a goroutine and failures are logged, never
 // returned to the request. Skipped for episodes (stills are per-episode) and
 // EXTERNAL_CACHE_ONLY (no files on disk to populate).
-func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []services.RatingBadge, rendered []byte, imageSize services.ImageSize) {
+//
+// available (the title's rating sources, nil when none were fetched) is
+// stored for each alternate too, so serveColdCache can rebuild its key.
+func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []services.RatingBadge, rendered []byte, available *string) {
 	if p.ExternalCacheOnly || p.Kind == "episode" {
 		return
 	}
@@ -142,6 +145,12 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 			}
 			if err := services.UpsertImageMetaCtx(ctx, p.DB, altKey, releaseDate, imageTypeChar, titleKey, title); err != nil {
 				slog.Warn("cross-id meta write failed", "cache_key", altKey, "error", err)
+			}
+			if available != nil {
+				altID := alt.idType + "/" + alt.idValue
+				if err := services.UpsertAvailableRatingsCtx(ctx, p.DB, altID, *available, releaseDate); err != nil {
+					slog.Warn("cross-id available ratings write failed", "id", altID, "error", err)
+				}
 			}
 		}
 	})

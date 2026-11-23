@@ -492,6 +492,9 @@ func FetchRatingsCtx(ctx context.Context, clients RatingsClients, q RatingsQuery
 			if mdbResp != nil && q.MediaType == "tv" && mdbResp.IDs.TVDB != nil {
 				RememberTVDBID(q.ResolvedTMDbID, *mdbResp.IDs.TVDB)
 			}
+			if mdbResp != nil && !hasIMDb && mdbResp.IDs.IMDB != nil {
+				RememberIMDbID(q.ResolvedTMDbID, q.MediaType, *mdbResp.IDs.IMDB)
+			}
 			return failedKeyHash(err), err
 		})
 	}

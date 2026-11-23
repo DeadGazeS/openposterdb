@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	apperr "openposterdb/internal/errors"
 )
@@ -101,5 +102,43 @@ func TestSeriesTVDBID_LearnedFromOtherProvider(t *testing.T) {
 	RememberTVDBID(987654, 4242)
 	if got := SeriesTVDBID(&ResolvedID{TMDbID: 987654}); got == nil || *got != 4242 {
 		t.Errorf("learned id: %v", got)
+	}
+}
+
+// Ids MDBList knows for a series TMDB has without them (IMDb, TVDB) reach the
+// cached resolution afterwards, without mutating the cached value.
+func TestResolveIDCached_GetsIDsLearnedFromMDBList(t *testing.T) {
+	const tmdbID = 818181
+	item := `{"ids":{"imdb":"tt8888","tmdb":818181,"tvdb":4321},"ratings":[]}`
+	mdb := NewMdblistClient([]string{"k"}, &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodPost {
+			return jsonResponse(200, "["+item+"]"), nil
+		}
+		return jsonResponse(200, item), nil
+	})})
+	FetchRatingsCtx(t.Context(), RatingsClients{MDBList: mdb}, RatingsQuery{ResolvedTMDbID: tmdbID, MediaType: "tv"})
+
+	cache := NewMemCache(0, 10, 0, 0)
+	cached := &ResolvedID{TMDbID: tmdbID, MediaType: MediaTypeTV}
+	now := time.Now()
+	cache.Set("tmdb/series-818181", idEntry{resolved: cached, refreshAfter: now.Add(time.Hour), fetched: now}, 1)
+	r, err := ResolveIDCachedCtx(t.Context(), cache, IDTypeTMDB, "series-818181", IDClients{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.IMDbID == nil || *r.IMDbID != "tt8888" {
+		t.Errorf("IMDb id not backfilled: %v", r.IMDbID)
+	}
+	if r.TVDBID == nil || *r.TVDBID != 4321 {
+		t.Errorf("TVDB id not backfilled: %v", r.TVDBID)
+	}
+	if cached.IMDbID != nil || cached.TVDBID != nil {
+		t.Error("cached resolution mutated")
+	}
+	// A movie with the same TMDB number is another title.
+	movie := &ResolvedID{TMDbID: tmdbID, MediaType: MediaTypeMovie}
+	cache.Set("tmdb/movie-818181", idEntry{resolved: movie, refreshAfter: now.Add(time.Hour), fetched: now}, 1)
+	if r, _ := ResolveIDCachedCtx(t.Context(), cache, IDTypeTMDB, "movie-818181", IDClients{}); r.IMDbID != nil || r.TVDBID != nil {
+		t.Errorf("movie got the series' ids: %v %v", r.IMDbID, r.TVDBID)
 	}
 }

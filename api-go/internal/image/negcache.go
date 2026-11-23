@@ -33,6 +33,20 @@ type renderFailureCache struct {
 
 var renderFailures = &renderFailureCache{entries: map[string]renderFailure{}, now: time.Now}
 
+// resolveFailures remembers ID resolutions that failed upstream (5xx /
+// timeout, e.g. a TMDB /find outage), keyed by the requested id, for
+// renderFailureTTL. 404s are not kept here: the ID cache remembers those.
+var resolveFailures = &renderFailureCache{entries: map[string]renderFailure{}, now: time.Now}
+
+// rememberUpstream is remember without 404s.
+func (c *renderFailureCache) rememberUpstream(key string, err error) {
+	var appErr *apperr.AppError
+	if stderrors.As(err, &appErr) && appErr.Status == http.StatusNotFound {
+		return
+	}
+	c.remember(key, err)
+}
+
 // recent returns the remembered failure of key, if still current.
 func (c *renderFailureCache) recent(key string) error {
 	c.mu.Lock()
@@ -93,9 +107,11 @@ func (c *renderFailureCache) remember(key string, err error) {
 // keys change or the cache is cleared: a "no artwork" caused by a missing or
 // wrong key must not outlive the fix by up to renderNoArtworkTTL.
 func ResetRenderFailures() {
-	renderFailures.mu.Lock()
-	clear(renderFailures.entries)
-	renderFailures.mu.Unlock()
+	for _, c := range []*renderFailureCache{renderFailures, resolveFailures} {
+		c.mu.Lock()
+		clear(c.entries)
+		c.mu.Unlock()
+	}
 }
 
 // forget drops a remembered failure (after a successful render).

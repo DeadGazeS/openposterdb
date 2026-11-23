@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"database/sql"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -211,16 +212,6 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 
 // --- CDN helpers ---
 
-// ImageResponse returns the status, headers and body of an image response;
-// max-age comes from services.ComputeCDNMaxAge (handlers.writeImage adds the
-// ETag / If-None-Match handling).
-func ImageResponse(data []byte, contentType string, maxAge uint64) (int, map[string]string, []byte) {
-	return 200, map[string]string{
-		"Content-Type":  contentType,
-		"Cache-Control": fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", maxAge, maxAge*7),
-	}, data
-}
-
 func TmdbPosterVariant(lang string, textless bool) string {
 	if lang == "en" {
 		if textless {
@@ -329,9 +320,6 @@ type ServeParams struct {
 	// freshRatings bypasses the ratings stale-while-revalidate (background
 	// refreshes must render with current badges).
 	freshRatings bool
-	// skipColdCache disables serveColdCache (the background warm-up after a
-	// cold hit runs the full pipeline).
-	skipColdCache bool
 }
 
 // serveColdCache answers a request whose id is not in the in-memory ID cache
@@ -341,18 +329,20 @@ type ServeParams struct {
 // render). On a hit the full pipeline runs in the background
 // (warmAfterColdHit), so new ratings or settings still reach the image.
 func (p ServeParams) serveColdCache(contentType string) ([]byte, bool) {
-	if p.skipColdCache || p.DB == nil || p.Caches == nil || p.Caches.IDs == nil {
+	if p.DB == nil || p.Caches == nil || p.Caches.IDs == nil {
 		return nil, false
 	}
 	idKey := p.IDType + "/" + p.IDValue
 	if _, warm := p.Caches.IDs.Peek(idKey); warm {
 		return nil, false
 	}
+	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 	sources, _, releaseDate, err := services.ReadAvailableRatingsCtx(p.Context, p.DB, idKey)
-	if err != nil || !services.ValidSourcesString(sources) {
+	// No row: the sources are unknown — unless no ratings are shown at all
+	// (limit 0), when the key doesn't depend on them.
+	if err != nil && !(limit == 0 && stderrors.Is(err, sql.ErrNoRows)) || !services.ValidSourcesString(sources) {
 		return nil, false
 	}
-	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 	ratingsSuffix := services.BadgesSuffixFromAvailable(sources, p.Settings.RatingsOrder, p.Settings.RatingsExclude, limit)
 	cacheKey, cachePath, err := p.cacheKeyFor(p.IDType, p.IDValue, p.renderSuffixFromRatings(ratingsSuffix))
 	if err != nil {
@@ -386,10 +376,12 @@ func (p ServeParams) serveColdCache(contentType string) ([]byte, bool) {
 	return bytes, true
 }
 
-// warmAfterColdHit runs the full pipeline for a request served by
-// serveColdCache: it fills the ID and ratings caches and re-renders when the
-// ratings or the staleness say so. Shares the background refresh slots and
-// back-off with refreshStale.
+// warmAfterColdHit follows up a request served by serveColdCache: it resolves
+// the id and fetches the ratings (filling the ID and ratings caches), then
+// re-renders when the ratings changed the cache key or the rendered file is
+// stale — checked against the file itself, not the in-memory entry the cold
+// hit may just have filled. Shares the background refresh slots and back-off
+// with refreshStale; the back-off is only cleared by a re-render.
 func (p ServeParams) warmAfterColdHit(staleKey string) {
 	if refreshFailures.blocked(staleKey, time.Now()) {
 		return
@@ -404,13 +396,43 @@ func (p ServeParams) warmAfterColdHit(staleKey string) {
 	bg := p
 	bg.Context = ctx
 	bg.Served = nil
-	bg.skipColdCache = true
-	if _, _, err := ServeImage(bg); err != nil {
+	idType, err := services.ParseIDType(bg.IDType)
+	if err != nil {
+		return
+	}
+	resolved, err := bg.resolveTitle(idType)
+	if err == nil {
+		var cacheKey, cachePath string
+		var releaseDate *string
+		_, cacheKey, cachePath, releaseDate, _, _, err = bg.prepareRender(resolved)
+		if err == nil && bg.renderIsCurrent(cacheKey, cachePath, releaseDate) {
+			return
+		}
+		if err == nil {
+			err = bg.rerender(resolved, bg.imageSize())
+		}
+	}
+	if err != nil {
 		slog.Debug("warm-up after cold cache hit failed", "cache_key", staleKey, "error", err)
 		refreshFailures.failed(staleKey, time.Now())
 		return
 	}
 	refreshFailures.succeeded(staleKey)
+}
+
+// renderIsCurrent reports whether cacheKey's render exists and is not stale
+// (with external_cache_only, whether it is in memory).
+func (p ServeParams) renderIsCurrent(cacheKey, cachePath string, releaseDate *string) bool {
+	if p.ExternalCacheOnly {
+		if p.Caches.ImageMem == nil {
+			return false
+		}
+		_, ok := p.Caches.ImageMem.Peek(cacheKey)
+		return ok
+	}
+	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
+	stale, err := services.CacheIsStale(cachePath, staleSecs)
+	return err == nil && !stale
 }
 
 // resolveKitsuMalCtx resolves a kitsu:N or mal:N URL. The UseKitsu and
@@ -589,6 +611,49 @@ func resolveIMDbViaAnimeTable(ctx context.Context, cache *services.MemCache, idV
 // from any single request's cancellation.
 const renderTimeout = 2 * time.Minute
 
+// resolveTitle resolves the requested id as the type its form names (see
+// resolveWithFallback), uplifts an episode to its series for the poster,
+// logo and backdrop kinds, and applies the anime artwork preference and the
+// title identity. The cache key downstream stays the requested
+// (idType, idValue).
+func (p ServeParams) resolveTitle(idType services.IDType) (*services.ResolvedID, error) {
+	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, p.idClients(), p.Settings.UseKitsu, p.Settings.UseMAL)
+	if err != nil {
+		// Logged so a request that "returns nothing" (the media server then
+		// shows its own artwork) is visible and explained.
+		slog.Info("image not resolved", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "error", err)
+		return nil, err
+	}
+
+	if p.Kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
+		if resolved.Episode != nil {
+			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
+			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, p.idClients())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if p.Kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
+		return nil, apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
+	}
+
+	// Anime artwork preference (Prefer Kitsu / Prefer MAL) — swaps the
+	// direct image URLs before rendering; refreshStale reuses this result.
+	resolved = p.applyAnimeArtworkPreference(resolved)
+	// Title identity (grouping key, ratings cross-ref, release date fill) —
+	// after the artwork swap so a Prefer-Kitsu swap's Kitsu id is used.
+	return p.withTitleIdentity(resolved), nil
+}
+
+func (p ServeParams) imageSize() services.ImageSize {
+	if p.ImageSizeStr != nil {
+		return services.ParseImageSize(*p.ImageSizeStr)
+	}
+	return services.ImageSizeMedium
+}
+
 func ServeImage(p ServeParams) ([]byte, string, error) {
 	if p.Context == nil {
 		p.Context = context.Background()
@@ -617,10 +682,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 
 	contentType := ImageContentType(p.Kind)
-	imageSize := services.ImageSizeMedium
-	if p.ImageSizeStr != nil {
-		imageSize = services.ParseImageSize(*p.ImageSizeStr)
-	}
+	imageSize := p.imageSize()
 
 	slog.Debug("image request", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
 
@@ -654,43 +716,18 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		return b, contentType, nil
 	}
 
-	// Resolve the ID, uplifting episodes to their parent series for poster,
-	// logo, and backdrop endpoints. resolveWithFallback retries the same
-	// idValue under the other ID sources (imdb → tmdb → tvdb, skipping the
-	// requested source) so a misrouted URL like
-	// /imdb/poster-default/series-124364.jpg still resolves: the strict
-	// imdb call fails (no tt prefix), the fallback tmdb call recognises the
-	// series- prefix and returns the show. The cache key downstream stays
-	// the originally-requested (idType, idValue) so the next request hits
-	// cache directly with no fallback fired.
-	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, p.idClients(), p.Settings.UseKitsu, p.Settings.UseMAL)
-	if err != nil {
-		// Logged so a request that "returns nothing" (the media server then
-		// shows its own artwork) is visible and explained.
-		slog.Info("image not resolved", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "error", err)
+	// An upstream outage during resolution moments ago isn't retried on
+	// every request for this id (see resolveFailures).
+	resolveKey := p.IDType + "/" + p.IDValue
+	if err := resolveFailures.recent(resolveKey); err != nil {
+		slog.Debug("id resolution failed recently, not retrying yet", "id", resolveKey, "error", err)
 		return nil, "", err
 	}
-
-	if p.Kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
-		if resolved.Episode != nil {
-			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, p.idClients())
-			if err != nil {
-				return nil, "", err
-			}
-		}
+	resolved, err := p.resolveTitle(idType)
+	if err != nil {
+		resolveFailures.rememberUpstream(resolveKey, err)
+		return nil, "", err
 	}
-
-	if p.Kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
-		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
-	}
-
-	// Anime artwork preference (Prefer Kitsu / Prefer MAL) — swaps the
-	// direct image URLs before rendering; refreshStale reuses this result.
-	resolved = p.applyAnimeArtworkPreference(resolved)
-	// Title identity (grouping key, ratings cross-ref, release date fill) —
-	// after the artwork swap so a Prefer-Kitsu swap's Kitsu id is used.
-	resolved = p.withTitleIdentity(resolved)
 
 	// Fetch ratings, apply preferences, and build the cache key.
 	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := p.prepareRender(resolved)
@@ -1057,6 +1094,9 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 		available = &s
 	} else if limit > 0 {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "no imdb/tmdb match for kitsu/mal title")
+		// Nothing to fetch ratings by: known to have none (for serveColdCache).
+		none := ""
+		available = &none
 	} else {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "ratings_limit=0")
 	}
@@ -1140,7 +1180,7 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 	}
 
 	// Cross-ID cache writes (fire-and-forget, logged on failure).
-	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
+	p.writeCrossIDCache(resolved, badges, rendered, available)
 
 	return rendered, nil
 }
@@ -1324,28 +1364,34 @@ func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize servi
 	defer cancel()
 	bgParams := p
 	bgParams.Context = ctx
-	bgParams.freshRatings = true
-	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := bgParams.prepareRender(resolved)
-	if err != nil {
-		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
-		refreshFailures.failed(staleKey, time.Now())
-		return
-	}
-	render := func() ([]byte, error) {
-		return bgParams.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, imageSize)
-	}
-	var renderErr error
-	if p.Inflight != nil {
-		_, renderErr = p.Inflight.RunCoalesced(cacheKey, render)
-	} else {
-		_, renderErr = render()
-	}
-	if renderErr != nil {
-		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", renderErr)
+	if err := bgParams.rerender(resolved, imageSize); err != nil {
 		refreshFailures.failed(staleKey, time.Now())
 		return
 	}
 	refreshFailures.succeeded(staleKey)
+}
+
+// rerender renders resolved again with fresh ratings (the body of a
+// background refresh; the caller holds a refresh slot).
+func (p ServeParams) rerender(resolved *services.ResolvedID, imageSize services.ImageSize) error {
+	p.freshRatings = true
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := p.prepareRender(resolved)
+	if err != nil {
+		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
+		return err
+	}
+	render := func() ([]byte, error) {
+		return p.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, imageSize)
+	}
+	if p.Inflight != nil {
+		_, err = p.Inflight.RunCoalesced(cacheKey, render)
+	} else {
+		_, err = render()
+	}
+	if err != nil {
+		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", err)
+	}
+	return err
 }
 
 func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary bool) string {

@@ -5,6 +5,7 @@ import (
 	"context"
 	stderrors "errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -254,4 +255,186 @@ func TestServeImage_ColdCacheServesWithoutUpstream(t *testing.T) {
 	}
 	// Let the background warm-up finish before the TempDir goes away.
 	time.Sleep(200 * time.Millisecond)
+}
+
+// A title without an available_ratings row has no known rating sources: the
+// cold path must not guess "no ratings" and serve that key's file.
+func TestServeImage_ColdCacheSkippedWithoutAvailableRatingsRow(t *testing.T) {
+	loadTestFont(t)
+	db := newServeTestDB(t)
+	cacheDir := t.TempDir()
+	settings := func() *services.RenderSettings {
+		return &services.RenderSettings{ImageSource: "t", Lang: "en", PosterLayout: services.DefaultLayout("poster")}
+	}
+	p := serveParams(t, db, cacheDir)
+	p.Settings = settings()
+	if _, _, err := ServeImage(p); err != nil {
+		t.Fatal(err)
+	}
+	var sources string
+	if err := db.QueryRow(`SELECT sources FROM available_ratings WHERE id_key = 'imdb/tt0111161'`).Scan(&sources); err != nil || sources != "" {
+		t.Fatalf("want a no-ratings render, got sources %q (%v)", sources, err)
+	}
+	if _, err := db.Exec(`DELETE FROM available_ratings`); err != nil {
+		t.Fatal(err)
+	}
+
+	ft := &failingTransport{}
+	cold := serveParams(t, db, cacheDir)
+	cold.Settings = settings()
+	cold.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: ft})
+	cold.Caches = &services.MemCacheSet{ImageMem: services.NewMemCache(10<<20, 100, 0, 0), IDs: services.NewMemCache(0, 100, 0, 0)}
+	if _, _, err := ServeImage(cold); err == nil {
+		t.Fatal("served a cached file without knowing the title's rating sources")
+	}
+}
+
+// Cross-ID copies get their own available_ratings row, so a later cold
+// request via the alternate id takes the fast path too.
+func TestServeImage_CrossIDWritesAvailableRatingsRow(t *testing.T) {
+	loadTestFont(t)
+	db := newServeTestDB(t)
+	cacheDir := t.TempDir()
+	p := serveParams(t, db, cacheDir)
+	p.IDValue = "tt0071562"
+	p.Settings = &services.RenderSettings{ImageSource: "t", Lang: "en", PosterLayout: services.DefaultLayout("poster")}
+	if _, _, err := ServeImage(p); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM available_ratings WHERE id_key = 'tmdb/movie-278'`).Scan(&n); err == nil && n == 1 {
+			// Let the cross-ID goroutine finish before the TempDir goes away.
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+	}
+	t.Fatal("no available_ratings row for the tmdb alternate")
+}
+
+// With ratings_limit=0 the cache key doesn't depend on the rating sources:
+// the cold path serves it without an available_ratings row.
+func TestServeImage_ColdCacheLimitZeroWithoutRow(t *testing.T) {
+	loadTestFont(t)
+	db := newServeTestDB(t)
+	cacheDir := t.TempDir()
+	zero := int32(0)
+	settings := func() *services.RenderSettings {
+		return &services.RenderSettings{ImageSource: "t", Lang: "en", PosterLayout: services.DefaultLayout("poster")}
+	}
+	p := serveParams(t, db, cacheDir)
+	p.IDValue = "tt0050083"
+	p.RatingsLimit = &zero
+	p.Settings = settings()
+	first, _, err := ServeImage(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM available_ratings`); err != nil {
+		t.Fatal(err)
+	}
+	ft := &failingTransport{}
+	cold := serveParams(t, db, cacheDir)
+	cold.IDValue = "tt0050083"
+	cold.RatingsLimit = &zero
+	cold.Settings = settings()
+	cold.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: ft})
+	cold.Caches = &services.MemCacheSet{ImageMem: services.NewMemCache(10<<20, 100, 0, 0), IDs: services.NewMemCache(0, 100, 0, 0)}
+	got, _, err := ServeImage(cold)
+	if err != nil || !bytes.Equal(got, first) {
+		t.Fatalf("limit-0 cold request not served from cache: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+}
+
+// status500Transport answers every call with a 500.
+type status500Transport struct{ calls atomic.Int32 }
+
+func (s *status500Transport) RoundTrip(*http.Request) (*http.Response, error) {
+	s.calls.Add(1)
+	return &http.Response{StatusCode: 500, Header: http.Header{}, Body: nopCloser{bytes.NewReader([]byte(`{}`))}}, nil
+}
+
+// An upstream outage during ID resolution is remembered briefly per id: the
+// next request for the same id doesn't call upstream again, another id does,
+// and ResetRenderFailures forgets it.
+func TestServeImage_ResolveFailureNegativeCache(t *testing.T) {
+	saved := services.TMDBAPIRetry
+	services.TMDBAPIRetry.MaxRetries = 0
+	t.Cleanup(func() { services.TMDBAPIRetry = saved })
+	t.Cleanup(ResetRenderFailures)
+	st := &status500Transport{}
+	params := func(id string) ServeParams {
+		p := serveParams(t, nil, t.TempDir())
+		p.IDValue = id
+		p.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: st})
+		p.Caches.IDs = services.NewMemCache(0, 100, 0, 0)
+		return p
+	}
+	if _, _, err := ServeImage(params("tt7000001")); err == nil {
+		t.Fatal("want an error from the failing upstream")
+	}
+	calls := st.calls.Load()
+	if calls == 0 {
+		t.Fatal("upstream never called")
+	}
+	if _, _, err := ServeImage(params("tt7000001")); err == nil {
+		t.Fatal("want the remembered error")
+	}
+	if got := st.calls.Load(); got != calls {
+		t.Fatalf("upstream called again within the window (%d → %d)", calls, got)
+	}
+	if _, _, err := ServeImage(params("tt7000002")); err == nil || st.calls.Load() == calls {
+		t.Fatal("another id must still reach upstream")
+	}
+	ResetRenderFailures()
+	calls = st.calls.Load()
+	ServeImage(params("tt7000001"))
+	if st.calls.Load() == calls {
+		t.Fatal("reset did not clear the resolution failure")
+	}
+}
+
+// A stale render served on a cold hit is re-rendered by the warm-up: the cold
+// hit must not leave a "fresh" in-memory entry that the warm-up then mistakes
+// for an up-to-date render.
+func TestServeImage_ColdCacheStaleFileIsReRendered(t *testing.T) {
+	loadTestFont(t)
+	db := newServeTestDB(t)
+	cacheDir := t.TempDir()
+	settings := func() *services.RenderSettings {
+		return &services.RenderSettings{ImageSource: "t", Lang: "en", PosterLayout: services.DefaultLayout("poster")}
+	}
+	// Own id: other cold-cache tests leave a refresh back-off on theirs.
+	const id = "tt0068646"
+	p := serveParams(t, db, cacheDir)
+	p.IDValue = id
+	p.Settings = settings()
+	p.Caches.IDs = services.NewMemCache(0, 100, 0, 0)
+	var served services.CDNServed
+	p.Served = &served
+	if _, _, err := ServeImage(p); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(served.CachePath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	cold := serveParams(t, db, cacheDir)
+	cold.IDValue = id
+	cold.Settings = settings()
+	cold.RatingsMinStaleSecs = 60
+	cold.Caches = &services.MemCacheSet{ImageMem: services.NewMemCache(10<<20, 100, 0, 0), IDs: services.NewMemCache(0, 100, 0, 0)}
+	if _, _, err := ServeImage(cold); err != nil {
+		t.Fatalf("cold request: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if info, err := os.Stat(served.CachePath); err == nil && info.ModTime().After(old.Add(time.Hour)) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("stale render served on a cold hit was never re-rendered")
 }

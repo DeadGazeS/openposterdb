@@ -291,7 +291,7 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 				if time.Now().After(e.refreshAfter) {
 					refreshIDInBackground(cache, key, flightKey, idType, idValue, clients)
 				}
-				return e.resolved, nil
+				return withLearnedIDs(e.resolved), nil
 			}
 			cache.Delete(key) // past the hard cap: resolve synchronously
 		case idMiss:
@@ -302,7 +302,7 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 		}
 	}
 	// Concurrent misses for the same id share one upstream lookup.
-	return idFlight.do(ctx, flightKey, func(fctx context.Context) (*ResolvedID, error) {
+	resolved, err := idFlight.do(ctx, flightKey, func(fctx context.Context) (*ResolvedID, error) {
 		resolved, err := ResolveIDCtx(fctx, idType, idValue, clients)
 		if err == nil {
 			now := time.Now()
@@ -312,6 +312,10 @@ func ResolveIDCachedCtx(ctx context.Context, cache *MemCache, idType IDType, idV
 		}
 		return resolved, err
 	})
+	if err != nil {
+		return nil, err
+	}
+	return withLearnedIDs(resolved), nil
 }
 
 // idRefreshAfter is the age after which a cached resolution is refreshed in
@@ -883,6 +887,55 @@ func RememberTVDBID(tmdbID, tvdbID uint64) {
 	if tmdbID != 0 && tvdbID != 0 {
 		knownTVDBIDs.Set(strconv.FormatUint(tmdbID, 10), tvdbID, 1)
 	}
+}
+
+// knownIMDbIDs remembers IMDb ids learned outside the ID resolver (the
+// MDBList "ids" block) for titles whose TMDB entry has none, keyed by
+// "movie/N" or "tv/N" (TMDB numbers are per kind).
+var knownIMDbIDs = NewMemCache(0, 50000, 7*24*time.Hour, 0)
+
+// RememberIMDbID records a title's IMDb id learned from another provider;
+// mediaType is "movie" or "tv".
+func RememberIMDbID(tmdbID uint64, mediaType, imdbID string) {
+	if tmdbID != 0 && strings.HasPrefix(imdbID, "tt") && (mediaType == "movie" || mediaType == "tv") {
+		knownIMDbIDs.Set(mediaType+"/"+strconv.FormatUint(tmdbID, 10), imdbID, 1)
+	}
+}
+
+// withLearnedIDs returns r with the IMDb / TVDB ids it lacks filled from the
+// ids learned from other providers (RememberIMDbID, RememberTVDBID), so ids
+// learned after r was cached still reach its users (ratings, alternate cache
+// keys). r itself, possibly a cached value, is never mutated.
+func withLearnedIDs(r *ResolvedID) *ResolvedID {
+	if r == nil || r.TMDbID == 0 || (r.MediaType != MediaTypeMovie && r.MediaType != MediaTypeTV) {
+		return r
+	}
+	kind := "movie"
+	if r.MediaType == MediaTypeTV {
+		kind = "tv"
+	}
+	var imdb *string
+	if r.IMDbID == nil || *r.IMDbID == "" {
+		if v, ok := knownIMDbIDs.Get(kind + "/" + strconv.FormatUint(r.TMDbID, 10)); ok {
+			s := v.(string)
+			imdb = &s
+		}
+	}
+	var tvdb *uint64
+	if r.MediaType == MediaTypeTV && (r.TVDBID == nil || *r.TVDBID == 0) {
+		tvdb = SeriesTVDBID(r)
+	}
+	if imdb == nil && tvdb == nil {
+		return r
+	}
+	out := *r
+	if imdb != nil {
+		out.IMDbID = imdb
+	}
+	if tvdb != nil {
+		out.TVDBID = tvdb
+	}
+	return &out
 }
 
 // SeriesTVDBID returns the TVDB id of a resolved series: its own, else one
