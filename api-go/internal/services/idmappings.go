@@ -801,8 +801,9 @@ func (m *IDMappings) animeIdx() *animeIndex {
 // known or follows from the entry's type.
 //
 // A film entry often carries its franchise show's ids, so for a film the
-// entry's own type decides: a TMDB id from the tv space and an IMDb id other
-// entries share are refused (as aiometadata's filmIdsFor does).
+// entry's own type decides: a TMDB id not stated to be in the movie space and
+// an IMDb id other entries share are refused (as aiometadata's filmIdsFor
+// does).
 func (a AnimeIDs) RatingsIDs() (imdbID *string, tmdbID uint64, mediaType MediaType) {
 	if a.MultiPart {
 		return nil, 0, MediaTypeTV
@@ -812,7 +813,7 @@ func (a AnimeIDs) RatingsIDs() (imdbID *string, tmdbID uint64, mediaType MediaTy
 			v := a.IMDb
 			imdbID = &v
 		}
-		if a.TMDB != 0 && a.TMDBType != "tv" {
+		if a.TMDB != 0 && a.TMDBType == "movie" {
 			tmdbID = a.TMDB
 		}
 		return imdbID, tmdbID, MediaTypeMovie

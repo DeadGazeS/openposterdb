@@ -237,11 +237,14 @@ type findResult struct {
 func ResolveIDCtx(ctx context.Context, idType IDType, idValue string, clients IDClients) (*ResolvedID, error) {
 	switch idType {
 	case IDTypeIMDB:
+		if r := resolveIMDBViaListsCtx(ctx, idValue, clients); r != nil {
+			return backfillSeriesTVDB(r, clients.Mappings), nil
+		}
 		r, err := resolveIMDBCtx(ctx, idValue, clients.TMDB)
 		return backfillSeriesTVDB(r, clients.Mappings), err
 	case IDTypeTMDB:
 		r, err := resolveTMDBCtx(ctx, idValue, clients.TMDB)
-		return backfillSeriesTVDB(r, clients.Mappings), err
+		return backfillSeriesTVDB(fillIDsFromLists(r, clients.Mappings), clients.Mappings), err
 	case IDTypeTVDB:
 		return resolveTVDBWithFallbacksCtx(ctx, idValue, clients)
 	case IDTypeKitsu:
@@ -696,6 +699,61 @@ func resolveViaTVDBRecordCtx(ctx context.Context, tvdbNum uint64, clients IDClie
 	}
 	slog.Info("tvdb id not on TMDB; serving it from TVDB", "tvdb_id", tvdbNum, "kind", kind.String())
 	return out, nil
+}
+
+// resolveIMDBViaListsCtx resolves an IMDb title id through the offline lists:
+// when exactly one list (movie or series) maps it to a TMDB id, the TMDB
+// details are fetched directly (no /find). nil sends the caller to /find: no
+// lists, an episode id, a miss, an id both lists claim, a failed details
+// call, or details naming another IMDb id (a stale list row).
+func resolveIMDBViaListsCtx(ctx context.Context, imdbID string, clients IDClients) *ResolvedID {
+	if clients.Mappings == nil || clients.TMDB == nil || strings.HasPrefix(imdbID, "episode-") {
+		return nil
+	}
+	var hit IDMap
+	var kind MediaType
+	hits := 0
+	for _, k := range []MediaType{MediaTypeMovie, MediaTypeTV} {
+		if e, ok := clients.Mappings.Lookup(k, IDTypeIMDB, imdbID); ok && e.TMDB != 0 {
+			hit, kind = e, k
+			hits++
+		}
+	}
+	if hits != 1 {
+		return nil
+	}
+	r, err := resolveTMDBCtx(ctx, FormatTMDbIDValue(hit.TMDB, kind, nil), clients.TMDB)
+	if err != nil || (r.IMDbID != nil && *r.IMDbID != hit.IMDb) {
+		return nil
+	}
+	id := imdbID
+	r.IMDbID = &id
+	if r.TVDBID == nil && hit.TVDB != 0 && kind == MediaTypeTV {
+		tvdb := hit.TVDB
+		r.TVDBID = &tvdb
+	}
+	return r
+}
+
+// fillIDsFromLists fills a resolved tmdb: title's missing IMDb / TVDB ids
+// from the list of its own kind (the id form decided it; never the other).
+func fillIDsFromLists(r *ResolvedID, m *IDMappings) *ResolvedID {
+	if r == nil || m == nil || r.TMDbID == 0 {
+		return r
+	}
+	e, ok := m.Lookup(r.MediaType, IDTypeTMDB, strconv.FormatUint(r.TMDbID, 10))
+	if !ok {
+		return r
+	}
+	if r.IMDbID == nil && e.IMDb != "" {
+		imdb := e.IMDb
+		r.IMDbID = &imdb
+	}
+	if (r.TVDBID == nil || *r.TVDBID == 0) && e.TVDB != 0 {
+		tvdb := e.TVDB
+		r.TVDBID = &tvdb
+	}
+	return r
 }
 
 // backfillSeriesTVDB fills a freshly resolved series' missing TVDB id from

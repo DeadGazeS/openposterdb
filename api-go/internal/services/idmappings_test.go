@@ -89,10 +89,11 @@ func TestIDMappings_AnimeList(t *testing.T) {
 	if imdb := m.IMDbForKitsu(21); imdb != nil {
 		t.Errorf("multi-part entry gave %v", *imdb)
 	}
-	// TMDB id with the namespace inferred from the type.
+	// A film's TMDB id needs the movie namespace stated (aiometadata's
+	// filmIdsFor): without themoviedb_type it is not used.
 	a, _ := m.AnimeByMAL(431)
-	if imdb, tmdb, kind := a.RatingsIDs(); imdb != nil || tmdb != 10494 || kind != MediaTypeMovie {
-		t.Errorf("mal 431: %v %d %v", imdb, tmdb, kind)
+	if imdb, tmdb, kind := a.RatingsIDs(); imdb != nil || tmdb != 0 || kind != MediaTypeMovie {
+		t.Errorf("mal 431: %v %d %v, want no TMDB id (namespace unknown)", imdb, tmdb, kind)
 	}
 	a, _ = m.AnimeByMAL(5114)
 	if _, tmdb, kind := a.RatingsIDs(); tmdb != 31911 || kind != MediaTypeTV {
@@ -112,7 +113,8 @@ func TestIDMappings_AnimeFilmRefusesFranchiseIDs(t *testing.T) {
  {"mal_id":1,"kitsu_id":11,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"TV"},
  {"mal_id":2,"kitsu_id":12,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"MOVIE"},
  {"mal_id":3,"kitsu_id":13,"imdb_id":"tt0100003","themoviedb_id":700,"themoviedb_type":"movie","type":"MOVIE"},
- {"mal_id":4,"kitsu_id":14,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"OVA"}
+ {"mal_id":4,"kitsu_id":14,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"OVA"},
+ {"mal_id":5,"kitsu_id":15,"imdb_id":"tt0100005","themoviedb_id":800,"type":"MOVIE"}
 ]`
 	m := NewIDMappings(nil, "")
 	if err := m.LoadAnimeList([]byte(list)); err != nil {
@@ -124,6 +126,10 @@ func TestIDMappings_AnimeFilmRefusesFranchiseIDs(t *testing.T) {
 	}
 	if imdb := m.IMDbForKitsu(12); imdb != nil {
 		t.Errorf("film kitsu 12 → %v, want nil (IMDb id shared with the show)", *imdb)
+	}
+	untyped, _ := m.AnimeByMAL(5)
+	if imdb, tmdb, kind := untyped.RatingsIDs(); imdb == nil || *imdb != "tt0100005" || tmdb != 0 || kind != MediaTypeMovie {
+		t.Errorf("film without themoviedb_type: %v %d %v, want its IMDb id only", imdb, tmdb, kind)
 	}
 	own, _ := m.AnimeByMAL(3)
 	if imdb, tmdb, kind := own.RatingsIDs(); imdb == nil || *imdb != "tt0100003" || tmdb != 700 || kind != MediaTypeMovie {
@@ -239,5 +245,124 @@ func TestResolveTVDB_UsesMappingFirst(t *testing.T) {
 	}
 	if finds.Load() != 0 {
 		t.Errorf("/find called %d times, want 0", finds.Load())
+	}
+}
+
+// listTMDB is a TMDB stub for the list-first resolve tests: it counts /find
+// calls and answers the given paths (anything else is a 404).
+func listTMDB(finds *atomic.Int32, routes map[string]string) *TmdbClient {
+	return NewTmdbClient("k", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Path, "/find/") {
+			finds.Add(1)
+		}
+		for suffix, body := range routes {
+			if strings.HasSuffix(req.URL.Path, suffix) {
+				return jsonResponse(200, body), nil
+			}
+		}
+		return jsonResponse(404, `{}`), nil
+	})})
+}
+
+func loadListFixture(t *testing.T) *IDMappings {
+	t.Helper()
+	m := NewIDMappings(nil, "")
+	movies := "imdb_id,tmdb_id,tvdb_id\ntt0111161,278,\ntt0000077,77,\ntt0000088,88,\n"
+	series := dinsSeriesCSV + "tt0000077,770,\n" // tt0000077 is in both lists: ambiguous
+	if err := m.LoadTables([]byte(series), []byte(wikiSeriesCSV), []byte(movies), nil); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// An IMDb id the offline lists map to a TMDB title skips /find and goes
+// straight to the TMDB details (which carry the poster path).
+func TestResolveIMDB_UsesMappingFirst(t *testing.T) {
+	m := loadListFixture(t)
+	var finds atomic.Int32
+	tmdb := listTMDB(&finds, map[string]string{
+		"/movie/278": `{"imdb_id":"tt0111161","title":"The Shawshank Redemption","poster_path":"/shaw.jpg"}`,
+		"/tv/1396":   `{"name":"Breaking Bad","poster_path":"/bb.jpg","external_ids":{"imdb_id":"tt0903747"}}`,
+	})
+	clients := IDClients{TMDB: tmdb, Mappings: m}
+
+	r, err := ResolveIDCtx(t.Context(), IDTypeIMDB, "tt0111161", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.TMDbID != 278 || r.MediaType != MediaTypeMovie || r.PosterPath == nil || *r.PosterPath != "/shaw.jpg" ||
+		r.IMDbID == nil || *r.IMDbID != "tt0111161" {
+		t.Errorf("movie: %+v", r)
+	}
+	r, err = ResolveIDCtx(t.Context(), IDTypeIMDB, "tt0903747", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.TMDbID != 1396 || r.MediaType != MediaTypeTV || r.TVDBID == nil || *r.TVDBID != 81189 {
+		t.Errorf("series: %+v", r)
+	}
+	if finds.Load() != 0 {
+		t.Errorf("/find called %d times, want 0", finds.Load())
+	}
+}
+
+// A list miss, an id both lists claim (the lists can't pick the kind) and a
+// list entry TMDB contradicts all fall back to /find as before.
+func TestResolveIMDB_ListMissFallsBackToFind(t *testing.T) {
+	m := loadListFixture(t)
+	var finds atomic.Int32
+	tmdb := listTMDB(&finds, map[string]string{
+		"/find/tt9999999": `{"movie_results":[{"id":42,"title":"Unlisted","poster_path":"/u.jpg"}]}`,
+		"/find/tt0000077": `{"movie_results":[{"id":77,"title":"Film","poster_path":"/f.jpg"}]}`,
+		"/find/tt0000088": `{"movie_results":[{"id":89,"title":"Moved","poster_path":"/m.jpg"}]}`,
+		"/movie/88":       `{"imdb_id":"tt0000123","title":"Someone else"}`,
+	})
+	clients := IDClients{TMDB: tmdb, Mappings: m}
+	for id, want := range map[string]uint64{"tt9999999": 42, "tt0000077": 77, "tt0000088": 89} {
+		r, err := ResolveIDCtx(t.Context(), IDTypeIMDB, id, clients)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if r.TMDbID != want || r.MediaType != MediaTypeMovie {
+			t.Errorf("%s: %+v, want tmdb %d", id, r, want)
+		}
+	}
+	if finds.Load() != 3 {
+		t.Errorf("/find called %d times, want 3", finds.Load())
+	}
+}
+
+// A tmdb: id's missing IMDb / TVDB ids come from the list of the kind its
+// form names (movie- / series-), never from the other list.
+func TestResolveTMDB_FillsIDsFromList(t *testing.T) {
+	m := loadListFixture(t)
+	var finds atomic.Int32
+	tmdb := listTMDB(&finds, map[string]string{
+		"/movie/278":  `{"title":"The Shawshank Redemption"}`,
+		"/tv/1399":    `{"name":"Game of Thrones","external_ids":{}}`,
+		"/movie/1396": `{"title":"Not Breaking Bad"}`,
+	})
+	clients := IDClients{TMDB: tmdb, Mappings: m}
+
+	r, err := ResolveIDCtx(t.Context(), IDTypeTMDB, "movie-278", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.IMDbID == nil || *r.IMDbID != "tt0111161" || r.MediaType != MediaTypeMovie {
+		t.Errorf("movie-278: %+v", r)
+	}
+	r, err = ResolveIDCtx(t.Context(), IDTypeTMDB, "series-1399", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.IMDbID == nil || *r.IMDbID != "tt0944947" || r.TVDBID == nil || *r.TVDBID != 121361 {
+		t.Errorf("series-1399: %+v", r)
+	}
+	r, err = ResolveIDCtx(t.Context(), IDTypeTMDB, "movie-1396", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.IMDbID != nil || r.TVDBID != nil || r.MediaType != MediaTypeMovie {
+		t.Errorf("movie-1396 took the series list's ids: %+v", r)
 	}
 }
