@@ -35,6 +35,7 @@ ID cross-references (IMDb ↔ TMDB ↔ TVDB, and MAL / Kitsu / AniList ↔ IMDb 
 | `RENDER_CONCURRENCY` | CPUs × 2 | Images rendered at the same time. A request that can't get a slot within ~3 s (or finds the wait queue full) gets `503` with `Retry-After`. `0` is rejected |
 | `CROSS_ID_CONCURRENCY` | CPUs | Background writers copying a render under the title's other ids (imdb/tmdb/tvdb); copies are skipped while all are busy. `0` is rejected |
 | `STATIC_DIR` | — | Directory of the built web UI (SPA) to serve; empty disables static serving |
+| `SHUTDOWN_DRAIN_DELAY_SECS` | `0` | On a stop signal, keep serving this many seconds with `/api/ready` answering `503` before closing the listener, so a load balancer or orchestrator polling readiness stops routing here first (a second stop signal ends the wait). The shutdown then drains requests (up to 10 s) and background renders (up to 20 s), so the container's stop grace period must cover the delay plus that. `0` shuts down at once; invalid values fall back to `0` with a warning |
 
 ## Auth & access
 

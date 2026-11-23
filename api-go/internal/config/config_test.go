@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestParseByteSize(t *testing.T) {
@@ -84,6 +85,24 @@ func TestFromEnvCustomValues(t *testing.T) {
 	}
 	if !cfg.ExternalCacheOnly {
 		t.Error("expected ExternalCacheOnly to be true")
+	}
+}
+
+// SHUTDOWN_DRAIN_DELAY_SECS: unset is 0 (shut down at once); an invalid
+// value falls back to 0.
+func TestFromEnv_ShutdownDrainDelay(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want time.Duration
+	}{{"", 0}, {"15", 15 * time.Second}, {"-3", 0}, {"abc", 0}} {
+		setEnv(t, "SHUTDOWN_DRAIN_DELAY_SECS", tc.val)
+		cfg, err := FromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ShutdownDrainDelay != tc.want {
+			t.Errorf("SHUTDOWN_DRAIN_DELAY_SECS=%q: %v, want %v", tc.val, cfg.ShutdownDrainDelay, tc.want)
+		}
 	}
 }
 

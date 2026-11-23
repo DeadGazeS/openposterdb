@@ -248,6 +248,7 @@ func main() {
 
 	slog.Info("shutdown signal received, draining requests")
 	state.Draining.Store(true) // /api/ready → 503
+	waitDrainDelay(cfg.ShutdownDrainDelay, quit)
 
 	close(cdnSweeperDone)
 
@@ -272,6 +273,23 @@ func main() {
 	services.FlushImageAccess(db)
 
 	slog.Info("server stopped")
+}
+
+// waitDrainDelay keeps serving for d after a stop signal (Draining is set,
+// so /api/ready answers 503) so a load balancer stops routing here before
+// the listener closes. A second stop signal ends the wait early.
+func waitDrainDelay(d time.Duration, quit <-chan os.Signal) {
+	if d <= 0 {
+		return
+	}
+	slog.Info("readiness off, waiting before shutdown", "delay_secs", d.Seconds())
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-quit:
+		slog.Info("second stop signal, shutting down now")
+	}
 }
 
 func logConfig(cfg *config.Config) {

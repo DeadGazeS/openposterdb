@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -65,6 +66,10 @@ type Config struct {
 	// CrossIDConcurrency caps alternate-id cache writers (default CPUs).
 	RenderConcurrency  int
 	CrossIDConcurrency int
+	// ShutdownDrainDelay (SHUTDOWN_DRAIN_DELAY_SECS): after a stop signal,
+	// keep serving with /api/ready answering 503 this long before shutting
+	// down, so a load balancer stops routing here first. 0 = at once.
+	ShutdownDrainDelay time.Duration
 }
 
 func FromEnv() (*Config, error) {
@@ -107,6 +112,7 @@ func FromEnv() (*Config, error) {
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
 		LogLevel:            envOrDefault("LOG_LEVEL", "info"),
+		ShutdownDrainDelay:  time.Duration(envUint64OrDefault("SHUTDOWN_DRAIN_DELAY_SECS", 0)) * time.Second,
 	}
 
 	if c.CacheMaxBytes, err = ParseByteSize(os.Getenv("CACHE_MAX_SIZE")); err != nil {
