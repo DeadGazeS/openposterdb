@@ -104,9 +104,9 @@ URLs written for the earlier (v1.3) version keep working. These parameters are m
 
 | Legacy parameter | Maps to |
 |---|---|
-| `?position={bc\|tc\|l\|r\|tl\|tr\|bl\|br}` | a `layout`: the badges sit at that anchor. `bc`/`tc` give a row at the bottom/top centre; corners and `l`/`r` give a column on that side (or a row with `badge_direction=h`). Ignored when `layout` is given |
-| `?badge_direction={d\|h\|v}` | the same `layout` conversion: `h` = a row, `v` = a column, `d` = a row for `bc`/`tc` and a column elsewhere. Also sets which way the `d` badge style faces |
-| `?split={true\|false}` | the same `layout` conversion, with the badges split over two opposite sides (the first half at `position`, the rest mirrored: top/bottom for rows, left/right for a column). Poster and logo |
+| `?position={bc\|tc\|l\|r\|tl\|tr\|bl\|br}` | a `layout`: the badges sit at that anchor. `bc`/`tc` give a row at the bottom/top centre; corners and `l`/`r` give a column on that side (or a row with `badge_direction=h`). Ignored when `layout` is given. Poster, backdrop and episode (logos ignore it) |
+| `?badge_direction={d\|h\|v}` | with `position` or `split`, part of the same `layout` conversion: `h` = a row, `v` = a column, `d` = a row for `bc`/`tc` and a column elsewhere. On its own it keeps the stored layout. Always sets which way the `d` badge style faces. Not for logos |
+| `?split={true\|false}` | the same `layout` conversion, with the badges split over two opposite sides (the first half at `position`, the rest mirrored: top/bottom for rows, left/right for a column). Poster only |
 | `?badge_background={d\|k\|t\|n}` | `badge_alpha`: `d` → 80, `k` (dark) → 78, `t` (transparent) → 47, `n` (none) → 0. Ignored when `badge_alpha` is given |
 | `?badge_size={xs\|s\|m\|l\|xl}` | `badge_size` in percent: 58 / 79 / 100 / 121 / 142 (episodes: 50 / 66 / 83 / 100 / 117, as their default was `l`). Numbers keep working as before |
 

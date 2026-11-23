@@ -77,3 +77,40 @@ func TestQuery_EmptyRatingsOrderAndExcludeClear(t *testing.T) {
 		t.Errorf("absent params changed order %q exclude %q", s.RatingsOrder, s.RatingsExclude)
 	}
 }
+
+// ?badge_direction alone (the web UI sends it without a layout whenever the
+// direction is non-default) sets the direction and keeps the stored layout.
+func TestLegacyQuery_DirectionAloneKeepsLayout(t *testing.T) {
+	base := services.DefaultRenderSettings()
+	base.PosterLayout = services.ImageLayout{Top: services.SideSlot{PerRow: 2, Rows: 1, Start: "l"}, Order: []string{"top"}}
+	s := overridesFor(t, "badge_direction=v", "poster", base)
+	if !reflect.DeepEqual(s.PosterLayout, base.PosterLayout) {
+		t.Errorf("badge_direction alone replaced the layout: %+v", s.PosterLayout)
+	}
+	if s.PosterBadgeDirection != services.ParseBadgeDirection("v") {
+		t.Errorf("direction %v, want v", s.PosterBadgeDirection)
+	}
+	// With position it still feeds the conversion.
+	s = overridesFor(t, "position=tl&badge_direction=h", "poster", base)
+	if want := services.LayoutFromLegacy("poster", "tl", "h", false, 2); !reflect.DeepEqual(s.PosterLayout, want) {
+		t.Errorf("layout %+v, want %+v", s.PosterLayout, want)
+	}
+}
+
+// As in the Rust version: logos ignore position / split / direction, and split
+// is poster-only.
+func TestLegacyQuery_LogoIgnoresPlacementSplitPosterOnly(t *testing.T) {
+	base := services.DefaultRenderSettings()
+	s := overridesFor(t, "position=tl&split=true&badge_direction=v", "logo", base)
+	if !reflect.DeepEqual(s.LogoLayout, base.LogoLayout) {
+		t.Errorf("logo layout changed by legacy placement: %+v", s.LogoLayout)
+	}
+	b := overridesFor(t, "split=true", "backdrop", base)
+	if !reflect.DeepEqual(b.BackdropLayout, base.BackdropLayout) {
+		t.Errorf("split alone changed the backdrop layout: %+v", b.BackdropLayout)
+	}
+	b = overridesFor(t, "position=bl&split=true&ratings_limit=4", "backdrop", base)
+	if want := services.LayoutFromLegacy("backdrop", "bl", "", false, 4); !reflect.DeepEqual(b.BackdropLayout, want) {
+		t.Errorf("backdrop layout %+v, want unsplit %+v", b.BackdropLayout, want)
+	}
+}

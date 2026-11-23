@@ -196,15 +196,19 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 			if l := services.UnmarshalLayout(*query.Layout, k.layout); services.ValidateLayout(&l) == nil {
 				*k.layout = l
 			}
-		} else if query.Position != nil || query.Split != nil || query.BadgeDirection != nil {
-			// Legacy placement: rebuilt from position / split / direction with
-			// the badge count of the layout it replaces (or ?ratings_limit).
-			// Unknown values fall back to the kind's old defaults.
+		} else if kind != "logo" && (query.Position != nil || (kind == "poster" && query.Split != nil)) {
+			// Legacy placement: rebuilt from position / split (plus direction)
+			// with the badge count of the layout it replaces (or
+			// ?ratings_limit). Unknown values fall back to the kind's old
+			// defaults. As in the Rust version, logos ignore all three and
+			// split is poster-only; badge_direction alone only sets the
+			// direction below, so it never wipes a stored layout.
 			count := k.layout.Total()
 			if query.RatingsLimit != nil {
 				count = *query.RatingsLimit
 			}
-			*k.layout = services.LayoutFromLegacy(kind, deref(query.Position), deref(query.BadgeDirection), query.Split != nil && *query.Split, count)
+			split := kind == "poster" && query.Split != nil && *query.Split
+			*k.layout = services.LayoutFromLegacy(kind, deref(query.Position), deref(query.BadgeDirection), split, count)
 		}
 		if query.BadgeDirection != nil && k.badgeDirection != nil {
 			*k.badgeDirection = services.ParseBadgeDirection(*query.BadgeDirection)
