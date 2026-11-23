@@ -1635,6 +1635,7 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 	if !externalCacheOnly {
 		if basePath, err := services.BaseFanartPath(cacheDir, selected.ID, services.ImageExt(kind)); err == nil {
 			if entry, err := services.ReadCache(basePath, 0); err == nil {
+				services.NoteBaseAccess(basePath) // cache cap LRU order, as for TMDB base art
 				return entry.Bytes
 			}
 			if bytes, err := fanart.FetchPosterBytesCtx(ctx, selected.URL); err == nil {

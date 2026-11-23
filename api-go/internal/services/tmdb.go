@@ -165,6 +165,7 @@ func (c *TmdbClient) FetchBaseImageCtx(ctx context.Context, cacheDir, filePath, 
 	if err != nil {
 		return nil, err
 	}
+	NoteBaseAccess(basePath) // the cache cap's LRU order (mtime is the staleness clock)
 	if entry, err := ReadCache(basePath, staleSecs); err == nil && !entry.IsStale {
 		return entry.Bytes, nil
 	}

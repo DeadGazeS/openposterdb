@@ -76,6 +76,12 @@ var SchemaSQL = []string{
 		backdrop_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":5,"rows":1,"start":"r"},"right":{"per_row":0,"rows":0,"start":"c"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}',
 		episode_layout TEXT NOT NULL DEFAULT '{"top":{"per_row":0,"rows":0,"start":"c"},"right":{"per_row":1,"rows":1,"start":"t"},"bottom":{"per_row":0,"rows":0,"start":"c"},"left":{"per_row":0,"rows":0,"start":"c"},"order":["bottom","top","left","right"]}'
 	)`,
+	// Last read of each base/ artwork file (path relative to the cache dir),
+	// the CACHE_MAX_SIZE sweep's LRU order for base/ (services/cachecap.go).
+	`CREATE TABLE IF NOT EXISTS base_access (
+		path          TEXT PRIMARY KEY,
+		last_accessed INTEGER NOT NULL
+	)`,
 }
 
 var Migrations = []Migration{

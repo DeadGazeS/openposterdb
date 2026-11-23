@@ -28,14 +28,14 @@ ID cross-references (IMDb ↔ TMDB ↔ TVDB, and MAL / Kitsu / AniList ↔ IMDb 
 |---|---|---|
 | `LISTEN_ADDR` | `0.0.0.0:3000` | Server bind address |
 | `CACHE_DIR` | `./cache` | Poster and metadata cache directory |
-| `CACHE_MAX_SIZE` | — (unlimited) | Size cap for the disk cache, e.g. `20GB` or `500MB` (binary units). Checked every 10 minutes; when the cache is over the cap, the least recently served images (and the oldest downloaded artwork) are deleted until it is at 90 % of the cap. Renders orphaned by settings changes and downloaded artwork otherwise accumulate forever |
+| `CACHE_MAX_SIZE` | — (unlimited) | Size cap for the disk cache, e.g. `20GB` or `500MB` (binary units). Checked every 10 minutes; when the cache is over the cap, the least recently served images and least recently read downloaded artwork are deleted until it is at 90 % of the cap. Renders orphaned by settings changes and downloaded artwork otherwise accumulate forever |
 | `DB_DIR` | `./db` | SQLite database directory |
 | `IMAGE_QUALITY` | `85` | JPEG output quality (1-100; values outside are clamped) |
 | `IMAGE_MEM_CACHE_MB` | `512` | In-memory cache size in MB |
 | `RENDER_CONCURRENCY` | CPUs × 2 | Images rendered at the same time. A request that can't get a slot within ~3 s (or finds the wait queue full) gets `503` with `Retry-After`. `0` is rejected |
 | `CROSS_ID_CONCURRENCY` | CPUs | Background writers copying a render under the title's other ids (imdb/tmdb/tvdb); copies are skipped while all are busy. `0` is rejected |
 | `STATIC_DIR` | — | Directory of the built web UI (SPA) to serve; empty disables static serving |
-| `SHUTDOWN_DRAIN_DELAY_SECS` | `0` | On a stop signal, keep serving this many seconds with `/api/ready` answering `503` before closing the listener, so a load balancer or orchestrator polling readiness stops routing here first (a second stop signal ends the wait). The shutdown then drains requests (up to 10 s) and background renders (up to 20 s), so the container's stop grace period must cover the delay plus that. `0` shuts down at once; invalid values fall back to `0` with a warning |
+| `SHUTDOWN_DRAIN_DELAY_SECS` | `0` | On a stop signal, keep serving this many seconds with `/api/ready` answering `503` before closing the listener, so a load balancer or orchestrator polling readiness stops routing here first (a second stop signal ends the wait). The shutdown then drains requests (up to 10 s) and background renders (up to 20 s), so the container's stop grace period must cover the delay plus that (Docker's default is 10 s; the bundled `docker-compose.yml` sets `stop_grace_period: 40s`, enough for a delay of up to 10 s; raise it with a longer delay). `0` shuts down at once; invalid values fall back to `0` with a warning |
 
 ## Auth & access
 

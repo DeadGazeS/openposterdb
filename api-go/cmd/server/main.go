@@ -271,6 +271,7 @@ func main() {
 	flusher.Stop()
 	flusher.Flush()
 	services.FlushImageAccess(db)
+	services.FlushBaseAccess(db, cfg.CacheDir)
 
 	slog.Info("server stopped")
 }
