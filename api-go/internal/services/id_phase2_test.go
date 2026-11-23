@@ -96,6 +96,10 @@ func TestSeriesTVDBID_LearnedFromOtherProvider(t *testing.T) {
 	if got := SeriesTVDBID(&ResolvedID{TMDbID: 1, TVDBID: &own}); got == nil || *got != 7 {
 		t.Errorf("own id: %v", got)
 	}
+	// knownTVDBIDs is process-global: start from and leave a clean entry, so
+	// the test also passes with -count > 1.
+	knownTVDBIDs.Delete("987654")
+	t.Cleanup(func() { knownTVDBIDs.Delete("987654") })
 	if SeriesTVDBID(&ResolvedID{TMDbID: 987654}) != nil {
 		t.Error("unknown series must have no TVDB id")
 	}

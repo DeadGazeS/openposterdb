@@ -38,6 +38,19 @@ func WaitBackground(ctx context.Context) bool {
 	backgroundMu.Lock()
 	backgroundDraining.Store(true)
 	backgroundMu.Unlock()
+	return waitBackgroundWG(ctx)
+}
+
+// WaitIdle waits, until ctx is done, for the background work running now
+// (including work it starts) without stopping new work, unlike
+// WaitBackground, which drains for good. For tests only: they call it
+// between requests, while nothing else starts background work, so detached
+// work from one step cannot bleed into the next. Reports whether it finished.
+func WaitIdle(ctx context.Context) bool {
+	return waitBackgroundWG(ctx)
+}
+
+func waitBackgroundWG(ctx context.Context) bool {
 	done := make(chan struct{})
 	go func() {
 		backgroundWG.Wait()

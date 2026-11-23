@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	appimg "openposterdb/internal/image"
 	"openposterdb/internal/services"
@@ -50,10 +52,15 @@ func newCDNFlowDeps(t *testing.T) (ImageDeps, string) {
 	if _, err := services.CreateAPIKey(db, "test", hash, prefix, "", 1); err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
+	cacheDir := t.TempDir()
+	// Registered after TempDir, so it runs first: detached work (cross-id
+	// copies, refreshes) must not outlive the test into the next one or
+	// write into a cache dir being removed.
+	t.Cleanup(func() { waitBackgroundIdle(t) })
 	return ImageDeps{
 		DB: db,
 		Config: &ImageServeConfig{
-			CacheDir:           t.TempDir(),
+			CacheDir:           cacheDir,
 			ImageQuality:       85,
 			EnableCDNRedirects: true,
 			Caches:             &services.MemCacheSet{},
@@ -62,6 +69,17 @@ func newCDNFlowDeps(t *testing.T) (ImageDeps, string) {
 		TMDB:      services.NewTmdbClient("test-key", &http.Client{Transport: cdnTmdbStub{}}),
 		CDNHashes: services.NewHashRegistry(),
 	}, raw
+}
+
+// waitBackgroundIdle lets the image pipeline's detached work settle (without
+// stopping new work, unlike WaitBackground).
+func waitBackgroundIdle(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if !appimg.WaitIdle(ctx) {
+		t.Fatal("background image work still running after 30s")
+	}
 }
 
 // TestCDNRedirect_EndToEnd follows the 302 HandleImage issues with
@@ -147,7 +165,14 @@ func TestCDNRoute_NoUpstreamWorkWithoutKey(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+apiKey+"/imdb/poster-default/tt0111161.jpg", nil))
 	loc := rec.Header().Get("Location")
+	if rec.Code != http.StatusFound || !strings.HasPrefix(loc, "/c/") {
+		t.Fatalf("authed URL: got %d, Location %q, want a 302 to /c/ (body %q)", rec.Code, loc, rec.Body.String())
+	}
 	hash := strings.Split(strings.TrimPrefix(loc, "/c/"), "/")[0]
+	// The authed request may leave detached work (cross-id copies,
+	// refreshes) running; under load it could reach the counting stub after
+	// `before` is read.
+	waitBackgroundIdle(t)
 	before := calls.Load()
 
 	rec = httptest.NewRecorder()
@@ -155,6 +180,8 @@ func TestCDNRoute_NoUpstreamWorkWithoutKey(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unrendered id via /c/: got %d want 404", rec.Code)
 	}
+	// Work /c/ might have detached counts too.
+	waitBackgroundIdle(t)
 	if n := calls.Load() - before; n != 0 {
 		t.Fatalf("/c/ made %d upstream calls without an API key", n)
 	}
@@ -177,6 +204,7 @@ func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
 		t.Fatalf("direct: %d", direct.Code)
 	}
 
+	waitBackgroundIdle(t) // the direct render's detached work settles first
 	deps.Config.EnableCDNRedirects = true
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
