@@ -115,7 +115,7 @@ func TestCreateKey_Valid_201_WithKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db, testSecretsKey)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, WithAuthUser(req, "admin"))
 	if rec.Code != 201 {
 		t.Fatalf("status: got %d, want 201 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -151,7 +151,7 @@ func TestCreateKey_RejectsEmptyName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db, testSecretsKey)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, WithAuthUser(req, "admin"))
 	if rec.Code != 400 {
 		t.Errorf("status: got %d, want 400", rec.Code)
 	}
@@ -176,7 +176,7 @@ func TestCreateKey_AllowsDuplicateName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db, testSecretsKey)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, WithAuthUser(req, "admin"))
 	if rec.Code != 201 {
 		t.Fatalf("first create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -185,7 +185,7 @@ func TestCreateKey_AllowsDuplicateName(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
-	HandleCreateKey(db, testSecretsKey)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, WithAuthUser(req, "admin"))
 	if rec.Code != 201 {
 		t.Errorf("second create: status %d, want 201 (current contract allows dup names)", rec.Code)
 	}
@@ -268,19 +268,33 @@ func TestGetKey_ByID_200(t *testing.T) {
 	}
 }
 
-// TestGetKey_NotFound_ReturnsDefaults guards the missing-row branch: a GET
-// for a key id that has no api_key_settings row returns the effective
-// (global-default) settings rather than 404 — that's the documented contract
-// (the per-key settings endpoint always returns a settings object).
-func TestGetKey_NotFound_ReturnsDefaults(t *testing.T) {
+// TestKeySettings_UnknownKey_404: the settings routes of a key that doesn't
+// exist answer 404 (GET used to return the global defaults and PUT created a
+// settings row for a key nobody has). A key without a settings row is still
+// answered with the effective defaults (TestGetKey_ByID_200).
+func TestKeySettings_UnknownKey_404(t *testing.T) {
 	db := crudTestDB(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/keys/9999/settings", nil)
-	req.SetPathValue("id", "9999")
-	rec := httptest.NewRecorder()
-	HandleGetKeySettings(db, false)(rec, req)
-	if rec.Code != 200 {
-		t.Errorf("status: got %d, want 200 (missing key returns defaults)", rec.Code)
+	for _, c := range []struct {
+		method string
+		h      http.HandlerFunc
+		body   string
+	}{
+		{http.MethodGet, HandleGetKeySettings(db, false), ""},
+		{http.MethodPut, HandleUpdateKeySettings(db), `{"lang":"de"}`},
+		{http.MethodDelete, HandleResetKeySettings(db), ""},
+	} {
+		req := httptest.NewRequest(c.method, "/api/keys/9999/settings", bytes.NewBufferString(c.body))
+		req.SetPathValue("id", "9999")
+		rec := httptest.NewRecorder()
+		c.h(rec, req)
+		if rec.Code != 404 {
+			t.Errorf("%s: status %d, want 404", c.method, rec.Code)
+		}
+	}
+	var rows int
+	db.QueryRow("SELECT COUNT(*) FROM api_key_settings").Scan(&rows)
+	if rows != 0 {
+		t.Errorf("PUT for an unknown key stored %d settings rows", rows)
 	}
 }
 
@@ -446,7 +460,7 @@ func TestCreateKey_RejectsBadJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/keys", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	HandleCreateKey(db, testSecretsKey)(rec, req)
+	HandleCreateKey(db, testSecretsKey)(rec, WithAuthUser(req, "admin"))
 	if rec.Code != 400 {
 		t.Errorf("status: got %d, want 400", rec.Code)
 	}

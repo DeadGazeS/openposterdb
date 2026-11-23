@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"golang.org/x/image/font"
 
@@ -100,9 +100,9 @@ func parsePreviewImageSize(raw *string, kind string) (*services.ImageSize, error
 	if raw == nil {
 		return nil, nil
 	}
-	s := services.ParseImageSize(*raw)
-	if s == services.ImageSizeSmall && kind != "backdrop" && kind != "episode" {
-		return nil, fmt.Errorf("imageSize 'small' is only valid for backdrops and episodes")
+	s, err := services.ValidateImageSize(*raw, kind)
+	if err != nil {
+		return nil, err
 	}
 	return &s, nil
 }
@@ -123,7 +123,8 @@ type PreviewConfig struct {
 	Trakt             *services.TraktClient
 	Kitsu             *services.KitsuClient
 	AniList           *services.AniListClient
-	KitsuIMDbMapper   *services.KitsuIMDbMapper
+	Mappings          *services.IDMappings
+	TVDB              *services.TVDBClient
 	// Caches (IDs, Ratings) back the demo-ratings lookup, so a preview with
 	// nothing stored doesn't hit TMDB and every rating provider on each edit.
 	Caches *services.MemCacheSet
@@ -165,7 +166,9 @@ func (p *PreviewHandler) demoBadges(kind string) []services.RatingBadge {
 	if kind == "episode" {
 		idValue = image.DemoEpisodeID
 	}
-	idKey := "imdb/" + idValue
+	// "preview/": the image path keys this table by "<idType>/<id>" with a
+	// different value format (services.ValidSourcesString).
+	idKey := "preview/imdb/" + idValue
 
 	if p.cfg.TMDB != nil {
 		if sources, _, _, err := services.ReadAvailableRatingsCtx(p.ctx, p.db, idKey); err == nil {
@@ -593,6 +596,7 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 			}
 		}
 
+		image.ResetRenderFailures() // remembered "no artwork" results go with the cache
 		metaDeleted, err := services.DeleteImageMetaByKindCtx(r.Context(), db, imageType)
 		if err != nil {
 			errs = append(errs, "image metadata: "+err.Error())
@@ -615,12 +619,19 @@ func HandleClearKind(db *sql.DB, cacheDir string, imageType string, externalCach
 // writePurgeResult answers a purge/clear: 200 {ok:true,...} when every step
 // succeeded, else 500 {ok:false, errors, ...} with whatever did get done (the
 // failures used to be swallowed behind ok:true).
+// The client gets which steps failed, not the errors themselves (paths, SQL);
+// those go to the log.
 func writePurgeResult(w http.ResponseWriter, errs []string, body map[string]any) {
 	status := 200
 	body["ok"] = len(errs) == 0
 	if len(errs) > 0 {
 		status = 500
-		body["errors"] = errs
+		failed := make([]string, len(errs))
+		for i, e := range errs {
+			step, _, _ := strings.Cut(e, ": ")
+			failed[i] = step + " failed"
+		}
+		body["errors"] = failed
 		slog.Warn("cache purge partially failed", "errors", errs)
 	}
 	httpx.WriteJSON(w, status, body)
@@ -634,6 +645,14 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 		}
 
 		scope := r.URL.Query().Get("scope")
+		if _, err := services.ParseIDType(idType); err != nil {
+			httpx.WriteError(w, 400, "invalid id_type")
+			return
+		}
+		if err := services.ValidateIDValue(idValue); err != nil {
+			httpx.WriteError(w, 400, "invalid id_value")
+			return
+		}
 
 		var errs []string
 		note := func(what string, err error) {
@@ -641,6 +660,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 				errs = append(errs, what+": "+err.Error())
 			}
 		}
+		image.ResetRenderFailures() // remembered "no artwork" results go with the cache
 		var filesDeleted int64 = 0
 		if !externalCacheOnly {
 			subdir := services.ImageSubdir(imageType)
@@ -669,8 +689,10 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 		note("image metadata", err)
 
 		idKey := idType + "/" + idValue
+		var ratingsDeleted int64
 		if scope != "variant" {
-			_, err := services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
+			var err error
+			ratingsDeleted, err = services.DeleteAvailableRatingsCtx(r.Context(), db, idKey)
 			note("available ratings", err)
 		}
 
@@ -682,11 +704,13 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			if scope != "variant" {
 				services.InvalidateTitleRatings(caches.IDs, caches.Ratings, idType, idValue)
 			}
+			// DeleteTitle, not DeletePrefix: "imdb/tt123" must not evict
+			// "imdb/tt1234567".
 			if caches.ImageMem != nil {
-				caches.ImageMem.DeletePrefix(idType + "/" + idValue)
+				caches.ImageMem.DeleteTitle(idKey)
 			}
 			if caches.IDs != nil {
-				caches.IDs.DeletePrefix(idType + "/" + idValue)
+				caches.IDs.DeleteTitle(idKey)
 			}
 		}
 
@@ -694,6 +718,7 @@ func HandlePurgeTitle(db *sql.DB, cacheDir string, imageType, idType, idValue st
 			"external_cache_only": externalCacheOnly,
 			"files_deleted":       filesDeleted,
 			"meta_deleted":        metaDeleted,
+			"ratings_deleted":     ratingsDeleted,
 		})
 	}
 }

@@ -61,10 +61,10 @@ Runs the full test suite: backend (Go), frontend unit tests (Vitest), Playwright
 4. Starts the container on port `3333`, loading API keys from `.env`
 5. Waits for the backend to become healthy (up to 60s)
 6. Runs `scripts/visual-report.sh` against the running container
-7. Runs Playwright E2E tests (`setup`, `settings`, `chromium`, `live` projects)
+7. Runs Playwright E2E tests (`setup`, `settings`, `chromium`, `live` projects, one worker: they share one container and DB). Playwright's global setup rebuilds and restarts the container with provider keys from `.env`, or dummy keys when none are set; `live` tests that need real keys skip themselves
 8. Tears down the container on exit
 
-Requires either `podman` or `docker`.
+Requires either `podman` or `docker`. On Windows (Git Bash) run it as `MSYS_NO_PATHCONV=1 bash scripts/test.sh`, otherwise `docker run --tmpfs` fails with "invalid mount path".
 
 ## regenerate-examples.sh
 

@@ -81,6 +81,13 @@ export default async function globalSetup() {
     '-e CACHE_DIR=/tmp/openposterdb-e2e',
     // The suite logs in far more often than the production per-IP limit allows.
     '-e RATE_LIMIT_AUTH_RPM=0',
+    // Provider keys (real ones from .env, else dummies). The UI tests need
+    // them: the Fanart checkbox only renders with a Fanart key, and image
+    // requests without a TMDB key stop at a 503.
+    `-e TMDB_API_KEY=${tmdbKey}`,
+    `-e MDBLIST_API_KEY=${mdblistKey}`,
+    `-e FANART_API_KEY=${fanartKey}`,
+    ...(omdbKey ? [`-e OMDB_API_KEY=${omdbKey}`] : []),
   ]
 
   execSync(

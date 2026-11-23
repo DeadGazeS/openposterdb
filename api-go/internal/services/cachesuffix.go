@@ -8,6 +8,20 @@ import (
 
 // --- Cache key suffix construction ---
 
+// RenderEpoch versions the render output. Bump it whenever a change alters
+// the pixels of an existing render (blur, artwork selection, badge drawing):
+// the key changes, so new requests miss, and the "render_epoch_<n>" upgrade
+// deletes the renders of older epochs on the next boot. 0 adds no token.
+const RenderEpoch = 1
+
+// RenderEpochCacheSuffix returns the ".re<n>" token of the current epoch.
+func RenderEpochCacheSuffix() string {
+	if RenderEpoch == 0 {
+		return ""
+	}
+	return fmt.Sprintf(".re%d", RenderEpoch)
+}
+
 func BadgeStyleCacheSuffix(style string) string {
 	return ".s" + style
 }
@@ -178,6 +192,7 @@ func SettingsCacheSuffixWithRatings(settings *RenderSettings, kind string, image
 		}
 		result = ratingsSuffix + bs + ls + bd + ly + ts + bsz + bw + bh + lgs + shp + bgd + blur + isSuffix
 	}
+	result += RenderEpochCacheSuffix()
 
 	// Recolored sources affect the rendered image, so fold them into the cache
 	// key. Defaults produce no token, keeping existing keys stable.

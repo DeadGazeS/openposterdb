@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -38,7 +39,152 @@ func RunUpgradesCtx(ctx context.Context, db *sql.DB, cacheDir string, externalCa
 		return err
 	}
 
+	if err := runOnceCtx(ctx, db, "v005_rust_render_cache", func() error {
+		n, f, err := sweepRenderCacheCtx(ctx, db, cacheDir, externalCacheOnly, HasRustOnlyCacheToken)
+		slog.Info("Rust-era rendered cache removed", "db_rows", n, "files", f)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	// Render epoch: renders of old titles are never stale, so a change to the
+	// render output only reaches them through this sweep. Recorded (runOnce)
+	// only after it succeeded; a failure is retried on the next boot.
+	if RenderEpoch > 0 {
+		if err := runOnceCtx(ctx, db, "render_epoch_"+strconv.Itoa(RenderEpoch), func() error {
+			n, f, err := sweepRenderCacheCtx(ctx, db, cacheDir, externalCacheOnly, func(key string) bool {
+				return cacheKeyRenderEpoch(key) != RenderEpoch
+			})
+			slog.Info("renders from older epochs removed", "epoch", RenderEpoch, "db_rows", n, "files", f)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// rustOnlyCacheTokens are cache-key segments only the Rust version wrote:
+// named badge sizes, badge backgrounds and badge positions. The Go keys use
+// .bz<n>, .ba<n> and .ly<hash> instead, so a key holding any of these can
+// never be requested again.
+var rustOnlyCacheTokens = map[string]bool{
+	"bxs": true, "bs": true, "bm": true, "bl": true, "bxl": true,
+	"bgd": true, "bgk": true, "bgt": true, "bgn": true,
+	"pbc": true, "ptc": true, "pl": true, "pr": true, "ptl": true, "ptr": true, "pbl": true, "pbr": true,
+}
+
+// HasRustOnlyCacheToken reports whether a rendered cache key (or file name)
+// was produced by the Rust version.
+func HasRustOnlyCacheToken(key string) bool {
+	for seg := range strings.SplitSeq(key, ".") {
+		if rustOnlyCacheTokens[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+// cacheKeyRenderEpoch returns the render epoch recorded in a cache key (the
+// ".re<n>" segment), or 0 for keys written before epochs existed.
+func cacheKeyRenderEpoch(key string) int {
+	epoch := 0
+	for seg := range strings.SplitSeq(key, ".") {
+		if len(seg) > 2 && strings.HasPrefix(seg, "re") {
+			if n, err := strconv.Atoi(seg[2:]); err == nil && n > 0 {
+				epoch = n
+			}
+		}
+	}
+	return epoch
+}
+
+// renderSubdirs hold rendered images; base/ (downloaded artwork) and
+// preview/ are not part of the rendered cache sweeps.
+var renderSubdirs = []string{"posters", "logos", "backdrops", "episodes"}
+
+// sweepRenderCacheCtx deletes image_meta rows and rendered files whose key
+// matches obsolete. Files are skipped under externalCacheOnly.
+func sweepRenderCacheCtx(ctx context.Context, db *sql.DB, cacheDir string, externalCacheOnly bool, obsolete func(string) bool) (dbRows, files int64, err error) {
+	rows, err := db.QueryContext(ctx, "SELECT cache_key FROM image_meta")
+	if err != nil {
+		return 0, 0, err
+	}
+	var doomed []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		if obsolete(key) {
+			doomed = append(doomed, key)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	if len(doomed) > 0 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, 0, err
+		}
+		stmt, err := tx.PrepareContext(ctx, "DELETE FROM image_meta WHERE cache_key = ?")
+		if err != nil {
+			tx.Rollback()
+			return 0, 0, err
+		}
+		for _, key := range doomed {
+			res, err := stmt.ExecContext(ctx, key)
+			if err != nil {
+				stmt.Close()
+				tx.Rollback()
+				return 0, 0, err
+			}
+			n, _ := res.RowsAffected()
+			dbRows += n
+		}
+		stmt.Close()
+		if err := tx.Commit(); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	if externalCacheOnly {
+		return dbRows, 0, nil
+	}
+	for _, sub := range renderSubdirs {
+		root := filepath.Join(cacheDir, sub)
+		werr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return filepath.SkipDir
+				}
+				return err
+			}
+			if d.IsDir() || strings.HasPrefix(d.Name(), ".tmp-") {
+				return nil
+			}
+			name := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+			if !obsolete(name) {
+				return nil
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			files++
+			return nil
+		})
+		if werr != nil {
+			return dbRows, files, werr
+		}
+	}
+	if files > 0 {
+		notePurge()
+	}
+	return dbRows, files, nil
 }
 
 func RunUpgrades(db *sql.DB, cacheDir string, externalCacheOnly bool) error {
@@ -111,15 +257,17 @@ func upgradeV002Ctx(ctx context.Context, db *sql.DB, cacheDir string, externalCa
 	// DB step
 	var total uint64
 
-	stylePatterns := []string{".sv.", ".sh.", ".sd."}
-	for _, style := range stylePatterns {
-		old := style + "l" + "."
-		newVal := ".ptr." + style + "l" + "."
+	// Same patterns as the Rust upgrade
+	// (upgrade/v002_backdrop_position_direction_cache.rs): ".sv.l" →
+	// ".ptr.sv.l" and ".lt.b" → ".lt.dv.b", first occurrence only.
+	for _, style := range []string{"sv", "sh", "sd"} {
+		old := "." + style + ".l"
+		newVal := ".ptr." + style + ".l"
 		oldLen := len(old)
 		result, err := db.ExecContext(ctx,
 			"UPDATE image_meta SET cache_key = "+
 				"substr(cache_key, 1, instr(cache_key, '"+old+"') - 1) || '"+newVal+"' || "+
-				"substr(cache_key, instr(cache_key, '"+old+"') + "+stringInt(oldLen)+") "+
+				"substr(cache_key, instr(cache_key, '"+old+"') + "+strconv.Itoa(oldLen)+") "+
 				"WHERE image_type = 'b' AND instr(cache_key, '"+old+"') > 0 AND instr(cache_key, '.ptr.') = 0",
 		)
 		if err != nil {
@@ -129,15 +277,14 @@ func upgradeV002Ctx(ctx context.Context, db *sql.DB, cacheDir string, externalCa
 		total += uint64(n)
 	}
 
-	labelPrefixes := []string{".lt.", ".li.", ".lo."}
-	for _, label := range labelPrefixes {
-		old := label + "b" + "."
-		newVal := label + "dv." + "b" + "."
+	for _, label := range []string{"lt", "li", "lo"} {
+		old := "." + label + ".b"
+		newVal := "." + label + ".dv.b"
 		oldLen := len(old)
 		result, err := db.ExecContext(ctx,
 			"UPDATE image_meta SET cache_key = "+
 				"substr(cache_key, 1, instr(cache_key, '"+old+"') - 1) || '"+newVal+"' || "+
-				"substr(cache_key, instr(cache_key, '"+old+"') + "+stringInt(oldLen)+") "+
+				"substr(cache_key, instr(cache_key, '"+old+"') + "+strconv.Itoa(oldLen)+") "+
 				"WHERE image_type = 'b' AND instr(cache_key, '"+old+"') > 0 AND instr(cache_key, '.dv.') = 0",
 		)
 		if err != nil {
@@ -248,7 +395,7 @@ func upgradeV003Ctx(ctx context.Context, db *sql.DB, cacheDir string, externalCa
 		result, err := db.ExecContext(ctx,
 			"UPDATE image_meta SET cache_key = "+
 				"substr(cache_key, 1, instr(cache_key, '"+token+"') - 1) || '"+newToken+"' || "+
-				"substr(cache_key, instr(cache_key, '"+token+"') + "+stringInt(oldLen)+") "+
+				"substr(cache_key, instr(cache_key, '"+token+"') + "+strconv.Itoa(oldLen)+") "+
 				"WHERE instr(cache_key, '"+token+"') > 0 AND instr(cache_key, '.bg') = 0",
 		)
 		if err != nil {
@@ -328,10 +475,6 @@ func migrateNameV003(name string) *string {
 	return nil
 }
 
-func stringInt(n int) string {
-	return string(rune('0' + n%10))
-}
-
 // v004: ensure the four per-kind *_badge_size columns on api_key_settings
 // exist as INTEGER NOT NULL DEFAULT 100 (percent scale).
 //
@@ -344,10 +487,26 @@ func stringInt(n int) string {
 // fire (a TEXT or v004-created column always exists first), so the conversion
 // lives here as a one-shot upgrade:
 //   - missing          → ADD COLUMN ... INTEGER NOT NULL DEFAULT 100
-//   - present as TEXT  → DROP + re-ADD (legacy enum values are replaced by the
-//     100% default — same convention as the badge_background migration)
+//   - present as TEXT  → DROP + re-ADD; Rust-era size names ("xs".."xl") are
+//     read first and written back as percents (PercentFromLegacySize)
 //   - present INTEGER  → no-op
+//
+// It all runs in one transaction (SQLite DDL is transactional): a crash or
+// error after a DROP rolls back to the TEXT column and its Rust-era values,
+// and the upgrade, not yet recorded, runs again on the next boot.
 func upgradeV004Ctx(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upgradeV004Tx(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func upgradeV004Tx(ctx context.Context, db dbtx) error {
 	cols, err := tableColumnTypes(ctx, db, "api_key_settings")
 	if err != nil {
 		return err
@@ -365,7 +524,14 @@ func upgradeV004Ctx(ctx context.Context, db *sql.DB) error {
 		// bookkeeping insert), so a racer may drop or create the column
 		// between our pragma read and these statements. The end state —
 		// exactly one INTEGER column — is the same either way.
+		// Rust-era values ("xs".."xl") are read before the DROP and written
+		// back as percents once the INTEGER column exists.
+		var legacy map[int64]ScalePercent
 		if exists {
+			legacy, err = readLegacyBadgeSizes(ctx, db, kind, name)
+			if err != nil {
+				return err
+			}
 			if _, err := db.ExecContext(ctx, "ALTER TABLE api_key_settings DROP COLUMN "+name); err != nil {
 				if !strings.Contains(strings.ToLower(err.Error()), "no such column") {
 					return err
@@ -380,15 +546,42 @@ func upgradeV004Ctx(ctx context.Context, db *sql.DB) error {
 				return err
 			}
 		}
+		for id, pct := range legacy {
+			if _, err := db.ExecContext(ctx, "UPDATE api_key_settings SET "+name+" = ? WHERE api_key_id = ?", int32(pct), id); err != nil {
+				return err
+			}
+		}
 	}
 	slog.Info("api_key_settings badge_size columns ensured INTEGER", "created", created, "converted", converted)
 	return nil
 }
 
+// readLegacyBadgeSizes returns the non-default percent for every row whose
+// TEXT badge_size column holds a Rust-era size name.
+func readLegacyBadgeSizes(ctx context.Context, db dbtx, kind, column string) (map[int64]ScalePercent, error) {
+	rows, err := db.QueryContext(ctx, "SELECT api_key_id, CAST("+column+" AS TEXT) FROM api_key_settings")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]ScalePercent{}
+	for rows.Next() {
+		var id int64
+		var v sql.NullString
+		if err := rows.Scan(&id, &v); err != nil {
+			return nil, err
+		}
+		if pct, ok := PercentFromLegacySize(kind, v.String); ok && pct != DefaultScalePercent() {
+			out[id] = pct
+		}
+	}
+	return out, rows.Err()
+}
+
 // tableColumnTypes returns the declared column types of the given table as
 // reported by PRAGMA table_info, keyed by column name. Callers pass a fixed
 // table name — the PRAGMA form does not support bound parameters.
-func tableColumnTypes(ctx context.Context, db *sql.DB, table string) (map[string]string, error) {
+func tableColumnTypes(ctx context.Context, db dbtx, table string) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return nil, err

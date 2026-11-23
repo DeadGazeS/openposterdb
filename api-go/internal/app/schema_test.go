@@ -169,6 +169,12 @@ func TestRunMigrations_HandlesExpectedError(t *testing.T) {
 // or untracked migrations at code-review time.
 func TestRunMigrations_AllApplied(t *testing.T) {
 	for i, m := range Migrations {
+		if m.Func != nil {
+			if m.SQL != "" {
+				t.Errorf("migration %d sets both Func and SQL", i)
+			}
+			continue
+		}
 		if m.ExpectedError == "" {
 			t.Errorf("migration %d has no ExpectedError — should be idempotent (SQL: %q)", i, m.SQL)
 		}

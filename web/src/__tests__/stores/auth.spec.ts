@@ -31,6 +31,7 @@ function mockFetchSuccess(data: Record<string, unknown>, ok = true) {
   return vi.fn().mockResolvedValue({
     ok,
     status: ok ? 200 : 401,
+    headers: new Headers(),
     json: () => Promise.resolve(data),
   })
 }
@@ -83,7 +84,7 @@ describe('auth store', () => {
 
     const result = await auth.login('user', 'pass')
 
-    expect(result).toBe(true)
+    expect(result).toEqual({ ok: true })
     expect(auth.token).toBe('new-token')
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/auth/login'),
@@ -98,7 +99,7 @@ describe('auth store', () => {
 
     const result = await auth.login('user', 'wrong')
 
-    expect(result).toBe(false)
+    expect(result).toEqual({ ok: false, reason: 'unauthorized' })
     expect(auth.token).toBeNull()
   })
 
@@ -109,7 +110,7 @@ describe('auth store', () => {
 
     const result = await auth.setup('admin', 'password123')
 
-    expect(result).toBe(true)
+    expect(result).toEqual({ ok: true })
     expect(auth.token).toBe('setup-token')
     expect(auth.setupRequired).toBe(false)
   })
@@ -121,7 +122,7 @@ describe('auth store', () => {
 
     const result = await auth.refresh()
 
-    expect(result).toBe(true)
+    expect(result).toBe('refreshed')
     expect(auth.token).toBe('refreshed-token')
   })
 
@@ -154,7 +155,7 @@ describe('auth store', () => {
 
     const result = await auth.refresh()
 
-    expect(result).toBe(false)
+    expect(result).toBe('unauthorized')
     expect(auth.token).toBeNull()
   })
 
@@ -165,7 +166,7 @@ describe('auth store', () => {
 
     const result = await auth.setup('admin', 'password123')
 
-    expect(result).toBe(false)
+    expect(result.ok).toBe(false)
     expect(auth.token).toBeNull()
   })
 
@@ -269,7 +270,7 @@ describe('auth store', () => {
     )
     const auth = useAuthStore()
     const ok = await auth.loginWithApiKey('raw-key')
-    expect(ok).toBe(true)
+    expect(ok).toEqual({ ok: true })
     expect(auth.apiKeyToken).toBe('jwt-token')
     expect(sessionStorageStub.setItem).not.toHaveBeenCalledWith('apiKeyToken', expect.anything())
     expect(auth.apiKeyInfo).toEqual({ name: 'my-key', key_prefix: 'xyz' })
@@ -279,7 +280,7 @@ describe('auth store', () => {
     vi.stubGlobal('fetch', mockFetchSuccess({}, false))
     const auth = useAuthStore()
     const ok = await auth.loginWithApiKey('bad-key')
-    expect(ok).toBe(false)
+    expect(ok).toEqual({ ok: false, reason: 'unauthorized' })
     expect(auth.apiKeyToken).toBeNull()
   })
 
@@ -396,7 +397,7 @@ describe('auth store - API key session', () => {
 
     const result = await auth.loginWithApiKey('the-full-api-key')
 
-    expect(result).toBe(true)
+    expect(result).toEqual({ ok: true })
     expect(auth.apiKeyToken).toBe('jwt-session-token')
     expect(sessionStorageStub.setItem).not.toHaveBeenCalled()
     expect(auth.apiKeyInfo).toEqual({ name: 'my-key', key_prefix: 'abcd1234' })
@@ -408,7 +409,7 @@ describe('auth store - API key session', () => {
 
     const result = await auth.loginWithApiKey('bad-key')
 
-    expect(result).toBe(false)
+    expect(result).toEqual({ ok: false, reason: 'unauthorized' })
     expect(auth.apiKeyToken).toBeNull()
     expect(auth.apiKeyInfo).toBeNull()
   })
@@ -489,12 +490,12 @@ describe('auth store - API key session', () => {
     vi.stubGlobal('fetch', fetchMock)
     const auth = useAuthStore()
     const calls = [auth.refresh(), auth.refresh(), auth.refresh()]
-    resolve({ ok: true, status: 200, json: () => Promise.resolve({ token: 'new-token' }) })
-    expect(await Promise.all(calls)).toEqual([true, true, true])
+    resolve({ ok: true, status: 200, headers: new Headers(), json: () => Promise.resolve({ token: 'new-token' }) })
+    expect(await Promise.all(calls)).toEqual(['refreshed', 'refreshed', 'refreshed'])
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(auth.token).toBe('new-token')
     // a later refresh starts a new request
-    fetchMock.mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ token: 't2' }) })
+    fetchMock.mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json: () => Promise.resolve({ token: 't2' }) })
     await auth.refresh()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
@@ -512,5 +513,159 @@ describe('auth store - API key session', () => {
       expect.objectContaining({ method: 'POST', credentials: 'include' }),
     )
     expect(auth.token).toBeNull()
+  })
+})
+
+function mockFetchStatus(
+  status: number,
+  body: Record<string, unknown> = {},
+  headers: Record<string, string> = {},
+) {
+  return vi.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    json: () => Promise.resolve(body),
+  })
+}
+
+// Login, key login and setup tell wrong credentials apart from rate limits,
+// a busy server, server errors and network failures, so the views can say so.
+describe('auth store - failure results', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.restoreAllMocks()
+    vi.stubGlobal('localStorage', localStorageStub)
+    vi.stubGlobal('sessionStorage', sessionStorageStub)
+  })
+
+  it('login: 429 is rate-limited with Retry-After seconds', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(429, { error: 'rate limit exceeded' }, { 'Retry-After': '42' }))
+    const auth = useAuthStore()
+    expect(await auth.login('u', 'p')).toEqual({ ok: false, reason: 'rate-limited', retryAfter: 42 })
+  })
+
+  it('login: 503 is busy with Retry-After seconds', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(503, { error: 'server busy, retry shortly' }, { 'Retry-After': '5' }))
+    const auth = useAuthStore()
+    expect(await auth.login('u', 'p')).toEqual({ ok: false, reason: 'busy', retryAfter: 5 })
+  })
+
+  it('login: 503 without a usable Retry-After has no retryAfter', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(503, {}, { 'Retry-After': 'soon' }))
+    const auth = useAuthStore()
+    expect(await auth.login('u', 'p')).toEqual({ ok: false, reason: 'busy' })
+  })
+
+  it('login: 500 is a server error', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(500, { error: 'Authentication failed' }))
+    const auth = useAuthStore()
+    expect(await auth.login('u', 'p')).toEqual({ ok: false, reason: 'server' })
+  })
+
+  it('login: a network failure is reported, not thrown', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const auth = useAuthStore()
+    expect(await auth.login('u', 'p')).toEqual({ ok: false, reason: 'network' })
+    expect(auth.token).toBeNull()
+  })
+
+  it('key login: 403 is forbidden with the server message', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(403, { error: 'Free API key is disabled' }))
+    const auth = useAuthStore()
+    expect(await auth.loginWithApiKey('t0-free-rpdb')).toEqual({
+      ok: false,
+      reason: 'forbidden',
+      message: 'Free API key is disabled',
+    })
+    expect(auth.apiKeyToken).toBeNull()
+  })
+
+  it('setup: 400 is invalid with the validation message', async () => {
+    const msg = 'Invalid username: must be 1-128 characters and not contain whitespace/control characters'
+    vi.stubGlobal('fetch', mockFetchStatus(400, { error: msg }))
+    const auth = useAuthStore()
+    expect(await auth.setup('a b', 'password123')).toEqual({ ok: false, reason: 'invalid', message: msg })
+    expect(auth.setupRequired).toBeNull()
+  })
+
+  it('setup: 403 means setup was already completed', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(403, { error: 'Setup already completed' }))
+    const auth = useAuthStore()
+    expect(await auth.setup('admin', 'password123')).toEqual({
+      ok: false,
+      reason: 'forbidden',
+      message: 'Setup already completed',
+    })
+  })
+
+  it('setup: 429 is rate-limited', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(429, {}, { 'Retry-After': '10' }))
+    const auth = useAuthStore()
+    expect(await auth.setup('admin', 'password123')).toEqual({
+      ok: false,
+      reason: 'rate-limited',
+      retryAfter: 10,
+    })
+  })
+})
+
+// Only a 401 from the refresh endpoint ends the session; a 500, 503, 429 or a
+// network error leaves the refresh cookie alone and is retried later.
+describe('auth store - refresh outcomes', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.restoreAllMocks()
+    vi.stubGlobal('localStorage', localStorageStub)
+    vi.stubGlobal('sessionStorage', sessionStorageStub)
+  })
+
+  it.each([500, 503, 429])('refresh: %i is unavailable, not unauthorized', async (status) => {
+    vi.stubGlobal('fetch', mockFetchStatus(status))
+    const auth = useAuthStore()
+    expect(await auth.refresh()).toBe('unavailable')
+  })
+
+  it('refresh: a network error is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const auth = useAuthStore()
+    expect(await auth.refresh()).toBe('unavailable')
+  })
+
+  it('restoreSession retries on the next navigation after a 503', async () => {
+    const fetchMock = mockFetchStatus(503, {}, { 'Retry-After': '5' })
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    expect(await auth.restoreSession()).toBe(false)
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve({ token: 'back' }),
+    })
+    expect(await auth.restoreSession()).toBe(true)
+    expect(auth.token).toBe('back')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('restoreSession retries after a network error and never calls logout', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    expect(await auth.restoreSession()).toBe(false)
+    expect(await auth.restoreSession()).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const [url] of fetchMock.mock.calls) {
+      expect(url).not.toContain('/logout')
+    }
+  })
+
+  it('restoreSession settles a 401 for the page load', async () => {
+    const fetchMock = mockFetchStatus(401)
+    vi.stubGlobal('fetch', fetchMock)
+    const auth = useAuthStore()
+    expect(await auth.restoreSession()).toBe(false)
+    expect(await auth.restoreSession()).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

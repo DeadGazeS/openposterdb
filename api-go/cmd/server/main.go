@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -68,18 +70,26 @@ func main() {
 	}
 
 	app.SeedAdminIfNeeded(db, cfg.AdminUsername, cfg.AdminPassword)
+	image.ConfigureLimits(cfg.RenderConcurrency, cfg.CrossIDConcurrency)
 
 	// One shared transport for every upstream (TMDB API + image CDN, OMDb,
 	// MDBList, Trakt, Fanart, Kitsu, AniList). The default keeps only 2 idle
 	// connections per host, so concurrent renders kept re-handshaking TLS.
+	// A connection that hangs is cut by the dial / TLS / response-header
+	// timeouts, so the retries still get a chance within the 30 s total
+	// (which used to be the only bound: one hung connection ate all of it).
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.TLSHandshakeTimeout = 5 * time.Second
+	transport.ResponseHeaderTimeout = 10 * time.Second
 	transport.MaxIdleConns = 256
 	transport.MaxIdleConnsPerHost = 64
+	transport.MaxConnsPerHost = 128
 	transport.IdleConnTimeout = 90 * time.Second
 	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: transport}
 
 	mgr := services.NewServiceKeyManager(db, cfg.SecretsKey, cfg.JWTSecret, httpClient,
-		cfg.TMDBAPIKey, cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID)
+		cfg.TMDBAPIKey, cfg.MDBListAPIKeys, cfg.OMDBAPIKey, cfg.FanartAPIKey, cfg.TraktClientID, cfg.TVDBAPIKey)
 	mgr.Init()
 
 	var tmdbClient *services.TmdbClient
@@ -93,18 +103,24 @@ func main() {
 		slog.Warn("TMDB_API_KEY is not set — image endpoints will return 503 until a key is configured in the admin UI")
 	}
 
-	// KitsuIMDbMapper is the TheBeastLT Kitsu→IMDb cross-reference (~775 KB).
-	// Constructed up-front and loaded in a goroutine so the slow HTTPS fetch
-	// doesn't block startup. When Load fails, the mapper is empty and the
-	// "find equivalent" step in resolveWithFallback is silently skipped —
-	// Kitsu/MAL art is still available via the explicit kitsu:N / mal:N
-	// paths, just no automatic translation to IMDb.
-	kitsuIMDbMapper := services.NewKitsuIMDbMapper(httpClient)
-	go func() {
-		if err := kitsuIMDbMapper.Load(context.Background()); err != nil {
-			slog.Warn("kitsu→imdb mapping load failed — translation step disabled", "error", err)
-		}
-	}()
+	// Offline id mapping lists (IMDb↔TMDB↔TVDB and the anime list): loaded
+	// from the disk snapshot, then downloaded and refreshed every 24 h in the
+	// background. Lookups simply miss until a list is loaded.
+	// The lists are tens of MB: a longer total timeout than API calls get.
+	idMappings := services.NewIDMappings(&http.Client{Timeout: 5 * time.Minute, Transport: transport}, filepath.Join(cfg.DBDir, "mappings"))
+	idMappings.Start(context.Background())
+
+	// IMDb's own ratings dataset (opt-in: IMDb licenses it for
+	// non-commercial use only): the first IMDb rating source when loaded.
+	if cfg.IMDbRatingsDataset {
+		imdbRatings := services.NewIMDbRatings(&http.Client{Timeout: 10 * time.Minute, Transport: transport}, filepath.Join(cfg.DBDir, "mappings", "imdb-ratings.bin"))
+		services.SetIMDbRatingsDataset(imdbRatings)
+		imdbRatings.Start(context.Background())
+	}
+
+	if cfg.PublicMetaDBRatings {
+		services.SetPublicMetaDB(services.NewPublicMetaDBClient(httpClient))
+	}
 
 	state := &router.AppState{
 		Config:          cfg,
@@ -113,7 +129,7 @@ func main() {
 		TMDB:            tmdbClient,
 		Kitsu:           services.NewKitsuClient(httpClient),
 		AniList:         services.NewAniListClient(httpClient),
-		KitsuIMDbMapper: kitsuIMDbMapper,
+		Mappings:        idMappings,
 		ServiceKeys:     mgr,
 		SecureCookies:   cfg.SecureCookies,
 		JWTSecret:       cfg.JWTSecret,
@@ -122,7 +138,7 @@ func main() {
 
 	// Process-wide in-memory caches (mirroring the Rust moka caches): rendered
 	// images capped by IMAGE_MEM_CACHE_MB (1h TTL, 30min idle), ID resolutions
-	// (50k entries, 1h TTL), and fetched ratings (50k entries, 30min TTL).
+	// (50k entries, 24h TTL), and fetched ratings (50k entries, 72h TTL).
 	state.Caches = &services.MemCacheSet{
 		ImageMem: services.NewMemCache(
 			int64(cfg.ImageMemCacheMB)*1024*1024, 0,
@@ -133,10 +149,11 @@ func main() {
 		IDs: services.NewMemCache(
 			0, 50_000, 24*time.Hour, 0,
 		),
-		// Hard limit; badges older than services.ratingsRefreshAfter (30 min)
-		// are served while a background refresh runs.
+		// Hard limit, past the 24 h refresh of older titles (see
+		// services.ratingsRefreshFor): due badges are served while a
+		// background refresh runs.
 		Ratings: services.NewMemCache(
-			0, 50_000, 24*time.Hour, 0,
+			0, 50_000, 72*time.Hour, 0,
 		),
 	}
 	// Mirror the Rust image_mem_cache: re-check release-date staleness of
@@ -148,6 +165,7 @@ func main() {
 	state.SetupMDBList(mgr.MDBListKeys())
 	state.SetupFanart(mgr.FanartKeys())
 	state.SetupTrakt(mgr.TraktClientIDs())
+	state.SetupTVDB(mgr.TVDBKey())
 
 	if !cfg.ExternalCacheOnly {
 		if err := os.MkdirAll(cfg.CacheDir, 0755); err != nil {
@@ -166,6 +184,9 @@ func main() {
 			slog.Info("removed leftover cache temp files", "count", n)
 		}
 	}()
+	if !cfg.ExternalCacheOnly {
+		services.StartCacheSizeCap(context.Background(), db, cfg.CacheDir, cfg.CacheMaxBytes)
+	}
 
 	if err := image.LoadFont("assets/fonts/Inter-Bold.ttf"); err != nil {
 		slog.Warn("failed to load font, image previews will not render", "error", err)
@@ -226,6 +247,8 @@ func main() {
 	<-quit
 
 	slog.Info("shutdown signal received, draining requests")
+	state.Draining.Store(true) // /api/ready → 503
+	waitDrainDelay(cfg.ShutdownDrainDelay, quit)
 
 	close(cdnSweeperDone)
 
@@ -234,14 +257,40 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+	// Detached renders, refreshes and cross-id copies started by requests:
+	// let them finish (bounded) so their cache files and image_meta rows
+	// aren't cut off half-way.
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer bgCancel()
+	if !image.WaitBackground(bgCtx) {
+		slog.Warn("shutdown: background image work still running after the deadline; stopping anyway")
+	}
 	// After the server stopped accepting and drained requests, so uses
 	// recorded by in-flight requests aren't lost: persist last_used and the
 	// batched image access times (services.TouchImageAccessCtx).
 	flusher.Stop()
 	flusher.Flush()
 	services.FlushImageAccess(db)
+	services.FlushBaseAccess(db, cfg.CacheDir)
 
 	slog.Info("server stopped")
+}
+
+// waitDrainDelay keeps serving for d after a stop signal (Draining is set,
+// so /api/ready answers 503) so a load balancer stops routing here before
+// the listener closes. A second stop signal ends the wait early.
+func waitDrainDelay(d time.Duration, quit <-chan os.Signal) {
+	if d <= 0 {
+		return
+	}
+	slog.Info("readiness off, waiting before shutdown", "delay_secs", d.Seconds())
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-quit:
+		slog.Info("second stop signal, shutting down now")
+	}
 }
 
 func logConfig(cfg *config.Config) {
@@ -251,6 +300,7 @@ func logConfig(cfg *config.Config) {
 		"omdb", cfg.OMDBAPIKey != "",
 		"fanart", cfg.FanartAPIKey != "",
 		"trakt", cfg.TraktClientID != "",
+		"tvdb", cfg.TVDBAPIKey != "",
 	)
 	slog.Info("server configuration",
 		"cache_dir", cfg.CacheDir,

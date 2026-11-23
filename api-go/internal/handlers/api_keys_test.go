@@ -88,8 +88,21 @@ const fullKeySettingsPayload = `{
 	"episode_badge_alpha": 80
 }`
 
+// ensureKeyRow creates api key id (and an admin owning it) unless present:
+// the settings routes answer 404 for unknown keys.
+func ensureKeyRow(t *testing.T, db *sql.DB, id int64) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT OR IGNORE INTO admin_users (id, username, password_hash) VALUES (1, 'admin', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO api_keys (id, name, key_hash, key_prefix, created_by) VALUES (?, 'k', ?, 'p', 1)`, id, "hash-"+strconv.FormatInt(id, 10)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func putKeySettings(t *testing.T, db *sql.DB, id int64, payload string) *httptest.ResponseRecorder {
 	t.Helper()
+	ensureKeyRow(t, db, id)
 	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	req.SetPathValue("id", strconv.FormatInt(id, 10))
@@ -210,20 +223,35 @@ func TestUpdateKeySettingsValidation(t *testing.T) {
 		t.Errorf("invalid lang returned %d, want 400", rec.Code)
 	}
 
-	// Garbage enums are normalised (not rejected) and numeric ranges clamped.
-	rec = putKeySettings(t, db, 1, `{"lang":"de","poster_badge_style":"garbage","poster_badge_shape":"garbage","poster_badge_alpha":999,"backdrop_edge_inset_x":999}`)
+	// Unknown enum values are rejected (they used to be normalised to the
+	// default without telling the client).
+	for _, body := range []string{
+		`{"poster_badge_style":"garbage"}`,
+		`{"poster_badge_shape":"garbage"}`,
+		`{"episode_label_style":"x"}`,
+		`{"backdrop_badge_direction":"sideways"}`,
+		`{"image_source":"z"}`,
+		`{"poster_fit":"stretch"}`,
+	} {
+		if rec := putKeySettings(t, db, 1, body); rec.Code != 400 {
+			t.Errorf("%s returned %d, want 400", body, rec.Code)
+		}
+	}
+
+	// Valid values (aliases included) are accepted; numeric ranges clamped.
+	rec = putKeySettings(t, db, 1, `{"lang":"de","poster_badge_style":"h","poster_badge_shape":"p","poster_badge_alpha":999,"backdrop_edge_inset_x":999}`)
 	if rec.Code != 200 {
-		t.Fatalf("normalising PUT returned %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("clamping PUT returned %d: %s", rec.Code, rec.Body.String())
 	}
 	got, err := services.GetAPIKeySettings(db, 1)
 	if err != nil || got == nil {
 		t.Fatalf("GetAPIKeySettings: %v", err)
 	}
-	if got.PosterBadgeStyle != "d" {
-		t.Errorf("poster_badge_style=%q, want normalised 'd'", got.PosterBadgeStyle)
+	if got.PosterBadgeStyle != "lr" {
+		t.Errorf("poster_badge_style=%q, want 'h' stored as 'lr'", got.PosterBadgeStyle)
 	}
-	if got.PosterBadgeShape != "r" {
-		t.Errorf("poster_badge_shape=%q, want normalised 'r'", got.PosterBadgeShape)
+	if got.PosterBadgeShape != "p" {
+		t.Errorf("poster_badge_shape=%q, want 'p'", got.PosterBadgeShape)
 	}
 	if got.PosterBadgeAlpha != 100 {
 		t.Errorf("poster_badge_alpha=%d, want clamped 100", got.PosterBadgeAlpha)
@@ -662,9 +690,21 @@ func TestKeySettingsUpdateMerge_AnimeArtworkPreserveOnOmit(t *testing.T) {
 	if got := mergeKeySettingsUpdate(base, &body2).AnimeArtwork; got != "mal" {
 		t.Errorf("explicit anime_artwork: got %q, want mal", got)
 	}
+	// A request with an unknown value is rejected (400) like the other enum
+	// settings, not silently turned into "id".
+	for v, wantErr := range map[string]bool{"bogus": true, "": true, "id": false, "kitsu": false, "mal": false} {
+		var b keySettingsUpdate
+		if err := json.Unmarshal([]byte(`{"anime_artwork":"`+v+`"}`), &b); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateKeySettingsEnums(&b); (err != nil) != wantErr {
+			t.Errorf("anime_artwork=%q: err %v, want error %v", v, err, wantErr)
+		}
+	}
+	// A stored value that predates validation still normalises to "id".
 	s := &services.APIKeySettings{AnimeArtwork: "bogus", Lang: "en", RatingsOrder: "imdb", RatingsLimit: 3}
 	_ = validateAndNormalizeKeySettings(s)
 	if s.AnimeArtwork != "id" {
-		t.Errorf("unknown anime_artwork normalised to %q, want id", s.AnimeArtwork)
+		t.Errorf("stored unknown anime_artwork normalised to %q, want id", s.AnimeArtwork)
 	}
 }

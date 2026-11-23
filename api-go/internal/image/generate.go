@@ -285,10 +285,6 @@ func resizeExact(img image.Image, targetW, targetH int) *image.RGBA {
 	return resized
 }
 
-// blurImage blurs an RGBA image by downscaling it to 1/divisor and scaling it
-// back up with bilinear interpolation — a cheap, dependency-free blur used for
-// blurred backdrops (the episode spoiler blur and the poster blur-fill fit).
-// Very small images are returned unchanged.
 // --- Logo rendering ---
 
 func RenderLogoSync(logoBytes []byte, params RenderParams) ([]byte, error) {
@@ -567,7 +563,7 @@ func RenderEpisodeSync(imageBytes []byte, params RenderParams) ([]byte, error) {
 	}
 
 	if params.Blur && canvas.Bounds().Dx() >= 8 && canvas.Bounds().Dy() >= 8 {
-		canvas = blurImage(canvas, 4)
+		canvas = blurImage(canvas, episodeBlurDivisor, episodeBlurPasses)
 	}
 
 	if len(params.Badges) == 0 {

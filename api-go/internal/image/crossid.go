@@ -106,7 +106,10 @@ func (p ServeParams) filterAnimeAlternates(resolved *services.ResolvedID, alts [
 // Fire-and-forget: writes run in a goroutine and failures are logged, never
 // returned to the request. Skipped for episodes (stills are per-episode) and
 // EXTERNAL_CACHE_ONLY (no files on disk to populate).
-func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []services.RatingBadge, rendered []byte, imageSize services.ImageSize) {
+//
+// available (the title's rating sources, nil when none were fetched) is
+// stored for each alternate too, so serveColdCache can rebuild its key.
+func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []services.RatingBadge, rendered []byte, available *string) {
 	if p.ExternalCacheOnly || p.Kind == "episode" {
 		return
 	}
@@ -119,17 +122,18 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 	titleKey := resolved.TitleKey
 	title := resolved.Title
 	imageTypeChar := ImageDbValue(p.Kind)
-	go func() {
-		// Use a background context for the writes so the cross-id cache
-		// population survives a client disconnect on the originating request
-		// (this is server-side cache maintenance, not part of the response).
-		ctx := p.Context
-		if ctx == nil {
-			ctx = context.Background()
-		} else {
-			bg := context.Background()
-			ctx = bg
-		}
+	// At most CROSS_ID_CONCURRENCY writers at a time; when all are busy the
+	// copies are skipped (a request via another id then renders normally).
+	release, ok := currentCrossIDSlots().tryAcquire()
+	if !ok {
+		slog.Debug("cross-id cache write skipped: writers busy", "id", p.IDType+"/"+p.IDValue)
+		return
+	}
+	started := goBackground(func() {
+		defer release()
+		// A background context: the copies survive a client disconnect on
+		// the originating request (server-side cache maintenance).
+		ctx := context.Background()
 		for _, alt := range alternates {
 			altKey, altPath, err := p.cacheKeyFor(alt.idType, alt.idValue, suffix)
 			if err != nil {
@@ -142,6 +146,15 @@ func (p ServeParams) writeCrossIDCache(resolved *services.ResolvedID, badges []s
 			if err := services.UpsertImageMetaCtx(ctx, p.DB, altKey, releaseDate, imageTypeChar, titleKey, title); err != nil {
 				slog.Warn("cross-id meta write failed", "cache_key", altKey, "error", err)
 			}
+			if available != nil {
+				altID := alt.idType + "/" + alt.idValue
+				if err := services.UpsertAvailableRatingsCtx(ctx, p.DB, altID, *available, releaseDate); err != nil {
+					slog.Warn("cross-id available ratings write failed", "id", altID, "error", err)
+				}
+			}
 		}
-	}()
+	})
+	if !started { // shutting down
+		release()
+	}
 }

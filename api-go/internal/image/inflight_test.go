@@ -9,20 +9,22 @@ import (
 	"time"
 )
 
-// waitForTotalCalls polls until the inflight set has been entered at least
-// `want` times, or fails the test after `deadline`. Replaces a fixed
-// time.Sleep that pessimistically waited for followers to enter
-// RunCoalesced before the leader released.
+// waitForTotalCalls polls until `want` callers (the leader plus want-1
+// followers) are inside the inflight set, or fails the test after
+// `deadline`. It waits for the followers to be registered as waiting on the
+// leader, not just to have entered RunCoalesced: a follower counted on entry
+// but not yet registered could find the key gone once the leader is
+// released, and run fn a second time.
 func waitForTotalCalls(t *testing.T, set *InflightSet, want int64, deadline time.Duration) {
 	t.Helper()
 	end := time.Now().Add(deadline)
 	for time.Now().Before(end) {
-		if set.TotalCalls() >= want {
+		if set.Waiting() >= want-1 {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("inflight total calls %d < %d after %v", set.TotalCalls(), want, deadline)
+	t.Fatalf("inflight waiters %d < %d after %v", set.Waiting(), want-1, deadline)
 }
 
 func TestInflightSet_DedupsConcurrentCalls(t *testing.T) {

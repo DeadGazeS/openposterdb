@@ -3,7 +3,23 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
+
+func TestParseByteSize(t *testing.T) {
+	for in, want := range map[string]int64{
+		"": 0, "0": 0, "1024": 1024, "10GB": 10 << 30, "500 MiB": 500 << 20, "1.5t": 3 << 39, "2k": 2048,
+	} {
+		if got, err := ParseByteSize(in); err != nil || got != want {
+			t.Errorf("ParseByteSize(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"GB", "-1", "10XB", "ten"} {
+		if _, err := ParseByteSize(bad); err == nil {
+			t.Errorf("ParseByteSize(%q): want an error", bad)
+		}
+	}
+}
 
 func setEnv(t *testing.T, key, value string) {
 	t.Helper()
@@ -69,6 +85,24 @@ func TestFromEnvCustomValues(t *testing.T) {
 	}
 	if !cfg.ExternalCacheOnly {
 		t.Error("expected ExternalCacheOnly to be true")
+	}
+}
+
+// SHUTDOWN_DRAIN_DELAY_SECS: unset is 0 (shut down at once); an invalid
+// value falls back to 0.
+func TestFromEnv_ShutdownDrainDelay(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want time.Duration
+	}{{"", 0}, {"15", 15 * time.Second}, {"-3", 0}, {"abc", 0}} {
+		setEnv(t, "SHUTDOWN_DRAIN_DELAY_SECS", tc.val)
+		cfg, err := FromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ShutdownDrainDelay != tc.want {
+			t.Errorf("SHUTDOWN_DRAIN_DELAY_SECS=%q: %v, want %v", tc.val, cfg.ShutdownDrainDelay, tc.want)
+		}
 	}
 }
 

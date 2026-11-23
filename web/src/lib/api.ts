@@ -41,19 +41,20 @@ async function authRequest(
 
 // Admin (JWT cookie-based) — wraps authRequest and adds a 401-refresh-retry
 // loop. On 401, tries to refresh the token; if that succeeds, re-sends the
-// request with the new token; if not, clears credentials and returns the
-// original 401.
+// request with the new token; if the refresh is rejected (401), clears
+// credentials and returns the original 401. A refresh that failed for another
+// reason (server error, busy, network) keeps the session and returns the 401.
 async function request(path: string, options: RequestInit = {}): Promise<Response> {
   const auth = useAuthStore()
   const token = auth.token
   let res = await authRequest(path, options, token, true)
 
   if (res.status === 401 && token) {
-    const refreshed = await auth.refresh()
-    if (refreshed) {
+    const outcome = await auth.refresh()
+    if (outcome === 'refreshed') {
       res = await authRequest(path, options, auth.token, true)
-    } else {
-      // Refresh failed — clear credentials and redirect without retrying
+    } else if (outcome === 'unauthorized') {
+      // Refresh rejected — clear credentials and redirect without retrying
       auth.logout()
       _onAuthFailure?.()
     }

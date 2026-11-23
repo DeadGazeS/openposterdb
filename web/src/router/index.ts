@@ -101,8 +101,9 @@ const router = createRouter({
           meta: { title: IMAGE_LIST_TITLES[kind] },
         })),
         {
+          // Old API keys page (Rust-era bookmarks).
           path: 'keys',
-          redirect: { name: 'settings-api' },
+          redirect: { name: 'settings-api', query: { tab: 'api-keys' } },
         },
         {
           path: 'settings',
@@ -168,6 +169,11 @@ const router = createRouter({
           meta: { title: 'Individual Image Settings' },
         },
       ],
+    },
+    {
+      // Old name of the per-key settings page (Rust-era bookmarks).
+      path: '/key-settings',
+      redirect: { name: 'individual-image-settings' },
     },
     {
       path: '/login',

@@ -45,7 +45,7 @@ func TestCDNHandler_MethodNotAllowed(t *testing.T) {
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
 	})
-	req := httptest.NewRequest("POST", "/c/abc/imdb/poster-default/x.jpg", nil)
+	req := httptest.NewRequest("POST", "/c/abc/imdb/poster-default/tt0000001.jpg", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -61,7 +61,7 @@ func TestCDNHandler_HeadAllowed(t *testing.T) {
 	mux.HandleFunc("/c/{hash}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		HandleCDNImage(func() ImageDeps { return ImageDeps{} }, reg)(w, r)
 	})
-	req := httptest.NewRequest("HEAD", "/c/unknown/imdb/poster-default/x.jpg", nil)
+	req := httptest.NewRequest("HEAD", "/c/unknown/imdb/poster-default/tt0000001.jpg", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

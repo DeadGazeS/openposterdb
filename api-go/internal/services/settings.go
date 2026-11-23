@@ -246,8 +246,8 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 	}
 	defaults := DefaultRenderSettings()
 
-	return RenderSettings{
-		ImageSource:            ImageSource(stringOr(globals, "image_source", string(defaults.ImageSource))),
+	s := RenderSettings{
+		ImageSource:            ParseImageSource(stringOr(globals, "image_source", string(defaults.ImageSource))),
 		Lang:                   stringOr(globals, "lang", defaults.Lang),
 		Textless:               boolOr(globals, "textless", defaults.Textless),
 		RatingsLimit:           int32Or(globals, "ratings_limit", defaults.RatingsLimit),
@@ -257,14 +257,14 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		PosterLayout:           UnmarshalLayout(stringOr(globals, "poster_layout", ""), &defaults.PosterLayout),
 		LogoRatingsLimit:       int32Or(globals, "logo_ratings_limit", defaults.LogoRatingsLimit),
 		BackdropRatingsLimit:   int32Or(globals, "backdrop_ratings_limit", defaults.BackdropRatingsLimit),
-		PosterBadgeStyle:       ParseBadgeStyle(stringOr(globals, "poster_badge_style", string(defaults.PosterBadgeStyle))),
-		LogoBadgeStyle:         ParseBadgeStyle(stringOr(globals, "logo_badge_style", string(defaults.LogoBadgeStyle))),
-		BackdropBadgeStyle:     ParseBadgeStyle(stringOr(globals, "backdrop_badge_style", string(defaults.BackdropBadgeStyle))),
-		PosterLabelStyle:       LabelStyle(stringOr(globals, "poster_label_style", string(defaults.PosterLabelStyle))),
-		LogoLabelStyle:         LabelStyle(stringOr(globals, "logo_label_style", string(defaults.LogoLabelStyle))),
-		BackdropLabelStyle:     LabelStyle(stringOr(globals, "backdrop_label_style", string(defaults.BackdropLabelStyle))),
-		PosterBadgeDirection:   BadgeDirection(stringOr(globals, "poster_badge_direction", string(defaults.PosterBadgeDirection))),
-		PosterFit:              PosterFit(stringOr(globals, "poster_fit", string(defaults.PosterFit))),
+		PosterBadgeStyle:       ParseBadgeStyleOr(stringOr(globals, "poster_badge_style", string(defaults.PosterBadgeStyle)), defaults.PosterBadgeStyle),
+		LogoBadgeStyle:         ParseBadgeStyleOr(stringOr(globals, "logo_badge_style", string(defaults.LogoBadgeStyle)), defaults.LogoBadgeStyle),
+		BackdropBadgeStyle:     ParseBadgeStyleOr(stringOr(globals, "backdrop_badge_style", string(defaults.BackdropBadgeStyle)), defaults.BackdropBadgeStyle),
+		PosterLabelStyle:       ParseLabelStyle(stringOr(globals, "poster_label_style", string(defaults.PosterLabelStyle))),
+		LogoLabelStyle:         ParseLabelStyle(stringOr(globals, "logo_label_style", string(defaults.LogoLabelStyle))),
+		BackdropLabelStyle:     ParseLabelStyle(stringOr(globals, "backdrop_label_style", string(defaults.BackdropLabelStyle))),
+		PosterBadgeDirection:   ParseBadgeDirectionOr(stringOr(globals, "poster_badge_direction", string(defaults.PosterBadgeDirection)), defaults.PosterBadgeDirection),
+		PosterFit:              ParsePosterFit(stringOr(globals, "poster_fit", string(defaults.PosterFit))),
 		PosterTextSize:         ClampScalePercent(int32Or(globals, "poster_text_size", int32(defaults.PosterTextSize))),
 		LogoTextSize:           ClampScalePercent(int32Or(globals, "logo_text_size", int32(defaults.LogoTextSize))),
 		BackdropTextSize:       ClampScalePercent(int32Or(globals, "backdrop_text_size", int32(defaults.BackdropTextSize))),
@@ -284,31 +284,33 @@ func ParseGlobalRenderSettings(globals map[string]string) RenderSettings {
 		BackdropLogoSize:       ClampScalePercent(int32Or(globals, "backdrop_logo_size", int32(defaults.BackdropLogoSize))),
 		LogoLayout:             UnmarshalLayout(stringOr(globals, "logo_layout", ""), &defaults.LogoLayout),
 		BackdropLayout:         UnmarshalLayout(stringOr(globals, "backdrop_layout", ""), &defaults.BackdropLayout),
-		BackdropBadgeDirection: BadgeDirection(stringOr(globals, "backdrop_badge_direction", string(defaults.BackdropBadgeDirection))),
+		BackdropBadgeDirection: ParseBadgeDirectionOr(stringOr(globals, "backdrop_badge_direction", string(defaults.BackdropBadgeDirection)), defaults.BackdropBadgeDirection),
 		BackdropEdgeInsetX:     int32ClampOr(int32Or(globals, "backdrop_edge_inset_x", defaults.BackdropEdgeInsetX)),
 		BackdropEdgeInsetY:     int32ClampOr(int32Or(globals, "backdrop_edge_inset_y", defaults.BackdropEdgeInsetY)),
 		EpisodeRatingsLimit:    int32Or(globals, "episode_ratings_limit", defaults.EpisodeRatingsLimit),
-		EpisodeBadgeStyle:      ParseBadgeStyle(stringOr(globals, "episode_badge_style", string(defaults.EpisodeBadgeStyle))),
-		EpisodeLabelStyle:      LabelStyle(stringOr(globals, "episode_label_style", string(defaults.EpisodeLabelStyle))),
+		EpisodeBadgeStyle:      ParseBadgeStyleOr(stringOr(globals, "episode_badge_style", string(defaults.EpisodeBadgeStyle)), defaults.EpisodeBadgeStyle),
+		EpisodeLabelStyle:      ParseLabelStyle(stringOr(globals, "episode_label_style", string(defaults.EpisodeLabelStyle))),
 		EpisodeTextSize:        ClampScalePercent(int32Or(globals, "episode_text_size", int32(defaults.EpisodeTextSize))),
 		EpisodeBadgeSize:       ClampScalePercent(int32Or(globals, "episode_badge_size", int32(defaults.EpisodeBadgeSize))),
 		EpisodeLogoSize:        ClampScalePercent(int32Or(globals, "episode_logo_size", int32(defaults.EpisodeLogoSize))),
 		EpisodeLayout:          UnmarshalLayout(stringOr(globals, "episode_layout", ""), &defaults.EpisodeLayout),
-		EpisodeBadgeDirection:  BadgeDirection(stringOr(globals, "episode_badge_direction", string(defaults.EpisodeBadgeDirection))),
+		EpisodeBadgeDirection:  ParseBadgeDirectionOr(stringOr(globals, "episode_badge_direction", string(defaults.EpisodeBadgeDirection)), defaults.EpisodeBadgeDirection),
 		EpisodeBlur:            boolOr(globals, "episode_blur", defaults.EpisodeBlur),
 		UseKitsu:               boolOr(globals, "use_kitsu", defaults.UseKitsu),
 		UseMAL:                 boolOr(globals, "use_mal", defaults.UseMAL),
 		AnimeArtwork:           ParseAnimeArtwork(stringOr(globals, "anime_artwork", string(defaults.AnimeArtwork))),
-		PosterBadgeShape:       BadgeShape(stringOr(globals, "poster_badge_shape", string(defaults.PosterBadgeShape))),
-		LogoBadgeShape:         BadgeShape(stringOr(globals, "logo_badge_shape", string(defaults.LogoBadgeShape))),
-		BackdropBadgeShape:     BadgeShape(stringOr(globals, "backdrop_badge_shape", string(defaults.BackdropBadgeShape))),
-		EpisodeBadgeShape:      BadgeShape(stringOr(globals, "episode_badge_shape", string(defaults.EpisodeBadgeShape))),
+		PosterBadgeShape:       ParseBadgeShape(stringOr(globals, "poster_badge_shape", string(defaults.PosterBadgeShape))),
+		LogoBadgeShape:         ParseBadgeShape(stringOr(globals, "logo_badge_shape", string(defaults.LogoBadgeShape))),
+		BackdropBadgeShape:     ParseBadgeShape(stringOr(globals, "backdrop_badge_shape", string(defaults.BackdropBadgeShape))),
+		EpisodeBadgeShape:      ParseBadgeShape(stringOr(globals, "episode_badge_shape", string(defaults.EpisodeBadgeShape))),
 		PosterBadgeAlpha:       ClampBadgeAlpha(int32Or(globals, "poster_badge_alpha", int32(defaults.PosterBadgeAlpha))),
 		LogoBadgeAlpha:         ClampBadgeAlpha(int32Or(globals, "logo_badge_alpha", int32(defaults.LogoBadgeAlpha))),
 		BackdropBadgeAlpha:     ClampBadgeAlpha(int32Or(globals, "backdrop_badge_alpha", int32(defaults.BackdropBadgeAlpha))),
 		EpisodeBadgeAlpha:      ClampBadgeAlpha(int32Or(globals, "episode_badge_alpha", int32(defaults.EpisodeBadgeAlpha))),
 		Colors:                 parseSourceColors(globals),
 	}
+	applyLegacyGlobals(globals, &s)
+	return s
 }
 
 func stringOr(m map[string]string, key, def string) string {
@@ -660,6 +662,18 @@ func ValidateRenderSettings(s *RenderSettings) error {
 	}
 	for _, layout := range []ImageLayout{s.PosterLayout, s.LogoLayout, s.BackdropLayout, s.EpisodeLayout} {
 		if err := ValidateLayout(&layout); err != nil {
+			return err
+		}
+	}
+	// Enum fields (image_source, poster_fit, *_badge_style, …): unknown
+	// values are rejected as on the per-key route, not stored and then
+	// silently normalised on read.
+	sv := reflect.ValueOf(s).Elem()
+	for _, spec := range RenderSettingFields {
+		if spec.GoType != fieldTypeString {
+			continue
+		}
+		if err := ValidateSettingEnum(spec.JSONName, sv.FieldByName(spec.GoName).String()); err != nil {
 			return err
 		}
 	}

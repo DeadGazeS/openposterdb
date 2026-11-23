@@ -5,6 +5,11 @@ services:
     image: ghcr.io/deadgazes/openposterdb:latest
     container_name: openposterdb
     restart: unless-stopped
+    # Time between SIGTERM and SIGKILL on `docker stop` (Docker's default is
+    # 10s). Shutdown takes SHUTDOWN_DRAIN_DELAY_SECS + up to 10s of request
+    # drain + up to 20s for background renders; 40s covers a delay of up to
+    # 10s. Raise it with a longer delay.
+    stop_grace_period: 40s
     ports:
       # Reachable on every interface of the host. With a reverse proxy on the
       # same host (nginx, Caddy, Traefik), publish on loopback only so clients
@@ -16,7 +21,7 @@ services:
     volumes:
       - openposterdb-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/auth/status"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/health"]
       interval: 5s
       timeout: 3s
       retries: 20

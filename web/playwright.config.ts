@@ -61,7 +61,9 @@ export default defineConfig({
       // key-auth-api tests that depend on the global default being 't'.
       name: 'settings',
       dependencies: ['setup'],
-      testMatch: /settings\.spec\.ts$/,
+      // Only settings.spec.ts: a bare /settings\.spec\.ts$/ also matched
+      // key-settings.spec.ts, whose failures then blocked every chromium test.
+      testMatch: /(^|[\\/])settings\.spec\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
       },
@@ -69,7 +71,7 @@ export default defineConfig({
     {
       name: 'chromium',
       dependencies: ['setup', 'settings'],
-      testIgnore: [/setup-flow\.spec\.ts/, /live-api\.spec\.ts/, /settings\.spec\.ts$/],
+      testIgnore: [/setup-flow\.spec\.ts/, /live-api\.spec\.ts/, /(^|[\\/])settings\.spec\.ts$/],
       use: {
         ...devices['Desktop Chrome'],
       },

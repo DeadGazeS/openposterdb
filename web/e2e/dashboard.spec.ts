@@ -14,7 +14,9 @@ test.describe('dashboard', () => {
   })
 
   test('shows stats cards', async ({ page }) => {
-    const cards = page.locator('[data-slot="card"]')
+    // The tooltip trigger (as-child) replaces the cards' data-slot="card",
+    // so the tiles are found by their stat-<key> test ids.
+    const cards = page.getByTestId('stats-grid').locator('[data-testid^="stat-"]')
     await expect(cards.filter({ hasText: 'Total Images' })).toBeVisible()
     await expect(cards.filter({ hasText: 'API Keys' })).toBeVisible()
     await expect(cards.filter({ hasText: 'Memory Cache Entries' })).toBeVisible()
@@ -53,9 +55,10 @@ test.describe('dashboard', () => {
     await page.click('text=Posters')
     await expect(page).toHaveURL(/\/admin\/posters/)
 
-    // Navigate to API Keys
-    await page.click('text=API Keys')
-    await expect(page).toHaveURL(/\/admin\/keys/)
+    // Navigate to Settings → API (API keys live there now)
+    await page.click('text=Settings')
+    await page.getByRole('link', { name: 'API', exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/settings\/api/)
 
     // Navigate back to Dashboard
     await page.click('text=Dashboard')

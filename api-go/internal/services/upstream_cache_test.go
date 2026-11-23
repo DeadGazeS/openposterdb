@@ -27,12 +27,12 @@ func TestTmdbGetImages_Cached(t *testing.T) {
 	tr := &upstreamCounter{status: 200, body: `{"posters":[{"file_path":"/a.jpg"}]}`}
 	c := NewTmdbClient("k", &http.Client{Transport: tr})
 	for i := 0; i < 3; i++ {
-		img, err := c.GetImagesCtx(t.Context(), "movie", 278, "en")
+		img, err := c.GetImagesCtx(t.Context(), "movie", 278, "en", "")
 		if err != nil || len(img.Posters) != 1 {
 			t.Fatalf("GetImages: %v %+v", err, img)
 		}
 	}
-	if _, err := c.GetImagesCtx(t.Context(), "movie", 278, "de"); err != nil {
+	if _, err := c.GetImagesCtx(t.Context(), "movie", 278, "de", ""); err != nil {
 		t.Fatal(err)
 	}
 	if n := tr.calls.Load(); n != 2 {
@@ -85,10 +85,10 @@ func TestResolveIDCached_NegativeCacheOnlyNotFound(t *testing.T) {
 func TestClearUpstreamCaches(t *testing.T) {
 	tr := &upstreamCounter{status: 200, body: `{"posters":[]}`}
 	c := NewTmdbClient("k", &http.Client{Transport: tr})
-	c.GetImagesCtx(t.Context(), "movie", 1, "en")
-	c.GetImagesCtx(t.Context(), "movie", 1, "en")
+	c.GetImagesCtx(t.Context(), "movie", 1, "en", "")
+	c.GetImagesCtx(t.Context(), "movie", 1, "en", "")
 	ClearUpstreamCaches()
-	c.GetImagesCtx(t.Context(), "movie", 1, "en")
+	c.GetImagesCtx(t.Context(), "movie", 1, "en", "")
 	if n := tr.calls.Load(); n != 2 {
 		t.Fatalf("TMDB calls = %d, want 2 (cached, then refetched after the clear)", n)
 	}
@@ -123,12 +123,12 @@ func TestClearUpstreamCaches_InFlightFetchDoesNotSurvive(t *testing.T) {
 	})
 	c := NewTmdbClient("k", &http.Client{Transport: transport})
 	done := make(chan struct{})
-	go func() { c.GetImagesCtx(t.Context(), "movie", 9, "en"); close(done) }()
+	go func() { c.GetImagesCtx(t.Context(), "movie", 9, "en", ""); close(done) }()
 	<-started
 	ClearUpstreamCaches()
 	close(release)
 	<-done
-	c.GetImagesCtx(t.Context(), "movie", 9, "en")
+	c.GetImagesCtx(t.Context(), "movie", 9, "en", "")
 	if n := calls.Load(); n != 2 {
 		t.Fatalf("calls = %d, want 2 (the pre-clear result must not be served)", n)
 	}

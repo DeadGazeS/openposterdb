@@ -14,8 +14,9 @@ Most self-hosters should use Docker (see the [README](../README.md)). These inst
 
 ```bash
 cd api-go
-cp .env.example .env
-# Edit .env — at minimum set TMDB_API_KEY, MDBLIST_API_KEY (or OMDB), and JWT_SECRET
+cp ../.env.example .env   # the server reads .env from the working directory
+# Edit .env — set JWT_SECRET and SECRETS_KEY (each: openssl rand -hex 32);
+# provider keys (TMDB, MDBList/OMDb, ...) go here or in the admin UI
 go run ./cmd/server/
 ```
 

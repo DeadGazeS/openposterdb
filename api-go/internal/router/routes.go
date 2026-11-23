@@ -32,23 +32,34 @@ var adminImageKinds = []struct {
 var previewKinds = []string{"poster", "logo", "backdrop", "episode"}
 
 func (r *Router) registerRoutes() {
+	r.registerHealthRoutes()
 	r.registerAuthRoutes()
 	r.registerKeyRoutes()
 	r.registerAdminRoutes()
 	r.registerKindRoutes()
 	r.registerPreviewRoutes()
 	r.registerOpenAPIRoute()
+	r.registerAPINotFound()
 	r.registerImageRoutes()
 	r.setupStatic()
 }
 
+// registerAPINotFound answers unknown /api/... paths with a JSON 404. They
+// used to fall through to the image catch-all (/{apiKey}/{rest...}) and come
+// back as "invalid api key" / "invalid path".
+func (r *Router) registerAPINotFound() {
+	r.mux.HandleFunc("/api/{rest...}", func(w http.ResponseWriter, req *http.Request) {
+		httpx.WriteError(w, http.StatusNotFound, "Not found")
+	})
+}
+
 // registerOpenAPIRoute wires GET /api/openapi.json. The spec is public by
-// default so a CDN edge can cache it; when DISABLE_PUBLIC_PAGES=true the
-// route is gated behind admin auth.
+// default so a CDN edge can cache it; when DISABLE_PUBLIC_PAGES=true it needs
+// a login — an admin or an API-key session, both of which use the API.
 func (r *Router) registerOpenAPIRoute() {
 	openapiHandler := http.HandlerFunc(handlers.HandleOpenAPISpec)
 	if r.state.Config.DisablePublicPages {
-		r.mux.Handle("/api/openapi.json", handlers.RequireAuth(r.jwtSecret())(openapiHandler))
+		r.mux.Handle("/api/openapi.json", handlers.RequireAnyAuth(r.jwtSecret(), r.state.DB)(openapiHandler))
 		return
 	}
 	r.mux.Handle("/api/openapi.json", openapiHandler)
@@ -59,10 +70,19 @@ func (r *Router) registerAuthRoutes() {
 	// were unthrottled, allowing unlimited password guessing.
 	authLimiter := newRateLimiter(r.state.Config.RateLimitAuthRPM)
 	authLimiter.clientIP = r.trust.clientIP
+	// The session refresh has its own, larger bucket (see refreshPerMinute);
+	// RATE_LIMIT_AUTH_RPM=0 turns it off as well.
+	var refreshRPM uint64 = refreshPerMinute
+	if r.state.Config.RateLimitAuthRPM == 0 {
+		refreshRPM = 0
+	}
+	refreshLimiter := newRateLimiterBurst(refreshRPM, refreshBurst)
+	refreshLimiter.clientIP = r.trust.clientIP
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		for range ticker.C {
 			authLimiter.SweepIdle()
+			refreshLimiter.SweepIdle()
 		}
 	}()
 	authRateLimit := RateLimit(authLimiter)
@@ -88,10 +108,7 @@ func (r *Router) registerAuthRoutes() {
 		_ = httpx.DecodeJSON(req, &body)
 
 		status, resp, cookies := handlers.SetupHandler(req.Context(), s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
-		for _, c := range cookies {
-			http.SetCookie(w, c)
-		}
-		httpx.WriteJSON(w, status, resp)
+		handlers.WriteAuthResponse(w, status, resp, cookies)
 	})
 
 	throttled("/api/auth/login", func(w http.ResponseWriter, req *http.Request) {
@@ -105,14 +122,12 @@ func (r *Router) registerAuthRoutes() {
 		}
 		_ = httpx.DecodeJSON(req, &body)
 
-		status, resp, cookies := handlers.LoginHandler(req.Context(), s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
-		for _, c := range cookies {
-			http.SetCookie(w, c)
-		}
-		httpx.WriteJSON(w, status, resp)
+		ctx := handlers.WithClientIP(req.Context(), r.trust.clientIP(req)) // for the failed-login log
+		status, resp, cookies := handlers.LoginHandler(ctx, s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
+		handlers.WriteAuthResponse(w, status, resp, cookies)
 	})
 
-	r.mux.HandleFunc("/api/auth/refresh", func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/auth/refresh", RateLimit(refreshLimiter)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
@@ -127,7 +142,7 @@ func (r *Router) registerAuthRoutes() {
 			http.SetCookie(w, c)
 		}
 		httpx.WriteJSON(w, status, resp)
-	})
+	})))
 
 	// Logout. The refresh cookie is path-scoped to /api/auth/refresh, so the
 	// browser only sends it to paths under that prefix: the SPA logs out via
@@ -173,7 +188,7 @@ func (r *Router) registerAuthRoutes() {
 func (r *Router) registerKeyRoutes() {
 	s := r.state
 
-	r.mux.Handle("/api/keys", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/keys", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleListKeys(s.DB, s.SecretsKey)(w, req)
@@ -184,13 +199,13 @@ func (r *Router) registerKeyRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/keys/{id}", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/keys/{id}", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		handlers.HandleDeleteKey(s.DB)(w, req)
 	})))
 
-	r.mux.Handle("/api/keys/{id}/reveal", handlers.RequireAuth(r.jwtSecret())(handlers.HandleRevealKey(s.DB, s.SecretsKey)))
+	r.mux.Handle("/api/keys/{id}/reveal", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(handlers.HandleRevealKey(s.DB, s.SecretsKey)))
 
-	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleGetKeySettings(s.DB, s.fanartAvailable())(w, req)
@@ -226,11 +241,11 @@ func (r *Router) registerKeyRoutes() {
 func (r *Router) registerAdminRoutes() {
 	s := r.state
 
-	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret())(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
+	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
 
 	// Per-admin-user UI preferences (sidebar disclaimer state etc.).
-	r.mux.Handle("/api/admin/prefs", handlers.RequireAuth(r.jwtSecret())(handlers.HandleUserPrefs(s.DB)))
-	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/admin/prefs", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(handlers.HandleUserPrefs(s.DB)))
+	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleGetSettings(s.DB, s.isFreeAPIKeyEnabled(), s.Config.FreeKeyEnabled != nil, s.fanartAvailable())(w, req)
@@ -241,7 +256,7 @@ func (r *Router) registerAdminRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/admin/cache/purge", handlers.RequireAuth(r.jwtSecret())(
+	r.mux.Handle("/api/admin/cache/purge", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(
 		handlers.HandlePurgeAll(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
 
 	r.mux.HandleFunc("/api/admin/settings/services", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
@@ -250,13 +265,16 @@ func (r *Router) registerAdminRoutes() {
 			httpx.WriteJSON(w, 200, s.ServiceKeys.GetStatus())
 		case http.MethodPut:
 			var update services.ServiceKeysUpdate
-			_ = httpx.DecodeJSON(req, &update)
+			if err := httpx.DecodeJSON(req, &update); err != nil {
+				httpx.WriteError(w, 400, "invalid request body")
+				return
+			}
 			// The UI keeps existing keys as "ref:<fingerprint>" (it never
 			// receives their plaintext); expand them before validating.
 			for _, f := range []struct {
 				name  string
 				value **string
-			}{{"tmdb", &update.TMDB}, {"mdblist", &update.MDBList}, {"omdb", &update.OMDB}, {"fanart", &update.Fanart}, {"trakt", &update.Trakt}} {
+			}{{"tmdb", &update.TMDB}, {"mdblist", &update.MDBList}, {"omdb", &update.OMDB}, {"fanart", &update.Fanart}, {"trakt", &update.Trakt}, {"tvdb", &update.TVDB}} {
 				if *f.value == nil {
 					continue
 				}
@@ -277,6 +295,7 @@ func (r *Router) registerAdminRoutes() {
 				{"omdb", update.OMDB},
 				{"fanart", update.Fanart},
 				{"trakt", update.Trakt},
+				{"tvdb", update.TVDB},
 			}
 			for _, v := range validators {
 				if v.value == nil || strings.TrimSpace(*v.value) == "" {
@@ -289,7 +308,8 @@ func (r *Router) registerAdminRoutes() {
 			}
 
 			if err := s.ServiceKeys.UpdateKeys(&update); err != nil {
-				httpx.WriteError(w, 500, "failed to update keys: "+err.Error())
+				slog.Error("updating service keys failed", "error", err)
+				httpx.WriteError(w, 500, "failed to update keys")
 				return
 			}
 			s.RefreshClientsFromKeys()
@@ -322,6 +342,7 @@ func (r *Router) registerAdminRoutes() {
 				return
 			}
 			if err := services.SetGlobalSettingCtx(req.Context(), s.DB, trustedProxiesSetting, raw); err != nil {
+				slog.Error("saving the trusted proxies setting failed", "error", err)
 				httpx.WriteError(w, 500, "Failed to save")
 				return
 			}
@@ -465,21 +486,38 @@ func (r *Router) registerPreviewRoutes() {
 func (r *Router) registerImageRoutes() {
 	s := r.state
 
-	// Per-IP rate limiters (0 disables). Constructed once per Router; janitor
-	// sweeps idle IPs every minute so long-running deployments don't grow
-	// the limiters map unboundedly.
-	imageLimiter := newRateLimiter(s.Config.RateLimitRPM)
+	// Rate limiters (0 disables), as in the Rust version: image requests are
+	// counted per API-key prefix + client IP (one household's media server
+	// and browser don't share a bucket with another key behind the same NAT),
+	// with a burst of imageBurst so a library scan's first page of posters
+	// goes through at once; isValid gets its own, smaller bucket; /c/ URLs
+	// carry no key and are counted per IP. The key is not validated yet, so
+	// one IP gets at most maxKeyBucketsPerIP key buckets (random keys can't
+	// fill the table). Constructed once per Router; the janitor sweeps idle
+	// entries every minute.
+	keyPrefix := func(req *http.Request) string { return apiKeyPrefix(req.PathValue("apiKey")) }
+	imageLimiter := newRateLimiterBurst(s.Config.RateLimitRPM, imageBurst)
 	imageLimiter.clientIP = r.trust.clientIP
-	cdnLimiter := newRateLimiter(s.Config.RateLimitCDNRPM)
+	imageLimiter.subKey = keyPrefix
+	var isValidRPM uint64 = isValidPerMinute
+	if s.Config.RateLimitRPM == 0 {
+		isValidRPM = 0 // RATE_LIMIT_RPM=0 turns the image-route limits off
+	}
+	isValidLimiter := newRateLimiterBurst(isValidRPM, isValidBurst)
+	isValidLimiter.clientIP = r.trust.clientIP
+	isValidLimiter.subKey = keyPrefix
+	cdnLimiter := newRateLimiterBurst(s.Config.RateLimitCDNRPM, imageBurst)
 	cdnLimiter.clientIP = r.trust.clientIP
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		for range ticker.C {
 			imageLimiter.SweepIdle()
+			isValidLimiter.SweepIdle()
 			cdnLimiter.SweepIdle()
 		}
 	}()
 	imageRateLimit := RateLimit(imageLimiter)
+	isValidRateLimit := RateLimit(isValidLimiter)
 	cdnRateLimit := RateLimit(cdnLimiter)
 
 	// Content-addressed CDN route: /c/{hash}/{rest...}. Resolves the hash to
@@ -488,16 +526,24 @@ func (r *Router) registerImageRoutes() {
 	r.mux.Handle("/c/{hash}/{rest...}", cdnRateLimit(http.HandlerFunc(cdnHandler)))
 
 	// Image/isValid routes via catch-all
-	imageHandler := handlers.HandleImage(s.imageDeps, s.isFreeAPIKeyEnabled)
-	isValidHandler := handlers.HandleIsValid(s.DB, s.isFreeAPIKeyEnabled)
-	r.mux.Handle("/{apiKey}/{rest...}", imageRateLimit(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		rest := req.PathValue("rest")
-		if rest == "isValid" {
-			isValidHandler(w, req)
+	imageHandler := imageRateLimit(handlers.HandleImage(s.imageDeps, s.freeAPIKeyEnabled))
+	isValidHandler := isValidRateLimit(handlers.HandleIsValid(s.DB, s.freeAPIKeyEnabled, r.lastUsed()))
+	r.mux.Handle("/{apiKey}/{rest...}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.PathValue("rest") == "isValid" {
+			isValidHandler.ServeHTTP(w, req)
 			return
 		}
-		imageHandler(w, req)
-	})))
+		imageHandler.ServeHTTP(w, req)
+	}))
+}
+
+// apiKeyPrefix is the part of an API key the rate limiter counts by (Rust:
+// the first 16 characters), so a client can't mint buckets with long keys.
+func apiKeyPrefix(key string) string {
+	if len(key) > 16 {
+		return key[:16]
+	}
+	return key
 }
 
 // setupStatic configures SPA serving from Config.StaticDir (if set).

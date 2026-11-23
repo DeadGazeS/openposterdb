@@ -5,10 +5,15 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -39,6 +44,9 @@ func CreateAdminUser(db *sql.DB, username, passwordHash string) (int64, error) {
 	return CreateAdminUserCtx(context.Background(), db, username, passwordHash)
 }
 
+// ErrSetupCompleted: an admin already exists, setup can't run again.
+var ErrSetupCompleted = errors.New("Setup already completed")
+
 func CreateFirstAdminUserCtx(ctx context.Context, db *sql.DB, username, passwordHash string) (int64, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -51,7 +59,7 @@ func CreateFirstAdminUserCtx(ctx context.Context, db *sql.DB, username, password
 		return 0, err
 	}
 	if count > 0 {
-		return 0, fmt.Errorf("Setup already completed")
+		return 0, ErrSetupCompleted
 	}
 
 	now := nowUTC()
@@ -92,6 +100,33 @@ func FindAdminUserByIDCtx(ctx context.Context, db *sql.DB, id int64) (username s
 
 func FindAdminUserByID(db *sql.DB, id int64) (username string, passwordHash string, err error) {
 	return FindAdminUserByIDCtx(context.Background(), db, id)
+}
+
+// adminExistsTTL bounds how long a deleted admin user's sessions keep
+// passing AdminUserExistsCachedCtx. Admin users are never deleted by the
+// app itself, only outside it (SQLite shell, restored backup).
+const adminExistsTTL = 60 * time.Second
+
+var adminExistsCaches sync.Map // *sql.DB -> *MemCache (username -> true)
+
+// AdminUserExistsCachedCtx reports whether an admin user with this name
+// exists. Hits are cached for adminExistsTTL; misses and read errors are not
+// (a new admin is seen at once).
+func AdminUserExistsCachedCtx(ctx context.Context, db *sql.DB, username string) (bool, error) {
+	v, _ := adminExistsCaches.LoadOrStore(db, NewMemCache(0, 1_000, adminExistsTTL, 0))
+	c := v.(*MemCache)
+	if _, ok := c.Get(username); ok {
+		return true, nil
+	}
+	_, _, _, err := FindAdminUserByUsernameCtx(ctx, db, username)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	c.Set(username, true, 1)
+	return true, nil
 }
 
 // --- Refresh token CRUD ---
@@ -138,21 +173,50 @@ func SetUserPrefs(db *sql.DB, username string, prefs map[string]string) error {
 
 // HashPassword returns an argon2id hash of password in the project's
 // canonical "hex(salt):hex(hash)" format. The salt is 16 random bytes and the
-// hash uses argon2id with parameters matching the Rust port: time=1,
-// memory=64MiB, threads=4, keyLen=32.
+// hash uses argon2id with time=1, memory=64MiB, threads=4, keyLen=32. (The
+// Rust version stored PHC strings with the argon2 crate defaults instead; see
+// VerifyPassword.)
 func HashPassword(password string) (string, error) {
+	return HashPasswordCtx(context.Background(), password)
+}
+
+// HashPasswordCtx is HashPassword; waiting for a hashing slot ends with ctx.
+func HashPasswordCtx(ctx context.Context, password string) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := argon2IDKey([]byte(password), salt)
+	hash, err := argon2IDKey(ctx, []byte(password), salt)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("%x:%x", salt, hash), nil
 }
 
+// phcPrefix marks a password hash written by the Rust version
+// ("$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>").
+const phcPrefix = "$argon2id$"
+
+// NeedsRehash reports whether storedHash is in a legacy format that should be
+// replaced by HashPassword after the next successful login.
+func NeedsRehash(storedHash string) bool {
+	return strings.HasPrefix(storedHash, phcPrefix)
+}
+
 // VerifyPassword checks password against a storedHash produced by
-// HashPassword. Returns false (not an error) when the password doesn't match;
-// returns an error only on malformed stored hash.
+// HashPassword, or a PHC-format argon2id string from a Rust-era install.
+// Returns false (not an error) when the password doesn't match; returns an
+// error only on malformed stored hash.
 func VerifyPassword(password, storedHash string) (bool, error) {
+	return VerifyPasswordCtx(context.Background(), password, storedHash)
+}
+
+// VerifyPasswordCtx is VerifyPassword; waiting for a hashing slot ends with
+// ctx (the error is then ctx.Err()).
+func VerifyPasswordCtx(ctx context.Context, password, storedHash string) (bool, error) {
+	if strings.HasPrefix(storedHash, phcPrefix) {
+		return verifyPHCArgon2id(ctx, password, storedHash)
+	}
 	before, after, ok := strings.Cut(storedHash, ":")
 	if !ok {
 		return false, fmt.Errorf("invalid hash format")
@@ -165,17 +229,119 @@ func VerifyPassword(password, storedHash string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	hash := argon2IDKey([]byte(password), salt)
+	hash, err := argon2IDKey(ctx, []byte(password), salt)
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(hash, expectedHash) == 1, nil
 }
 
 // passwordHashSlots caps concurrent argon2id runs: each allocates 64 MiB, so
 // a burst of parallel logins (login is unauthenticated) could otherwise
-// exhaust memory. Extra callers wait for a slot.
+// exhaust memory. Extra callers wait for a slot, or until their context ends
+// (a client that went away no longer holds a place in the queue).
 var passwordHashSlots = make(chan struct{}, 4)
 
-func argon2IDKey(password, salt []byte) []byte {
-	passwordHashSlots <- struct{}{}
+// passwordSlotWait bounds the wait for a hashing slot, so a saturated server
+// answers a busy 503 while the client is still there to read it.
+const passwordSlotWait = 5 * time.Second
+
+// passwordSlotWaitFor is passwordSlotWait; tests shorten it.
+var passwordSlotWaitFor = passwordSlotWait
+
+// ErrPasswordHashBusy: no hashing slot freed up within passwordSlotWait.
+var ErrPasswordHashBusy = errors.New("no password-hashing slot available")
+
+// newSlotWaitTimer: argon2IDKeyParams' "time" parameter shadows the package.
+func newSlotWaitTimer() *time.Timer { return time.NewTimer(passwordSlotWaitFor) }
+
+func argon2IDKey(ctx context.Context, password, salt []byte) ([]byte, error) {
+	return argon2IDKeyParams(ctx, password, salt, 1, 64*1024, 4, 32)
+}
+
+func argon2IDKeyParams(ctx context.Context, password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
+	wait := newSlotWaitTimer()
+	defer wait.Stop()
+	select {
+	case passwordHashSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-wait.C:
+		return nil, ErrPasswordHashBusy
+	}
 	defer func() { <-passwordHashSlots }()
-	return argon2.IDKey(password, salt, 1, 64*1024, 4, 32)
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen), nil
+}
+
+// Upper bounds for parameters read from a stored PHC string, so a corrupted
+// row can't make a login allocate gigabytes or spin for minutes.
+const (
+	phcMaxMemoryKiB = 256 * 1024
+	phcMaxTime      = 16
+	phcMaxKeyLen    = 128
+)
+
+// verifyPHCArgon2id verifies password against a PHC string
+// "$argon2id$v=19$m=<KiB>,t=<iterations>,p=<lanes>$<b64 salt>$<b64 hash>"
+// (unpadded standard base64, as written by the Rust argon2 crate).
+func verifyPHCArgon2id(ctx context.Context, password, phc string) (bool, error) {
+	parts := strings.Split(phc, "$")
+	// "", "argon2id", ["v=19",] "m=..,t=..,p=..", salt, hash
+	if len(parts) == 5 {
+		parts = append(parts[:2], append([]string{"v=19"}, parts[2:]...)...)
+	}
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
+		return false, fmt.Errorf("invalid PHC hash format")
+	}
+	if parts[2] != "v=19" {
+		return false, fmt.Errorf("unsupported argon2 version %q", parts[2])
+	}
+	var m, t, p uint64
+	seen := 0
+	for kv := range strings.SplitSeq(parts[3], ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			return false, fmt.Errorf("invalid PHC parameter %q", kv)
+		}
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			return false, fmt.Errorf("invalid PHC parameter %q", kv)
+		}
+		switch k {
+		case "m":
+			m = n
+		case "t":
+			t = n
+		case "p":
+			p = n
+		default:
+			return false, fmt.Errorf("unknown PHC parameter %q", k)
+		}
+		seen++
+	}
+	if seen != 3 || m == 0 || t == 0 || p == 0 || p > 255 || m > phcMaxMemoryKiB || t > phcMaxTime || m < 8*p {
+		return false, fmt.Errorf("invalid PHC parameters %q", parts[3])
+	}
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return false, fmt.Errorf("invalid PHC salt: %w", err)
+	}
+	expected, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil {
+		return false, fmt.Errorf("invalid PHC hash: %w", err)
+	}
+	if len(salt) < 8 || len(expected) < 4 || len(expected) > phcMaxKeyLen {
+		return false, fmt.Errorf("invalid PHC salt or hash length")
+	}
+	hash, err := argon2IDKeyParams(ctx, []byte(password), salt, uint32(t), uint32(m), uint8(p), uint32(len(expected)))
+	if err != nil {
+		return false, err
+	}
+	return subtle.ConstantTimeCompare(hash, expected) == 1, nil
+}
+
+// UpdateAdminPasswordHashCtx replaces the stored password hash of a user.
+func UpdateAdminPasswordHashCtx(ctx context.Context, db *sql.DB, id int64, passwordHash string) error {
+	_, err := db.ExecContext(ctx, "UPDATE admin_users SET password_hash = ? WHERE id = ?", passwordHash, id)
+	return err
 }

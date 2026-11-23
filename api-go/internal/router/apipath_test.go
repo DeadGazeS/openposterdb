@@ -12,11 +12,30 @@ func TestIsAPIPath(t *testing.T) {
 		"/c/abc":          true,
 		"/" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" + "/imdb/poster-default/tt1.jpg": true,
 		"/t0-free-rpdb/imdb/poster-default/tt0111161.jpg":                                                         true,
-		"/t0-free-rpdb/isValid":  true,
-		"/t0-free-rpdbx/isValid": false,
-		"/settings":              false,
-		"/assets/app.js":         false,
-		"/":                      false,
+		"/t0-free-rpdb/isValid": true,
+		// Any other key with an image or isValid path shape reaches the API
+		// too, so an unknown key is a JSON 401 instead of the SPA's index.html
+		// (media servers would otherwise get HTML with a 200).
+		"/t0-free-rpdbx/isValid":                              true,
+		"/invalid-key-here/imdb/poster-default/tt0111161.jpg": true,
+		"/somekey/tmdb/poster-default/movie-550.jpg":          true,
+		"/somekey/tvdb/logo-default/81189.png":                true,
+		"/somekey/kitsu/poster-default/1.jpg":                 true,
+		"/somekey/mal/poster-default/1.jpg":                   true,
+		"/somekey/imdb":                                       true,
+		// SPA routes stay with the SPA.
+		"/settings":                  false,
+		"/admin/keys":                false,
+		"/admin/settings/image":      false,
+		"/admin/posters":             false,
+		"/individual-image-settings": false,
+		"/key-settings":              false,
+		"/docs":                      false,
+		"/legal":                     false,
+		"/does/not/exist":            false,
+		"/assets/app.js":             false,
+		"/assets/imdb/x.js":          false,
+		"/":                          false,
 	}
 	for p, want := range cases {
 		if got := isAPIPath(p); got != want {

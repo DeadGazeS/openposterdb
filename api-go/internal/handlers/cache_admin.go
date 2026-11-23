@@ -61,6 +61,10 @@ func HandleFetchImage(deps ImageDeps, imageType, idType, idValue string) http.Ha
 			httpx.WriteError(w, 400, "invalid id value")
 			return
 		}
+		if err := services.ValidateIDFormat(idType, idValue); err != nil {
+			httpx.WriteError(w, 400, err.Error())
+			return
+		}
 
 		if deps.TMDB == nil {
 			httpx.WriteError(w, 503, "TMDB API key not configured — image generation unavailable")
@@ -83,7 +87,7 @@ func HandleFetchImage(deps ImageDeps, imageType, idType, idValue string) http.Ha
 
 		bytes, contentType, err := image.ServeImage(image.ServeParams{
 			Context: r.Context(), DB: deps.DB, TMDB: deps.TMDB, OMDB: deps.OMDB, MDBList: deps.MDBList, Trakt: deps.Trakt, Fanart: deps.Fanart,
-			Kitsu: deps.Kitsu, AniList: deps.AniList, KitsuIMDbMapper: deps.KitsuIMDbMapper,
+			Kitsu: deps.Kitsu, AniList: deps.AniList, Mappings: deps.Mappings, TVDB: deps.TVDB,
 			IDType: idType, IDValue: idValue, Kind: kind,
 			Settings: &settings,
 			CacheDir: deps.Config.CacheDir, ExternalCacheOnly: deps.Config.ExternalCacheOnly,

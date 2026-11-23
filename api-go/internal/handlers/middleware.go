@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -63,7 +64,9 @@ func WithAPIKeyUser(r *http.Request, keyID int64) *http.Request {
 	return r.WithContext(ctx)
 }
 
-func RequireAuth(jwtSecret []byte) func(http.Handler) http.Handler {
+// RequireAuth admits admin session JWTs whose admin still exists (db nil
+// skips that check, for tests); a lookup failure is a 500.
+func RequireAuth(jwtSecret []byte, db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
@@ -76,6 +79,18 @@ func RequireAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 			if err != nil || claims.Username == "" {
 				httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 				return
+			}
+			if db != nil {
+				exists, err := services.AdminUserExistsCachedCtx(r.Context(), db, claims.Username)
+				if err != nil {
+					slog.Error("auth: admin user lookup failed", "error", err)
+					httpx.WriteError(w, http.StatusInternalServerError, "Internal server error")
+					return
+				}
+				if !exists {
+					httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
+					return
+				}
 			}
 
 			next.ServeHTTP(w, WithAuthUser(r, claims.Username))
@@ -102,6 +117,7 @@ func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder, db *sql.DB) func(h
 			if db != nil {
 				exists, err := services.APIKeyExistsCachedCtx(r.Context(), db, claims.KeyID)
 				if err != nil {
+					slog.Error("auth: api key lookup failed", "key_id", claims.KeyID, "error", err)
 					httpx.WriteError(w, http.StatusInternalServerError, "Internal server error")
 					return
 				}
@@ -121,7 +137,9 @@ func RequireAPIKeyAuth(jwtSecret []byte, flusher KeyRecorder, db *sql.DB) func(h
 	}
 }
 
-func RequireAnyAuth(jwtSecret []byte) func(http.Handler) http.Handler {
+// RequireAnyAuth admits an admin or an API-key session JWT whose user or key
+// still exists (cached lookups; db nil skips the check, for tests).
+func RequireAnyAuth(jwtSecret []byte, db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
@@ -131,10 +149,34 @@ func RequireAnyAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 			}
 
 			if claims, err := ParseJWT(token, jwtSecret); err == nil && claims.Username != "" {
+				if db != nil {
+					exists, err := services.AdminUserExistsCachedCtx(r.Context(), db, claims.Username)
+					if err != nil {
+						slog.Error("auth: admin user lookup failed", "error", err)
+						httpx.WriteError(w, http.StatusInternalServerError, "Internal server error")
+						return
+					}
+					if !exists {
+						httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
+						return
+					}
+				}
 				next.ServeHTTP(w, WithAuthUser(r, claims.Username))
 				return
 			}
 			if claims, err := ParseAPIKeyJWT(token, jwtSecret); err == nil && claims.KeyID != 0 {
+				if db != nil {
+					exists, err := services.APIKeyExistsCachedCtx(r.Context(), db, claims.KeyID)
+					if err != nil {
+						slog.Error("auth: api key lookup failed", "key_id", claims.KeyID, "error", err)
+						httpx.WriteError(w, http.StatusInternalServerError, "Internal server error")
+						return
+					}
+					if !exists {
+						httpx.WriteError(w, http.StatusUnauthorized, "Unauthorized")
+						return
+					}
+				}
 				next.ServeHTTP(w, WithAPIKeyUser(r, claims.KeyID))
 				return
 			}

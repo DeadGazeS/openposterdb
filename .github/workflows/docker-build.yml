@@ -2,7 +2,7 @@ name: Build Docker Image
 
 on:
   push:
-    branches: [main, testing, rewrite, refactor]
+    branches: [main, testing, rewrite, refactor, fix/rewrite-regressions]
   workflow_dispatch:
 
 env:
@@ -27,7 +27,9 @@ jobs:
           if [ "${{ github.ref_name }}" = "main" ]; then
             VERSION="${BASE}"
           else
-            VERSION="${BASE}-${{ github.ref_name }}-${SHORT_SHA}"
+            # Branch names may contain "/", which breaks the Dockerfile's sed.
+            REF=$(echo "${{ github.ref_name }}" | tr '/' '-')
+            VERSION="${BASE}-${REF}-${SHORT_SHA}"
           fi
           # No package.json rewrite here: it changed the `COPY web/package.json`
           # layer and busted the npm ci cache on every commit. The Dockerfile

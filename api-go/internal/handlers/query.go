@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"openposterdb/internal/services"
 )
@@ -31,10 +32,19 @@ type ImageQuery struct {
 	Fit            *string `json:"fit"`
 	EdgeInsetX     *int32  `json:"edge_inset_x"`
 	EdgeInsetY     *int32  `json:"edge_inset_y"`
+
+	// Legacy (Rust-era) aliases, mapped onto the current settings:
+	// position / split / badge_direction → layout (LayoutFromLegacy),
+	// badge_background d|k|t|n → badge alpha, badge_size xs..xl → percent.
+	Position        *string `json:"position"`
+	Split           *bool   `json:"split"`
+	BadgeBackground *string `json:"badge_background"`
+	BadgeSizeName   *string `json:"-"` // badge_size given as a size name
 }
 
 func (q *ImageQuery) HasOverrides() bool {
 	return q.RatingsLimit != nil || q.RatingsOrder != nil || q.RatingsExclude != nil ||
+		q.Position != nil || q.Split != nil || q.BadgeBackground != nil || q.BadgeSizeName != nil ||
 		q.BadgeStyle != nil || q.LabelStyle != nil || q.TextSize != nil ||
 		q.BadgeSize != nil || q.LogoSize != nil ||
 		q.BadgeDirection != nil || q.BadgeShape != nil || q.BadgeAlpha != nil ||
@@ -155,6 +165,10 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 		if query.BadgeSize != nil {
 			*k.badgeSize = services.ClampScalePercent(*query.BadgeSize)
+		} else if query.BadgeSizeName != nil {
+			if pct, ok := services.PercentFromLegacySize(kind, *query.BadgeSizeName); ok {
+				*k.badgeSize = pct
+			}
 		}
 		if query.BadgeWidth != nil {
 			*k.badgeWidth = services.ClampScalePercent(*query.BadgeWidth)
@@ -170,6 +184,10 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 		}
 		if query.BadgeAlpha != nil {
 			*k.badgeAlpha = services.ClampBadgeAlpha(*query.BadgeAlpha)
+		} else if query.BadgeBackground != nil {
+			if a, ok := services.AlphaFromLegacyBackground(*query.BadgeBackground); ok {
+				*k.badgeAlpha = a
+			}
 		}
 		if query.Layout != nil {
 			// Parsed values only (never raw query strings) reach the cache
@@ -178,6 +196,23 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 			if l := services.UnmarshalLayout(*query.Layout, k.layout); services.ValidateLayout(&l) == nil {
 				*k.layout = l
 			}
+		} else if split := kind == "poster" && query.Split != nil && *query.Split; kind != "logo" && (query.Position != nil || split) {
+			// Legacy placement: rebuilt from position / split (plus direction)
+			// with the badge count of the layout it replaces (or
+			// ?ratings_limit). Without ?badge_direction the key's stored
+			// direction applies; unknown values fall back to the kind's old
+			// defaults. As in the Rust version, logos ignore all three and
+			// split is poster-only; badge_direction or split=false alone
+			// never rebuild, so they never wipe a stored layout.
+			count := k.layout.Total()
+			if query.RatingsLimit != nil {
+				count = *query.RatingsLimit
+			}
+			direction := string(*k.badgeDirection)
+			if query.BadgeDirection != nil {
+				direction = *query.BadgeDirection
+			}
+			*k.layout = services.LayoutFromLegacy(kind, deref(query.Position), direction, split, count)
 		}
 		if query.BadgeDirection != nil && k.badgeDirection != nil {
 			*k.badgeDirection = services.ParseBadgeDirection(*query.BadgeDirection)
@@ -214,6 +249,13 @@ func applyQueryOverrides(settings *services.RenderSettings, query *ImageQuery, k
 	return &s
 }
 
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func parseImageQuery(r *http.Request) *ImageQuery {
 	q := r.URL.Query()
 	query := &ImageQuery{}
@@ -233,10 +275,14 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 			query.RatingsLimit = &n
 		}
 	}
-	if v := q.Get("ratings_order"); v != "" {
+	// Present but empty clears the stored value (?ratings_exclude= shows
+	// every source again), so presence is checked, not emptiness.
+	if q.Has("ratings_order") {
+		v := q.Get("ratings_order")
 		query.RatingsOrder = &v
 	}
-	if v := q.Get("ratings_exclude"); v != "" {
+	if q.Has("ratings_exclude") {
+		v := q.Get("ratings_exclude")
 		query.RatingsExclude = &v
 	}
 	if v := q.Get("badge_style"); v != "" {
@@ -246,9 +292,11 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 		query.LabelStyle = &v
 	}
 	if v := q.Get("badge_size"); v != "" {
-		var n int32
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			query.BadgeSize = &n
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			n32 := int32(n)
+			query.BadgeSize = &n32
+		} else {
+			query.BadgeSizeName = &v // legacy xs/s/m/l/xl
 		}
 	}
 	if v := q.Get("badge_width"); v != "" {
@@ -288,7 +336,14 @@ func parseImageQuery(r *http.Request) *ImageQuery {
 		}
 	}
 	if v := q.Get("position"); v != "" {
-		_ = v
+		query.Position = &v
+	}
+	if v := q.Get("split"); v != "" {
+		b := v == "true" || v == "1"
+		query.Split = &b
+	}
+	if v := q.Get("badge_background"); v != "" {
+		query.BadgeBackground = &v
 	}
 	if v := q.Get("image_source"); v != "" {
 		query.ImageSource = &v

@@ -18,6 +18,9 @@ import {
 } from '@/lib/constants'
 import { idTypeExample, idTypeLabel, availableIdTypesForKind } from '@/lib/idPlaceholders'
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
+import LayoutEditor from '@/components/LayoutEditor.vue'
+import type { ImageLayout } from '@/lib/layout'
+import { parseLayout, layoutToJSON } from '@/lib/layout'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -144,15 +147,29 @@ const typeDefaults = computed(() => {
   if (!d) return null
   switch (imageType.value) {
     case 'logo':
-      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_alpha: d.logo_badge_alpha }
+      return { badge_style: d.logo_badge_style, label_style: d.logo_label_style, text_size: d.logo_text_size, badge_size: d.logo_badge_size, logo_size: d.logo_logo_size, ratings_limit: d.logo_ratings_limit, badge_direction: null as string | null, badge_shape: d.logo_badge_shape, badge_alpha: d.logo_badge_alpha, layout: d.logo_layout }
     case 'backdrop':
-      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_alpha: d.backdrop_badge_alpha }
+      return { badge_style: d.backdrop_badge_style, label_style: d.backdrop_label_style, text_size: d.backdrop_text_size, badge_size: d.backdrop_badge_size, logo_size: d.backdrop_logo_size, ratings_limit: d.backdrop_ratings_limit, badge_direction: d.backdrop_badge_direction, badge_shape: d.backdrop_badge_shape, badge_alpha: d.backdrop_badge_alpha, layout: d.backdrop_layout }
     case 'episode':
-      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_alpha: d.episode_badge_alpha }
+      return { badge_style: d.episode_badge_style, label_style: d.episode_label_style, text_size: d.episode_text_size, badge_size: d.episode_badge_size, logo_size: d.episode_logo_size, ratings_limit: d.episode_ratings_limit, badge_direction: d.episode_badge_direction, badge_shape: d.episode_badge_shape, badge_alpha: d.episode_badge_alpha, layout: d.episode_layout }
     default: // poster
-      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_alpha: d.poster_badge_alpha }
+      return { badge_style: d.poster_badge_style, label_style: d.poster_label_style, text_size: d.poster_text_size, badge_size: d.poster_badge_size, logo_size: d.poster_logo_size, ratings_limit: d.ratings_limit, badge_direction: d.poster_badge_direction, badge_shape: d.poster_badge_shape, badge_alpha: d.poster_badge_alpha, layout: d.poster_layout }
   }
 })
+
+// Badge placement: the editor starts from the server's layout for the current
+// image type and `layout=` is sent only once it differs. A later server load
+// or a type switch replaces the layout unless the user has edited it (the
+// type-switch watcher below resets it unconditionally).
+const serverLayout = computed(() => parseLayout(typeDefaults.value?.layout, imageType.value))
+const layout = ref<ImageLayout>(serverLayout.value)
+const layoutChanged = computed(() => layoutToJSON(layout.value) !== layoutToJSON(serverLayout.value))
+watch(serverLayout, (next, prev) => {
+  if (layoutToJSON(layout.value) === layoutToJSON(prev)) layout.value = next
+})
+function resetLayout() {
+  layout.value = serverLayout.value
+}
 
 /** Build a "<base>: default (<resolved>)" label, or plain "<base>: default" until loaded. */
 function annotate(base: string, value: string | null | undefined, map: Record<string, string>): string {
@@ -222,6 +239,7 @@ watch(imageType, (newType) => {
   ratingsLimit.value = 'default'
   badgeDirection.value = 'default'
   badgeAlpha.value = ''
+  resetLayout()
   // Controls that only exist for one type; clearing them keeps the query string
   // free of params the new type would ignore.
   textless.value = 'default'
@@ -291,6 +309,7 @@ const queryString = computed(() => {
   params.badge_shape = setIf(badgeShape.value, 'default')
   params.badge_alpha = clamp(badgeAlpha.value, 0, 100)
   params.ratings_limit = setIf(ratingsLimit.value, 'default')
+  if (layoutChanged.value) params.layout = layoutToJSON(layout.value)
 
   if (imageType.value !== 'logo') params.badge_direction = setIf(badgeDirection.value, 'default')
   if (imageType.value !== 'episode') params.image_source = setIf(imageSource.value, 'default')
@@ -612,6 +631,19 @@ async function handleFetch() {
               </Label>
             </div>
           </div>
+        </div>
+        <div class="space-y-1 flex flex-col items-center">
+          <p class="text-xs text-muted-foreground">Badge placement</p>
+          <LayoutEditor v-model="layout" :kind="imageType" test-prefix="free" class="w-full" />
+          <button
+            v-if="layoutChanged"
+            type="button"
+            class="text-xs text-muted-foreground underline hover:text-foreground"
+            data-testid="free-layout-reset"
+            @click="resetLayout"
+          >
+            Reset to default placement
+          </button>
         </div>
         <code class="block text-xs font-mono bg-muted px-3 py-2 rounded text-muted-foreground break-all select-all">{{ curlExample }}</code>
         <div class="flex flex-wrap gap-2">

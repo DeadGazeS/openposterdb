@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -200,6 +202,7 @@ type keyCache struct {
 	omdb    []string
 	fanart  []string
 	trakt   []string
+	tvdb    []string
 }
 
 // ServiceKeyManager stores source API keys (TMDB / MDBList / OMDb / Fanart.tv /
@@ -218,6 +221,7 @@ type ServiceKeyManager struct {
 	EnvOMDB         bool
 	EnvFanart       bool
 	EnvTrakt        bool
+	EnvTVDB         bool
 }
 
 type ServiceKeyStatus struct {
@@ -249,6 +253,7 @@ type ServiceKeysResponse struct {
 	OMDB    ServiceKeyStatus `json:"omdb"`
 	Fanart  ServiceKeyStatus `json:"fanart"`
 	Trakt   ServiceKeyStatus `json:"trakt"`
+	TVDB    ServiceKeyStatus `json:"tvdb"`
 }
 
 type ServiceKeysUpdate struct {
@@ -257,6 +262,7 @@ type ServiceKeysUpdate struct {
 	OMDB    *string `json:"omdb"`
 	Fanart  *string `json:"fanart"`
 	Trakt   *string `json:"trakt"`
+	TVDB    *string `json:"tvdb"`
 }
 
 // NewServiceKeyManager builds a manager with the v2 KEK seed (SECRETS_KEY) and
@@ -264,7 +270,7 @@ type ServiceKeysUpdate struct {
 // for legacyJWTSecret on fresh installs; the manager will treat any pre-v2
 // ciphertext as missing.
 func NewServiceKeyManager(db *sql.DB, secretsKey []byte, legacyJWTSecret []byte, httpClient *http.Client,
-	envTMDB string, envMDBList []string, envOMDB, envFanart, envTrakt string) *ServiceKeyManager {
+	envTMDB string, envMDBList []string, envOMDB, envFanart, envTrakt, envTVDB string) *ServiceKeyManager {
 
 	cache := keyCache{
 		mdblist: envMDBList,
@@ -284,6 +290,9 @@ func NewServiceKeyManager(db *sql.DB, secretsKey []byte, legacyJWTSecret []byte,
 	if envTrakt != "" {
 		cache.trakt = []string{envTrakt}
 	}
+	if envTVDB != "" {
+		cache.tvdb = []string{envTVDB}
+	}
 
 	return &ServiceKeyManager{
 		DB:              db,
@@ -296,6 +305,7 @@ func NewServiceKeyManager(db *sql.DB, secretsKey []byte, legacyJWTSecret []byte,
 		EnvOMDB:         envOMDB != "",
 		EnvFanart:       envFanart != "",
 		EnvTrakt:        envTrakt != "",
+		EnvTVDB:         envTVDB != "",
 	}
 }
 
@@ -325,6 +335,11 @@ func (m *ServiceKeyManager) Init() {
 			m.Keys.trakt = *v
 		}
 	}
+	if !m.EnvTVDB {
+		if v := m.loadFromDB("tvdb"); v != nil {
+			m.Keys.tvdb = *v
+		}
+	}
 }
 
 // Reload re-reads every service key from the DB into the in-memory cache
@@ -350,6 +365,7 @@ func (m *ServiceKeyManager) Reload() {
 	m.reloadOne(&m.Keys.omdb, m.EnvOMDB, "omdb")
 	m.reloadOne(&m.Keys.fanart, m.EnvFanart, "fanart")
 	m.reloadOne(&m.Keys.trakt, m.EnvTrakt, "trakt")
+	m.reloadOne(&m.Keys.tvdb, m.EnvTVDB, "tvdb")
 }
 
 // reloadOne replaces one service's cached keys with the stored ones (nil when
@@ -465,6 +481,16 @@ func (m *ServiceKeyManager) TraktClientIDs() []string {
 	return m.Keys.trakt
 }
 
+// TVDBKey returns the TVDB v4 API key ("" when none): TVDB uses one key.
+func (m *ServiceKeyManager) TVDBKey() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.Keys.tvdb) > 0 {
+		return m.Keys.tvdb[0]
+	}
+	return ""
+}
+
 func (m *ServiceKeyManager) EnvLocked(service string) bool {
 	switch service {
 	case "tmdb":
@@ -477,6 +503,8 @@ func (m *ServiceKeyManager) EnvLocked(service string) bool {
 		return m.EnvFanart
 	case "trakt":
 		return m.EnvTrakt
+	case "tvdb":
+		return m.EnvTVDB
 	}
 	return false
 }
@@ -488,7 +516,7 @@ func (m *ServiceKeyManager) PlaintextKeys() map[string]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make(map[string]string)
-	for _, svc := range []string{"tmdb", "mdblist", "omdb", "fanart", "trakt"} {
+	for _, svc := range []string{"tmdb", "mdblist", "omdb", "fanart", "trakt", "tvdb"} {
 		if m.EnvLocked(svc) {
 			continue
 		}
@@ -508,6 +536,7 @@ func (m *ServiceKeyManager) GetStatus() ServiceKeysResponse {
 		OMDB:    m.statusFor("omdb", m.Keys.omdb),
 		Fanart:  m.statusFor("fanart", m.Keys.fanart),
 		Trakt:   m.statusFor("trakt", m.Keys.trakt),
+		TVDB:    m.statusFor("tvdb", m.Keys.tvdb),
 	}
 }
 
@@ -572,6 +601,13 @@ func (m *ServiceKeyManager) UpdateKeys(update *ServiceKeysUpdate) error {
 			return err
 		}
 		m.Keys.trakt = keys
+	}
+	if !m.EnvTVDB && update.TVDB != nil {
+		keys := parseKeys(*update.TVDB)
+		if err := m.storeKey("tvdb", *update.TVDB); err != nil {
+			return err
+		}
+		m.Keys.tvdb = keys
 	}
 	return nil
 }
@@ -670,6 +706,31 @@ func ValidateServiceKeyCtx(ctx context.Context, service, key string, httpClient 
 		return checkProviderURLCtx(ctx, httpClient, "https://webservice.fanart.tv/v3/movies/550?api_key="+key, "Fanart.tv")
 	case "trakt":
 		return checkTraktClientIDCtx(ctx, httpClient, key)
+	case "tvdb":
+		return checkTVDBKeyCtx(ctx, httpClient, key)
+	}
+	return nil
+}
+
+// checkTVDBKeyCtx logs in to TVDB v4 with the key: a 401 means the key is
+// wrong. Network errors and other statuses are tolerated like the others.
+func checkTVDBKeyCtx(ctx context.Context, httpClient *http.Client, key string) error {
+	body, _ := json.Marshal(map[string]string{"apikey": key})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tvdbDefaultBaseURL+"/login", bytes.NewReader(body))
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", UserAgent())
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Warn("service key validation request failed", "service", "tvdb", "error", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("invalid key (HTTP %d)", resp.StatusCode)
 	}
 	return nil
 }
@@ -743,6 +804,8 @@ func (m *ServiceKeyManager) keysFor(service string) ([]string, bool) {
 		return m.Keys.fanart, true
 	case "trakt":
 		return m.Keys.trakt, true
+	case "tvdb":
+		return m.Keys.tvdb, true
 	}
 	return nil, false
 }

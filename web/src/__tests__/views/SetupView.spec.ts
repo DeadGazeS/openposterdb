@@ -76,7 +76,7 @@ describe('SetupView', () => {
   })
 
   it('calls auth.setup on valid submit', async () => {
-    mockAuthStore.setup.mockResolvedValue(true)
+    mockAuthStore.setup.mockResolvedValue({ ok: true })
     const wrapper = mountView()
 
     await wrapper.find('input#username').setValue('admin')
@@ -87,5 +87,48 @@ describe('SetupView', () => {
 
     expect(mockAuthStore.setup).toHaveBeenCalledWith('admin', 'password123')
     expect(mockRouter.push).toHaveBeenCalledWith('/admin')
+  })
+
+  async function submitValid() {
+    const wrapper = mountView()
+    await wrapper.find('input#username').setValue('admin')
+    await wrapper.find('input#password').setValue('password123')
+    await wrapper.find('input#confirm-password').setValue('password123')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('400 shows the server validation message', async () => {
+    const msg = 'Invalid username: must be 1-128 characters and not contain whitespace/control characters'
+    mockAuthStore.setup.mockResolvedValue({ ok: false, reason: 'invalid', message: msg })
+    const wrapper = await submitValid()
+    expect(wrapper.text()).toContain(msg)
+    expect(wrapper.text()).not.toContain('already')
+    expect(mockRouter.push).not.toHaveBeenCalled()
+  })
+
+  it('400 without a message falls back to a generic validation error', async () => {
+    mockAuthStore.setup.mockResolvedValue({ ok: false, reason: 'invalid' })
+    const wrapper = await submitValid()
+    expect(wrapper.text()).toContain('Invalid username or password.')
+  })
+
+  it('403 says setup is already done', async () => {
+    mockAuthStore.setup.mockResolvedValue({ ok: false, reason: 'forbidden', message: 'Setup already completed' })
+    const wrapper = await submitValid()
+    expect(wrapper.text()).toContain('Setup is already complete: an admin account exists. Sign in instead.')
+  })
+
+  it.each([
+    [{ ok: false, reason: 'rate-limited', retryAfter: 30 }, 'Too many attempts. Try again in 30 s.'],
+    [{ ok: false, reason: 'busy', retryAfter: 5 }, 'The server is busy. Try again in 5 s.'],
+    [{ ok: false, reason: 'server' }, 'Server error. Try again later.'],
+    [{ ok: false, reason: 'network' }, 'Could not reach the server. Check your connection and try again.'],
+  ])('%o shows %s and not "already set up"', async (result, message) => {
+    mockAuthStore.setup.mockResolvedValue(result)
+    const wrapper = await submitValid()
+    expect(wrapper.text()).toContain(message)
+    expect(wrapper.text()).not.toContain('already')
   })
 })

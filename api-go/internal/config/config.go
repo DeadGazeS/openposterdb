@@ -4,11 +4,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -19,7 +22,20 @@ type Config struct {
 	MDBListAPIKeys      []string
 	FanartAPIKey        string
 	TraktClientID       string
+	TVDBAPIKey          string
+	// FanartClientKey is an optional personal fanart.tv key, sent with the
+	// project key for newer images.
+	FanartClientKey string
+	// IMDbRatingsDataset enables IMDb's ratings dataset (non-commercial
+	// use only, hence opt-in) as the first IMDb rating source.
+	IMDbRatingsDataset bool
+	// PublicMetaDBRatings enables the keyless PublicMetaDB fallback for
+	// RT / Metacritic / Letterboxd / Roger Ebert (opt-in: it sends TMDB
+	// ids to a third-party service).
+	PublicMetaDBRatings bool
 	CacheDir            string
+	// CacheMaxBytes caps the disk cache (CACHE_MAX_SIZE); 0 = unlimited.
+	CacheMaxBytes       int64
 	DBDir               string
 	ListenAddr          string
 	RatingsMinStaleSecs uint64
@@ -46,6 +62,14 @@ type Config struct {
 	SecureCookies      bool
 	AdminUsername      string
 	AdminPassword      string
+	// RenderConcurrency caps simultaneous renders (default CPUs×2);
+	// CrossIDConcurrency caps alternate-id cache writers (default CPUs).
+	RenderConcurrency  int
+	CrossIDConcurrency int
+	// ShutdownDrainDelay (SHUTDOWN_DRAIN_DELAY_SECS): after a stop signal,
+	// keep serving with /api/ready answering 503 this long before shutting
+	// down, so a load balancer stops routing here first. 0 = at once.
+	ShutdownDrainDelay time.Duration
 }
 
 func FromEnv() (*Config, error) {
@@ -55,7 +79,8 @@ func FromEnv() (*Config, error) {
 	_ = godotenv.Load()
 	// Validated after .env is loaded, so a value set only there is checked
 	// too (it used to be validated before, i.e. only from the real env).
-	if _, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES")); err != nil {
+	_, err := ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
 		return nil, err
 	}
 
@@ -65,7 +90,11 @@ func FromEnv() (*Config, error) {
 		MDBListAPIKeys:      optionalSecrets("MDBLIST_API_KEY"),
 		FanartAPIKey:        optionalSecret("FANART_API_KEY"),
 		TraktClientID:       optionalSecret("TRAKT_CLIENT_ID"),
-		CacheDir:            envOrDefault("CACHE_DIR", "./cache"),
+		TVDBAPIKey:          optionalSecret("TVDB_API_KEY"),
+		FanartClientKey:     optionalSecret("FANART_CLIENT_KEY"),
+		IMDbRatingsDataset:  envBool("IMDB_RATINGS_DATASET"),
+		PublicMetaDBRatings: envBool("PUBLICMETADB_RATINGS"),
+		CacheDir:           envOrDefault("CACHE_DIR", "./cache"),
 		DBDir:               envOrDefault("DB_DIR", "./db"),
 		ListenAddr:          envOrDefault("LISTEN_ADDR", "0.0.0.0:3000"),
 		RatingsMinStaleSecs: envUint64OrDefault("RATINGS_STALE_SECS", 86400),
@@ -75,14 +104,26 @@ func FromEnv() (*Config, error) {
 		ImageMemCacheMB:     envUint64OrDefault("IMAGE_MEM_CACHE_MB", 512),
 		StaticDir:           os.Getenv("STATIC_DIR"),
 		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
-		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 60),
-		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 240),
+		RateLimitRPM:        envUint64OrDefault("RATE_LIMIT_RPM", 300),     // Rust default (bursts of 240)
+		RateLimitCDNRPM:     envUint64OrDefault("RATE_LIMIT_CDN_RPM", 300), // Rust default (bursts of 240)
 		RateLimitAuthRPM:    envUint64OrDefault("RATE_LIMIT_AUTH_RPM", 10),
 		TrustedProxiesEnv:   strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")),
 		ExternalCacheOnly:   envBool("EXTERNAL_CACHE_ONLY"),
 		EnableCDNRedirects:  envBool("ENABLE_CDN_REDIRECTS"),
 		DisablePublicPages:  envBool("DISABLE_PUBLIC_PAGES"),
 		LogLevel:            envOrDefault("LOG_LEVEL", "info"),
+		ShutdownDrainDelay:  time.Duration(envUint64OrDefault("SHUTDOWN_DRAIN_DELAY_SECS", 0)) * time.Second,
+	}
+
+	if c.CacheMaxBytes, err = ParseByteSize(os.Getenv("CACHE_MAX_SIZE")); err != nil {
+		return nil, fmt.Errorf("CACHE_MAX_SIZE: %w", err)
+	}
+
+	if c.RenderConcurrency, err = envPositiveInt("RENDER_CONCURRENCY", runtime.NumCPU()*2); err != nil {
+		return nil, err
+	}
+	if c.CrossIDConcurrency, err = envPositiveInt("CROSS_ID_CONCURRENCY", runtime.NumCPU()); err != nil {
+		return nil, err
 	}
 
 	if v := os.Getenv("FREE_KEY_ENABLED"); v != "" {
@@ -194,11 +235,35 @@ func envUint64OrDefault(key string, def uint64) uint64 {
 	if v == "" {
 		return def
 	}
-	n, err := strconv.ParseUint(v, 10, 64)
+	n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
 	if err != nil {
+		slog.Warn("invalid value in environment, using the default", "var", key, "value", v, "default", def)
 		return def
 	}
 	return n
+}
+
+// ParseByteSize parses a size like "20GB", "500 MiB", "1.5T" or plain bytes
+// ("1073741824"). Units are binary (1 GB = 1024³ bytes). "" or "0" is 0.
+func ParseByteSize(s string) (int64, error) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if s == "" {
+		return 0, nil
+	}
+	i := 0
+	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.') {
+		i++
+	}
+	num, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil || num < 0 {
+		return 0, fmt.Errorf("invalid size %q", s)
+	}
+	unit := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(s[i:]), "B"), "I")
+	mult := map[string]float64{"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}[unit]
+	if mult == 0 {
+		return 0, fmt.Errorf("invalid size unit in %q", s)
+	}
+	return int64(num * mult), nil
 }
 
 func envUint8OrDefault(key string, def uint8) uint8 {
@@ -206,11 +271,31 @@ func envUint8OrDefault(key string, def uint8) uint8 {
 	if v == "" {
 		return def
 	}
-	n, err := strconv.ParseUint(v, 10, 8)
+	n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 8)
 	if err != nil {
+		slog.Warn("invalid value in environment, using the default", "var", key, "value", v, "default", def)
 		return def
 	}
 	return uint8(n)
+}
+
+// envPositiveInt reads a count that must be at least 1. Unset uses def; 0 is
+// an error (it would block every request); anything unparsable is logged and
+// replaced by def.
+func envPositiveInt(key string, def int) (int, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Warn("invalid value in environment, using the default", "var", key, "value", v, "default", def)
+		return def, nil
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("%s must be at least 1", key)
+	}
+	return n, nil
 }
 
 func envBool(key string) bool {

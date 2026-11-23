@@ -10,7 +10,7 @@ import (
 	"openposterdb/internal/services"
 )
 
-// TestLive_KitsuMAL exercises the real Kitsu / AniList / TheBeastLT
+// TestLive_KitsuMAL exercises the real Kitsu / AniList / anime-list
 // endpoints through openposterdb's own clients (no API keys needed). It is
 // skipped unless OPENPOSTERDB_LIVE=1, so normal and CI runs stay offline:
 //
@@ -69,28 +69,32 @@ func TestLive_KitsuMAL(t *testing.T) {
 		t.Logf("anilist 35972: en=%q romaji=%q start=%s cover=%s", media.TitleEnglish, media.TitleRomaji, *media.StartDate, *media.CoverImageExtra)
 	})
 
-	t.Run("kitsu to imdb table", func(t *testing.T) {
-		mapper := services.NewKitsuIMDbMapper(httpClient)
-		if err := mapper.Load(ctx); err != nil {
-			t.Fatal(err)
+	mappings := services.NewIDMappings(httpClient, "")
+	t.Run("anime list", func(t *testing.T) {
+		if err := mappings.Refresh(ctx); err != nil {
+			t.Logf("refresh reported: %v", err)
 		}
-		if imdb := mapper.LookupIMDB(13658); imdb == nil || *imdb != "tt1528406" {
-			t.Errorf("LookupIMDB(13658) = %v, want tt1528406", imdb)
+		if !mappings.AnimeReady() {
+			t.Fatal("anime list not loaded")
 		}
-		t.Logf("mapper entries: %d", mapper.Size())
+		if imdb := mappings.IMDbForKitsu(13658); imdb == nil || *imdb != "tt1528406" {
+			t.Errorf("IMDbForKitsu(13658) = %v, want tt1528406", imdb)
+		}
+		if k := mappings.KitsuForMAL(35972); k == nil || *k != 13658 {
+			t.Errorf("KitsuForMAL(35972) = %v, want 13658", k)
+		}
 	})
 
 	// tt19861160 (Sailor Moon Cosmos, 2023) is one of the anime movies whose
-	// IMDb id TMDB didn't resolve (user report 2026-09-24); the reverse table
+	// IMDb id TMDB didn't resolve (user report 2026-09-24); the reverse
 	// lookup finds its Kitsu entry, which Kitsu types as a (lowercase) movie.
 	t.Run("imdb to kitsu for an anime movie", func(t *testing.T) {
-		mapper := services.NewKitsuIMDbMapper(httpClient)
-		if err := mapper.Load(ctx); err != nil {
-			t.Fatal(err)
+		if !mappings.AnimeReady() {
+			t.Skip("anime list not loaded")
 		}
-		id := mapper.LookupKitsuByIMDB("tt19861160")
+		id := mappings.KitsuByIMDb("tt19861160")
 		if id == nil || *id != 46085 {
-			t.Fatalf("LookupKitsuByIMDB(tt19861160) = %v, want 46085", id)
+			t.Fatalf("KitsuByIMDb(tt19861160) = %v, want 46085", id)
 		}
 		r, err := services.ResolveIDCtx(ctx, services.IDTypeKitsu, "46085", services.IDClients{Kitsu: kitsu})
 		if err != nil {

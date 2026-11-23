@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"openposterdb/internal/config"
 	"openposterdb/internal/handlers"
@@ -26,7 +27,8 @@ type AppState struct {
 	Trakt           *services.TraktClient
 	Kitsu           *services.KitsuClient
 	AniList         *services.AniListClient
-	KitsuIMDbMapper *services.KitsuIMDbMapper
+	Mappings        *services.IDMappings
+	TVDB            *services.TVDBClient
 	ServiceKeys     *services.ServiceKeyManager
 	SecureCookies   bool
 	Caches          *services.MemCacheSet
@@ -35,6 +37,8 @@ type AppState struct {
 	JWTSecret       []byte
 	SecretsKey      []byte
 	LastUsedFlusher *services.LastUsedFlusher
+	// Draining is set when shutdown begins: /api/ready answers 503.
+	Draining atomic.Bool
 
 	// clientsMu protects the rating-provider client fields (TMDB/OMDB/MDBList/
 	// Fanart/Trakt). Setup* and RefreshClientsFromKeys write; imageDeps() and
@@ -93,13 +97,26 @@ func isAPIPath(path string) bool {
 	if strings.HasPrefix(rest, "/") {
 		rest = rest[1:]
 	}
-	parts := strings.SplitN(rest, "/", 2)
+	parts := strings.SplitN(rest, "/", 3)
 	first := parts[0]
 	if len(first) == 64 && isHex(first) {
 		return true
 	}
 	// The public free key isn't hex; without this its URLs got the SPA.
-	return first == handlers.FreeAPIKey && len(parts) == 2
+	if first == handlers.FreeAPIKey && len(parts) >= 2 {
+		return true
+	}
+	// Any other key with an isValid or /{key}/{idType}/... shape: the image
+	// handler answers an unknown key with a JSON 401. These used to get the
+	// SPA's index.html with a 200, which media servers took as an image.
+	if len(parts) < 2 || first == "" || first == "assets" {
+		return false
+	}
+	if parts[1] == "isValid" && len(parts) == 2 {
+		return true
+	}
+	_, err := services.ParseIDType(parts[1])
+	return err == nil
 }
 
 func isHex(s string) bool {
@@ -112,7 +129,7 @@ func isHex(s string) bool {
 }
 
 func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return handlers.RequireAuth(r.jwtSecret())(next).ServeHTTP
+	return handlers.RequireAuth(r.jwtSecret(), r.state.DB)(next).ServeHTTP
 }
 
 func (r *Router) jwtSecret() []byte {

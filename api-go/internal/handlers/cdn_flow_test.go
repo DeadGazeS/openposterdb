@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	appimg "openposterdb/internal/image"
 	"openposterdb/internal/services"
@@ -50,10 +52,15 @@ func newCDNFlowDeps(t *testing.T) (ImageDeps, string) {
 	if _, err := services.CreateAPIKey(db, "test", hash, prefix, "", 1); err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
+	cacheDir := t.TempDir()
+	// Registered after TempDir, so it runs first: detached work (cross-id
+	// copies, refreshes) must not outlive the test into the next one or
+	// write into a cache dir being removed.
+	t.Cleanup(func() { waitBackgroundIdle(t) })
 	return ImageDeps{
 		DB: db,
 		Config: &ImageServeConfig{
-			CacheDir:           t.TempDir(),
+			CacheDir:           cacheDir,
 			ImageQuality:       85,
 			EnableCDNRedirects: true,
 			Caches:             &services.MemCacheSet{},
@@ -62,6 +69,17 @@ func newCDNFlowDeps(t *testing.T) (ImageDeps, string) {
 		TMDB:      services.NewTmdbClient("test-key", &http.Client{Transport: cdnTmdbStub{}}),
 		CDNHashes: services.NewHashRegistry(),
 	}, raw
+}
+
+// waitBackgroundIdle lets the image pipeline's detached work settle (without
+// stopping new work, unlike WaitBackground).
+func waitBackgroundIdle(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if !appimg.WaitIdle(ctx) {
+		t.Fatal("background image work still running after 30s")
+	}
 }
 
 // TestCDNRedirect_EndToEnd follows the 302 HandleImage issues with
@@ -75,7 +93,7 @@ func TestCDNRedirect_EndToEnd(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 
 	req := httptest.NewRequest(http.MethodGet, "/"+apiKey+"/imdb/poster-default/tt0111161.jpg?imageSize=large", nil)
 	rec := httptest.NewRecorder()
@@ -109,7 +127,7 @@ func TestCDNRedirect_EndToEnd(t *testing.T) {
 // for any string.
 func TestHandleIsValid_UnknownKeyRejected(t *testing.T) {
 	deps, apiKey := newCDNFlowDeps(t)
-	h := HandleIsValid(deps.DB, func() bool { return false })
+	h := HandleIsValid(deps.DB, func() (bool, error) { return false, nil }, nil)
 	for key, want := range map[string]int{
 		apiKey:              http.StatusOK,
 		"not-a-real-key-42": http.StatusUnauthorized,
@@ -142,12 +160,19 @@ func TestCDNRoute_NoUpstreamWorkWithoutKey(t *testing.T) {
 	get := func() ImageDeps { return deps }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+apiKey+"/imdb/poster-default/tt0111161.jpg", nil))
 	loc := rec.Header().Get("Location")
+	if rec.Code != http.StatusFound || !strings.HasPrefix(loc, "/c/") {
+		t.Fatalf("authed URL: got %d, Location %q, want a 302 to /c/ (body %q)", rec.Code, loc, rec.Body.String())
+	}
 	hash := strings.Split(strings.TrimPrefix(loc, "/c/"), "/")[0]
+	// The authed request may leave detached work (cross-id copies,
+	// refreshes) running; under load it could reach the counting stub after
+	// `before` is read.
+	waitBackgroundIdle(t)
 	before := calls.Load()
 
 	rec = httptest.NewRecorder()
@@ -155,6 +180,8 @@ func TestCDNRoute_NoUpstreamWorkWithoutKey(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unrendered id via /c/: got %d want 404", rec.Code)
 	}
+	// Work /c/ might have detached counts too.
+	waitBackgroundIdle(t)
 	if n := calls.Load() - before; n != 0 {
 		t.Fatalf("/c/ made %d upstream calls without an API key", n)
 	}
@@ -167,7 +194,7 @@ func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
 	get := func() ImageDeps { return deps }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 	path := "/" + apiKey + "/imdb/poster-default/tt0111161.jpg?ratings_limit=0"
 
 	deps.Config.EnableCDNRedirects = false
@@ -177,6 +204,7 @@ func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
 		t.Fatalf("direct: %d", direct.Code)
 	}
 
+	waitBackgroundIdle(t) // the direct render's detached work settles first
 	deps.Config.EnableCDNRedirects = true
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -184,5 +212,29 @@ func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
 	mux.ServeHTTP(cdn, httptest.NewRequest(http.MethodGet, rec.Header().Get("Location"), nil))
 	if cdn.Code != http.StatusOK || !bytes.Equal(cdn.Body.Bytes(), direct.Body.Bytes()) {
 		t.Fatalf("/c/ must serve the authed render: code %d, equal=%v", cdn.Code, bytes.Equal(cdn.Body.Bytes(), direct.Body.Bytes()))
+	}
+}
+
+// An id no type takes is a 400 before any upstream call. (An id of another
+// type's form, such as tvdb/movie-2, is served as that type: see
+// services.EffectiveIDType.)
+func TestImageRoute_RejectsInvalidIDForm(t *testing.T) {
+	deps, apiKey := newCDNFlowDeps(t)
+	deps.Config.EnableCDNRedirects = false
+	var calls atomic.Int32
+	deps.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: countingCDNStub{&calls}})
+	get := func() ImageDeps { return deps }
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
+
+	for _, p := range []string{"tvdb/poster-default/foo-2.jpg", "imdb/poster-default/abc.jpg", "imdb/poster-default/81189.jpg", "tmdb/poster-default/550.jpg", "mal/poster-default/x1.jpg"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+apiKey+"/"+p, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d want 400", p, rec.Code)
+		}
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("%d upstream calls for invalid ids", n)
 	}
 }

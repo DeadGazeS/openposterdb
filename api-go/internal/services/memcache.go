@@ -216,6 +216,19 @@ func (c *MemCache) DeletePrefix(prefix string) {
 	}
 }
 
+// DeleteTitle removes the entries of one title: the key itself and keys that
+// continue it with a variant ('_') or ratings ('@') suffix — not every key
+// that merely shares the prefix (purging tt123 must not evict tt1234567).
+func (c *MemCache) DeleteTitle(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, e := range c.entries {
+		if k == key || strings.HasPrefix(k, key) && (k[len(key)] == '_' || k[len(key)] == '@') {
+			c.remove(e)
+		}
+	}
+}
+
 // Clear removes all entries.
 func (c *MemCache) Clear() {
 	c.mu.Lock()

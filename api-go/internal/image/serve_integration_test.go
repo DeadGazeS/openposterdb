@@ -83,6 +83,14 @@ func newServeTestDB(t *testing.T) *sql.DB {
 	);`); err != nil {
 		t.Fatalf("image_meta: %v", err)
 	}
+	if _, err := db.Exec(`CREATE TABLE available_ratings (
+		id_key TEXT PRIMARY KEY,
+		sources TEXT NOT NULL,
+		updated_at INTEGER NOT NULL,
+		release_date TEXT
+	);`); err != nil {
+		t.Fatalf("available_ratings: %v", err)
+	}
 	return db
 }
 

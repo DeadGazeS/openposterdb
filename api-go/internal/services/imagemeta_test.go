@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS image_meta (
 	title_key TEXT NOT NULL DEFAULT '',
 	title TEXT
 );
+CREATE TABLE IF NOT EXISTS base_access (
+	path TEXT PRIMARY KEY,
+	last_accessed INTEGER NOT NULL
+);
 `
 
 func newImageMetaTestDB(t *testing.T) *sql.DB {

@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"database/sql"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -211,13 +212,6 @@ func GenerateImage(imageBytes []byte, badges []services.RatingBadge, settings *s
 
 // --- CDN helpers ---
 
-func ImageResponse(data []byte, contentType string) (int, map[string]string, []byte) {
-	return 200, map[string]string{
-		"Content-Type":  contentType,
-		"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-	}, data
-}
-
 func TmdbPosterVariant(lang string, textless bool) string {
 	if lang == "en" {
 		if textless {
@@ -304,7 +298,8 @@ type ServeParams struct {
 	Fanart              *services.FanartClient
 	Kitsu               *services.KitsuClient
 	AniList             *services.AniListClient
-	KitsuIMDbMapper     *services.KitsuIMDbMapper
+	Mappings            *services.IDMappings
+	TVDB                *services.TVDBClient
 	IDType              string
 	IDValue             string
 	Kind                string
@@ -327,14 +322,160 @@ type ServeParams struct {
 	freshRatings bool
 }
 
+// serveColdCache answers a request whose id is not in the in-memory ID cache
+// (typically the first request after a restart) from the rendered cache,
+// without resolving the id or fetching ratings: the cache key is rebuilt from
+// the title's stored rating sources (available_ratings, written with every
+// render). On a hit the full pipeline runs in the background
+// (warmAfterColdHit), so new ratings or settings still reach the image.
+func (p ServeParams) serveColdCache(contentType string) ([]byte, bool) {
+	if p.DB == nil || p.Caches == nil || p.Caches.IDs == nil {
+		return nil, false
+	}
+	if p.idCacheWarm() {
+		return nil, false
+	}
+	idKey := p.IDType + "/" + p.IDValue
+	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
+	sources, _, releaseDate, err := services.ReadAvailableRatingsCtx(p.Context, p.DB, idKey)
+	// No row: the sources are unknown — unless no ratings are shown at all
+	// (limit 0), when the key doesn't depend on them.
+	if err != nil && !(limit == 0 && stderrors.Is(err, sql.ErrNoRows)) || !services.ValidSourcesString(sources) {
+		return nil, false
+	}
+	ratingsSuffix := services.BadgesSuffixFromAvailable(sources, p.Settings.RatingsOrder, p.Settings.RatingsExclude, limit)
+	cacheKey, cachePath, err := p.cacheKeyFor(p.IDType, p.IDValue, p.renderSuffixFromRatings(ratingsSuffix))
+	if err != nil {
+		return nil, false
+	}
+	var bytes []byte
+	if p.Caches.ImageMem != nil {
+		if v, ok := p.Caches.ImageMem.Get(cacheKey); ok {
+			bytes = v.([]byte)
+		}
+	}
+	if bytes == nil && !p.ExternalCacheOnly {
+		if entry, err := services.ReadCache(cachePath, 0); err == nil {
+			bytes = entry.Bytes
+			if p.Caches.ImageMem != nil {
+				p.Caches.ImageMem.Set(cacheKey, bytes, int64(len(bytes)))
+			}
+		}
+	}
+	if bytes == nil {
+		return nil, false
+	}
+	slog.Debug("image cold cache hit", "kind", p.Kind, "cache_key", cacheKey)
+	if p.Served != nil {
+		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType, ReleaseDate: releaseDate}
+	}
+	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+	}
+	goBackground(func() { p.warmAfterColdHit(cacheKey) })
+	return bytes, true
+}
+
+// idCacheWarm reports whether the in-memory ID cache holds the request's id
+// under a key its resolution caches: the type the id's form names
+// (services.EffectiveIDType: imdb/movie-123 is cached as tmdb/movie-123) and,
+// for a kitsu/mal id translated to the standard pipeline (toggle off), the
+// translated id — from the offline anime list only, no lookups here.
+func (p ServeParams) idCacheWarm() bool {
+	idType := p.IDType
+	if eff, err := services.EffectiveIDType(p.IDType, p.IDValue); err == nil {
+		idType = eff
+	}
+	if _, warm := p.Caches.IDs.Peek(idType + "/" + p.IDValue); warm {
+		return true
+	}
+	var entry services.AnimeIDs
+	found := false
+	if id, err := strconv.ParseUint(p.IDValue, 10, 64); err == nil {
+		switch {
+		case idType == "kitsu" && !p.Settings.UseKitsu:
+			entry, found = p.Mappings.AnimeByKitsu(id)
+		case idType == "mal" && !p.Settings.UseMAL:
+			entry, found = p.Mappings.AnimeByMAL(id)
+		}
+	}
+	if !found {
+		return false
+	}
+	t, v, ok := standardIDFor(entry)
+	if !ok {
+		return false
+	}
+	_, warm := p.Caches.IDs.Peek(t.String() + "/" + v)
+	return warm
+}
+
+// warmAfterColdHit follows up a request served by serveColdCache: it resolves
+// the id and fetches the ratings (filling the ID and ratings caches), then
+// re-renders when the ratings changed the cache key or the rendered file is
+// stale — checked against the file itself, not the in-memory entry the cold
+// hit may just have filled. Shares the background refresh slots and back-off
+// with refreshStale; the back-off is only cleared by a re-render.
+func (p ServeParams) warmAfterColdHit(staleKey string) {
+	if refreshFailures.blocked(staleKey, time.Now()) {
+		return
+	}
+	release, ok := refreshSlots.tryAcquire()
+	if !ok {
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	defer cancel()
+	bg := p
+	bg.Context = ctx
+	bg.Served = nil
+	idType, err := services.ParseIDType(bg.IDType)
+	if err != nil {
+		return
+	}
+	resolved, err := bg.resolveTitle(idType)
+	if err == nil {
+		var cacheKey, cachePath string
+		var releaseDate *string
+		_, cacheKey, cachePath, releaseDate, _, _, err = bg.prepareRender(resolved)
+		if err == nil && bg.renderIsCurrent(cacheKey, cachePath, releaseDate) {
+			return
+		}
+		if err == nil {
+			err = bg.rerender(resolved, bg.imageSize())
+		}
+	}
+	if err != nil {
+		slog.Debug("warm-up after cold cache hit failed", "cache_key", staleKey, "error", err)
+		refreshFailures.failed(staleKey, time.Now())
+		return
+	}
+	refreshFailures.succeeded(staleKey)
+}
+
+// renderIsCurrent reports whether cacheKey's render exists and is not stale
+// (with external_cache_only, whether it is in memory).
+func (p ServeParams) renderIsCurrent(cacheKey, cachePath string, releaseDate *string) bool {
+	if p.ExternalCacheOnly {
+		if p.Caches.ImageMem == nil {
+			return false
+		}
+		_, ok := p.Caches.ImageMem.Peek(cacheKey)
+		return ok
+	}
+	staleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
+	stale, err := services.CacheIsStale(cachePath, staleSecs)
+	return err == nil && !stale
+}
+
 // resolveKitsuMalCtx resolves a kitsu:N or mal:N URL. The UseKitsu and
 // UseMAL settings independently control each source:
 //   - UseKitsu=true, UseMAL=true (defaults): direct Kitsu/MAL call →
 //     Kitsu/MAL artwork (posterImage.original / coverImage.extraLarge /
 //     bannerImage).
 //   - Either false: try to find an IMDB equivalent first (via the
-//     appropriate mapping source — KitsuIMDbMapper for kitsu, AniListClient
-//     for mal). If a mapping exists, re-resolve via the standard IMDb
+//     offline anime list, Kitsu or MAL id → IMDb). If a mapping exists, re-resolve via the standard IMDb
 //     pipeline (TMDB /find). If the mapping is missing OR the IMDb pipeline
 //     rejects it, fall back to the direct Kitsu/MAL call. "No third
 //     option" — if both equivalent-finding and direct-call fail, the
@@ -350,37 +491,33 @@ func resolveKitsuMalCtx(ctx context.Context, cache *services.MemCache, idType se
 		if useKitsu {
 			return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
 		}
-		// UseKitsu=false: try to find an IMDB equivalent via the TheBeastLT
-		// cross-ref (~775 KB, good coverage).
-		if clients.KitsuIMDbMapper != nil {
-			if imdbID := lookupKitsuIMDb(ctx, cache, idValue, clients); imdbID != nil {
-				slog.Debug("kitsu→imdb equivalent translation hit",
+		// UseKitsu=false: try to find an IMDb/TMDB equivalent via the
+		// offline anime list.
+		if clients.Mappings != nil {
+			if t, v, ok := lookupKitsuStandard(ctx, cache, idValue, clients); ok {
+				slog.Debug("kitsu equivalent translation hit",
 					"kitsu_id_or_slug", idValue,
-					"imdb_id", *imdbID)
-				if r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeIMDB, *imdbID, clients); err == nil {
+					"id", t.String()+"/"+v)
+				if r, err := services.ResolveIDCachedCtx(ctx, cache, t, v, clients); err == nil {
 					return r, nil
 				}
-				slog.Debug("kitsu→imdb translation resolve failed, falling back to direct", "imdb_id", *imdbID)
+				slog.Debug("kitsu translation resolve failed, falling back to direct", "id", t.String()+"/"+v)
 			}
 		}
 	case services.IDTypeMAL:
 		if useMAL {
 			return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
 		}
-		// UseMAL=false: try AniList's externalLinks for an IMDB cross-ref.
-		// Coverage is limited (verified 2026-08-15 that 0/6 popular anime
-		// had IMDB in AniList's externalLinks), so this is best-effort.
-		if clients.AniList != nil {
-			if malID, parseErr := strconv.ParseUint(idValue, 10, 64); parseErr == nil && malID > 0 {
-				if imdbID := clients.AniList.LookupIMDBByMAL(ctx, malID); imdbID != nil {
-					slog.Debug("mal→imdb equivalent translation hit",
-						"mal_id", malID,
-						"imdb_id", *imdbID)
-					if r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeIMDB, *imdbID, clients); err == nil {
-						return r, nil
-					}
-					slog.Debug("mal→imdb translation resolve failed, falling back to direct", "imdb_id", *imdbID)
+		// UseMAL=false: try the offline anime list for an IMDb/TMDB cross-ref.
+		if malID, parseErr := strconv.ParseUint(idValue, 10, 64); parseErr == nil && malID > 0 {
+			if t, v, ok := malStandardID(ctx, clients, malID); ok {
+				slog.Debug("mal equivalent translation hit",
+					"mal_id", malID,
+					"id", t.String()+"/"+v)
+				if r, err := services.ResolveIDCachedCtx(ctx, cache, t, v, clients); err == nil {
+					return r, nil
 				}
+				slog.Debug("mal translation resolve failed, falling back to direct", "id", t.String()+"/"+v)
 			}
 		}
 	}
@@ -390,71 +527,120 @@ func resolveKitsuMalCtx(ctx context.Context, cache *services.MemCache, idType se
 	return services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
 }
 
-// lookupKitsuIMDb accepts either a numeric Kitsu id or a slug. Numeric
-// values are looked up directly; slug values are first resolved to a
-// numeric id via the Kitsu slug-filter endpoint.
-func lookupKitsuIMDb(ctx context.Context, cache *services.MemCache, idOrSlug string, clients services.IDClients) *string {
-	mapper := clients.KitsuIMDbMapper
+// imdbForMAL returns the IMDb id of a MAL anime from the offline anime
+// list; AniList's externalLinks (rarely carrying IMDb) only stand in while
+// the list hasn't loaded.
+func imdbForMAL(ctx context.Context, clients services.IDClients, malID uint64) *string {
+	if clients.Mappings.AnimeReady() {
+		if a, ok := clients.Mappings.AnimeByMAL(malID); ok {
+			imdb, _, _ := a.RatingsIDs()
+			return imdb
+		}
+		return nil
+	}
+	if clients.AniList != nil {
+		return clients.AniList.LookupIMDBByMAL(ctx, malID)
+	}
+	return nil
+}
+
+// kitsuForMAL returns the Kitsu id of a MAL anime from the offline anime
+// list; Kitsu's /mappings endpoint only stands in while the list hasn't
+// loaded.
+func kitsuForMAL(ctx context.Context, m *services.IDMappings, kitsu *services.KitsuClient, malID uint64) *uint64 {
+	if m.AnimeReady() {
+		return m.KitsuForMAL(malID)
+	}
+	if kitsu != nil {
+		return kitsu.AnimeIDByMALCtx(ctx, malID)
+	}
+	return nil
+}
+
+// standardIDFor returns the id an anime-list entry translates to in the
+// standard pipeline: its IMDb id, else its TMDB id of known kind — the pair
+// AnimeIDs.RatingsIDs gives the ratings path (ratingsTargetFor), so artwork
+// and ratings come from the same title. ok is false when neither is usable.
+func standardIDFor(a services.AnimeIDs) (services.IDType, string, bool) {
+	imdbID, tmdbID, kind := a.RatingsIDs()
+	if imdbID != nil {
+		return services.IDTypeIMDB, *imdbID, true
+	}
+	if tmdbID != 0 {
+		return services.IDTypeTMDB, services.FormatTMDbIDValue(tmdbID, kind, nil), true
+	}
+	return 0, "", false
+}
+
+// lookupKitsuStandard accepts either a numeric Kitsu id or a slug and
+// returns its standard id (standardIDFor). Numeric values are looked up
+// directly; slug values are first resolved to a numeric id via the Kitsu
+// slug-filter endpoint.
+func lookupKitsuStandard(ctx context.Context, cache *services.MemCache, idOrSlug string, clients services.IDClients) (services.IDType, string, bool) {
+	mapper := clients.Mappings
 	if mapper == nil || idOrSlug == "" {
-		return nil
+		return 0, "", false
 	}
-	if kitsuID, parseErr := strconv.ParseUint(idOrSlug, 10, 64); parseErr == nil && kitsuID > 0 {
-		return mapper.LookupIMDB(kitsuID)
+	kitsuID, parseErr := strconv.ParseUint(idOrSlug, 10, 64)
+	if parseErr != nil || kitsuID == 0 {
+		// Slug (e.g. "fairy-tail-2018"): the anime list is keyed by the
+		// numeric id, so resolve the slug through the cached Kitsu lookup
+		// first. The direct-artwork fallback after a miss reuses the same
+		// cache entry.
+		if clients.Kitsu == nil {
+			return 0, "", false
+		}
+		r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeKitsu, idOrSlug, clients)
+		if err != nil || r == nil || r.KitsuID == nil {
+			return 0, "", false
+		}
+		kitsuID = *r.KitsuID
 	}
-	// Slug (e.g. "fairy-tail-2018"): the TheBeastLT table is keyed by the
-	// numeric id, so resolve the slug through the cached Kitsu lookup first.
-	// The direct-artwork fallback after a miss reuses the same cache entry.
-	if clients.Kitsu == nil {
-		return nil
+	a, ok := mapper.AnimeByKitsu(kitsuID)
+	if !ok {
+		return 0, "", false
 	}
-	r, err := services.ResolveIDCachedCtx(ctx, cache, services.IDTypeKitsu, idOrSlug, clients)
-	if err != nil || r == nil || r.KitsuID == nil {
-		return nil
-	}
-	return mapper.LookupIMDB(*r.KitsuID)
+	return standardIDFor(a)
 }
 
-// resolveStandardCtx is the standard TMDB/IMDb/TVDB pipeline — strict call
-// then the imdb → tmdb → tvdb fallback chain. The use_kitsu_mal checkbox
-// does not affect this path; it only governs how explicit kitsu:N /
-// mal:N URLs are handled (see resolveKitsuMalCtx).
-func resolveStandardCtx(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, clients services.IDClients) (*services.ResolvedID, error) {
-	resolve := func(t services.IDType) (*services.ResolvedID, error) {
-		return services.ResolveIDCachedCtx(ctx, cache, t, idValue, clients)
-	}
-	resolved, strictErr := resolve(idType)
-	if strictErr == nil {
-		return resolved, nil
-	}
-	for _, alt := range []services.IDType{services.IDTypeIMDB, services.IDTypeTMDB, services.IDTypeTVDB} {
-		if alt == idType {
-			continue
+// malStandardID returns the standard id (standardIDFor) of a MAL anime from
+// the offline anime list; while the list hasn't loaded, AniList's IMDb link
+// (imdbForMAL) stands in.
+func malStandardID(ctx context.Context, clients services.IDClients, malID uint64) (services.IDType, string, bool) {
+	if clients.Mappings.AnimeReady() {
+		if a, ok := clients.Mappings.AnimeByMAL(malID); ok {
+			return standardIDFor(a)
 		}
-		if r, err := resolve(alt); err == nil {
-			slog.Debug("image request: standard-chain fallback hit",
-				"requested", idType.String(),
-				"resolved_via", alt.String(),
-				"id", idValue)
-			return r, nil
-		}
+		return 0, "", false
 	}
-	return nil, strictErr
+	if imdbID := imdbForMAL(ctx, clients, malID); imdbID != nil {
+		return services.IDTypeIMDB, *imdbID, true
+	}
+	return 0, "", false
 }
 
-// resolveWithFallback dispatches to the two resolution paths above. The
-// use_kitsu_mal checkbox only changes how explicit kitsu:N / mal:N URLs
-// are handled — every other id_type (imdb / tmdb / tvdb) uses the standard
-// imdb → tmdb → tvdb chain regardless of the checkbox.
-//
-// Per the user's 2026-08-14 spec ("no third option"):
+// resolveWithFallback resolves an id as the type its form names
+// (services.EffectiveIDType: tt… is IMDb, movie-/series- is TMDB, whatever
+// the URL says; this replaced a blind imdb → tmdb → tvdb retry chain that
+// cost a lookup per wrong guess). The use_kitsu_mal checkbox only changes
+// how explicit kitsu:N / mal:N ids are handled:
 //   - ON:  kitsu:N / mal:N → direct Kitsu/MAL → Kitsu/MAL artwork.
 //   - OFF: kitsu:N / mal:N → IMDB-equivalent lookup → fallback to direct.
-//   - Both: imdb:N / tmdb:N / tvdb:N → strict + standard chain.
+//
+// An IMDb id TMDB doesn't know still falls back to the anime table.
 func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType services.IDType, idValue string, clients services.IDClients, useKitsu, useMAL bool) (*services.ResolvedID, error) {
+	eff, err := services.EffectiveIDType(idType.String(), idValue)
+	if err != nil {
+		return nil, err
+	}
+	if effType, perr := services.ParseIDType(eff); perr == nil && effType != idType {
+		slog.Debug("image request: id resolved by its form", "requested", idType.String(), "resolved_as", eff, "id", idValue)
+		idType = effType
+	}
 	if idType == services.IDTypeKitsu || idType == services.IDTypeMAL {
 		return resolveKitsuMalCtx(ctx, cache, idType, idValue, clients, useKitsu, useMAL)
 	}
-	resolved, err := resolveStandardCtx(ctx, cache, idType, idValue, clients)
+	resolved, err := services.ResolveIDCachedCtx(ctx, cache, idType, idValue, clients)
 	if err == nil {
 		return resolved, nil
 	}
@@ -466,16 +652,16 @@ func resolveWithFallback(ctx context.Context, cache *services.MemCache, idType s
 
 // resolveIMDbViaAnimeTable is the last resort for an IMDb id ("tt…") that
 // TMDB doesn't know — common for some anime movies (e.g. tt19861160, Sailor
-// Moon Cosmos): the TheBeastLT table maps it back to a Kitsu entry, whose
+// Moon Cosmos): the offline anime list maps it back to a Kitsu entry, whose
 // artwork is used (it's the only artwork there is, whatever the "Use Kitsu
 // artwork" setting says). The returned copy carries the IMDb id so
 // ratingsTargetFor can still fetch ratings by IMDb id. nil when the id isn't
 // in the table or Kitsu can't resolve it.
 func resolveIMDbViaAnimeTable(ctx context.Context, cache *services.MemCache, idValue string, clients services.IDClients) *services.ResolvedID {
-	if !strings.HasPrefix(idValue, "tt") || clients.KitsuIMDbMapper == nil || clients.Kitsu == nil {
+	if !strings.HasPrefix(idValue, "tt") || clients.Mappings == nil || clients.Kitsu == nil {
 		return nil
 	}
-	kitsuID := clients.KitsuIMDbMapper.LookupKitsuByIMDB(idValue)
+	kitsuID := clients.Mappings.KitsuByIMDb(idValue)
 	if kitsuID == nil {
 		return nil
 	}
@@ -495,16 +681,66 @@ func resolveIMDbViaAnimeTable(ctx context.Context, cache *services.MemCache, idV
 // from any single request's cancellation.
 const renderTimeout = 2 * time.Minute
 
+// resolveTitle resolves the requested id as the type its form names (see
+// resolveWithFallback), uplifts an episode to its series for the poster,
+// logo and backdrop kinds, and applies the anime artwork preference and the
+// title identity. The cache key downstream stays the requested
+// (idType, idValue).
+func (p ServeParams) resolveTitle(idType services.IDType) (*services.ResolvedID, error) {
+	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, p.idClients(), p.Settings.UseKitsu, p.Settings.UseMAL)
+	if err != nil {
+		// Logged so a request that "returns nothing" (the media server then
+		// shows its own artwork) is visible and explained.
+		slog.Info("image not resolved", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "error", err)
+		return nil, err
+	}
+
+	if p.Kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
+		if resolved.Episode != nil {
+			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
+			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, p.idClients())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if p.Kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
+		return nil, apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
+	}
+
+	// Anime artwork preference (Prefer Kitsu / Prefer MAL) — swaps the
+	// direct image URLs before rendering; refreshStale reuses this result.
+	resolved = p.applyAnimeArtworkPreference(resolved)
+	// Title identity (grouping key, ratings cross-ref, release date fill) —
+	// after the artwork swap so a Prefer-Kitsu swap's Kitsu id is used.
+	return p.withTitleIdentity(resolved), nil
+}
+
+func (p ServeParams) imageSize() services.ImageSize {
+	if p.ImageSizeStr != nil {
+		return services.ParseImageSize(*p.ImageSizeStr)
+	}
+	return services.ImageSizeMedium
+}
+
 func ServeImage(p ServeParams) ([]byte, string, error) {
 	if p.Context == nil {
 		p.Context = context.Background()
 	}
+	start := time.Now()
+	defer func() {
+		services.LogSlow("image request", time.Since(start).Milliseconds(), "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
+	}()
 	idType, err := services.ParseIDType(p.IDType)
 	if err != nil {
 		return nil, "", err
 	}
 
 	if err := services.ValidateIDValue(p.IDValue); err != nil {
+		return nil, "", err
+	}
+	if err := services.ValidateIDFormat(p.IDType, p.IDValue); err != nil {
 		return nil, "", err
 	}
 
@@ -516,10 +752,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 	}
 
 	contentType := ImageContentType(p.Kind)
-	imageSize := services.ImageSizeMedium
-	if p.ImageSizeStr != nil {
-		imageSize = services.ParseImageSize(*p.ImageSizeStr)
-	}
+	imageSize := p.imageSize()
 
 	slog.Debug("image request", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
 
@@ -547,51 +780,32 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		p.Settings.EpisodeBadgeStyle = p.Settings.EpisodeBadgeStyle.Resolve(p.Settings.EpisodeBadgeDirection)
 	}
 
-	// Resolve the ID, uplifting episodes to their parent series for poster,
-	// logo, and backdrop endpoints. resolveWithFallback retries the same
-	// idValue under the other ID sources (imdb → tmdb → tvdb, skipping the
-	// requested source) so a misrouted URL like
-	// /imdb/poster-default/series-124364.jpg still resolves: the strict
-	// imdb call fails (no tt prefix), the fallback tmdb call recognises the
-	// series- prefix and returns the show. The cache key downstream stays
-	// the originally-requested (idType, idValue) so the next request hits
-	// cache directly with no fallback fired.
-	resolved, err := resolveWithFallback(p.Context, p.Caches.IDs, idType, p.IDValue, services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, AniList: p.AniList, KitsuIMDbMapper: p.KitsuIMDbMapper}, p.Settings.UseKitsu, p.Settings.UseMAL)
+	// Cold start: the rendered image may already be on disk while nothing
+	// about the id is in memory. Serve it without any upstream call.
+	if b, ok := p.serveColdCache(contentType); ok {
+		return b, contentType, nil
+	}
+
+	// An upstream outage during resolution moments ago isn't retried on
+	// every request for this id (see resolveFailures).
+	resolveKey := p.IDType + "/" + p.IDValue
+	if err := resolveFailures.recent(resolveKey); err != nil {
+		slog.Debug("id resolution failed recently, not retrying yet", "id", resolveKey, "error", err)
+		return nil, "", err
+	}
+	resolved, err := p.resolveTitle(idType)
 	if err != nil {
-		// Logged so a request that "returns nothing" (the media server then
-		// shows its own artwork) is visible and explained.
-		slog.Info("image not resolved", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "error", err)
+		resolveFailures.rememberUpstream(resolveKey, err)
 		return nil, "", err
 	}
 
-	if p.Kind != "episode" && resolved.MediaType == services.MediaTypeEpisode {
-		if resolved.Episode != nil {
-			seriesID := services.FormatTMDbIDValue(resolved.Episode.ShowTMDbID, services.MediaTypeTV, nil)
-			resolved, err = services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB, seriesID, services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, AniList: p.AniList, KitsuIMDbMapper: p.KitsuIMDbMapper})
-			if err != nil {
-				return nil, "", err
-			}
-		}
-	}
-
-	if p.Kind == "episode" && resolved.MediaType != services.MediaTypeEpisode {
-		return nil, "", apperr.NewBadRequest("not an episode - use poster/logo/backdrop endpoint")
-	}
-
-	// Anime artwork preference (Prefer Kitsu / Prefer MAL) — swaps the
-	// direct image URLs before rendering; refreshStale reuses this result.
-	resolved = p.applyAnimeArtworkPreference(resolved)
-	// Title identity (grouping key, ratings cross-ref, release date fill) —
-	// after the artwork swap so a Prefer-Kitsu swap's Kitsu id is used.
-	resolved = p.withTitleIdentity(resolved)
-
 	// Fetch ratings, apply preferences, and build the cache key.
-	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := p.prepareRender(resolved)
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := p.prepareRender(resolved)
 	if err != nil {
 		return nil, "", err
 	}
 	if p.Served != nil {
-		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType}
+		*p.Served = services.CDNServed{CacheKey: cacheKey, CachePath: cachePath, ContentType: contentType, ReleaseDate: releaseDate}
 	}
 
 	// Serve from the in-memory cache first (fast path; works even with
@@ -606,7 +820,7 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 				revalStaleSecs := services.ComputeStaleSecs(derefStr(releaseDate), p.RatingsMinStaleSecs, p.RatingsMaxAgeSecs)
 				if stale, err := services.CacheIsStale(cachePath, revalStaleSecs); err == nil && stale {
 					slog.Debug("image mem cache entry stale, background refresh", "kind", p.Kind, "cache_key", cacheKey)
-					go p.refreshStale(resolved, imageSize)
+					goBackground(func() { p.refreshStale(resolved, imageSize, cacheKey) })
 				}
 				p.Caches.ImageMem.Touch(cacheKey)
 			}
@@ -639,12 +853,19 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 			if p.Caches.ImageMem != nil {
 				p.Caches.ImageMem.Set(cacheKey, entry.Bytes, int64(len(entry.Bytes)))
 			}
-			go p.refreshStale(resolved, imageSize)
+			goBackground(func() { p.refreshStale(resolved, imageSize, cacheKey) })
 			if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
 				slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
 			}
 			return entry.Bytes, contentType, nil
 		}
+	}
+
+	// A render of this key that failed moments ago (no artwork, upstream
+	// down) isn't retried on every request: see renderFailures.
+	if err := renderFailures.recent(cacheKey); err != nil {
+		slog.Debug("render failed recently, not retrying yet", "kind", p.Kind, "cache_key", cacheKey, "error", err)
+		return nil, "", err
 	}
 
 	// Render (fetch artwork + generate + persist), coalesced so concurrent
@@ -656,7 +877,13 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 		defer cancel()
 		rp := p
 		rp.Context = ctx
-		return rp.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+		b, err := rp.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, imageSize)
+		if err != nil {
+			renderFailures.remember(cacheKey, err)
+		} else {
+			renderFailures.forget(cacheKey)
+		}
+		return b, err
 	}
 	var rendered []byte
 	if p.Inflight != nil {
@@ -673,32 +900,52 @@ func ServeImage(p ServeParams) ([]byte, string, error) {
 }
 
 // ratingsTargetFor finds the standard (TMDB-resolved) title behind a
-// Kitsu/MAL-resolved one so its ratings can be fetched: Kitsu id (or MAL id
-// → Kitsu id via Kitsu's /mappings) → TheBeastLT Kitsu→IMDb table, else MAL
-// id → AniList externalLinks; then the IMDb id resolves through TMDB /find
-// (cached in Caches.IDs). Returns nil when no IMDb/TMDB match exists.
-// TheBeastLT maps season entries to the whole show, so a season's poster
-// gets the show's ratings.
+// Kitsu/MAL-resolved one so its ratings can be fetched, through the offline
+// anime list: the Kitsu (or MAL) entry's IMDb id resolves through TMDB /find
+// (cached in Caches.IDs); an entry without one but with a TMDB id of known
+// kind (movie / tv) resolves by that id. Returns nil when no IMDb/TMDB match
+// exists. The list maps season entries to the whole show, so a season's
+// poster gets the show's ratings.
 func (p ServeParams) ratingsTargetFor(resolved *services.ResolvedID) (*services.ResolvedID, *uint64) {
 	kitsuID := resolved.KitsuID
-	if kitsuID == nil && resolved.MALID != nil && p.Kitsu != nil {
-		kitsuID = p.Kitsu.AnimeIDByMALCtx(p.Context, *resolved.MALID)
+	if kitsuID == nil && resolved.MALID != nil {
+		kitsuID = kitsuForMAL(p.Context, p.Mappings, p.Kitsu, *resolved.MALID)
 	}
 	// An IMDb id may already be known (the IMDb→Kitsu anime fallback in
 	// resolveWithFallback carries the requested one).
 	imdbID := resolved.IMDbID
-	if imdbID == nil && kitsuID != nil && p.KitsuIMDbMapper != nil {
-		imdbID = p.KitsuIMDbMapper.LookupIMDB(*kitsuID)
+	var tmdbID uint64
+	tmdbKind := resolved.MediaType
+	entry, found := services.AnimeIDs{}, false
+	if kitsuID != nil {
+		entry, found = p.Mappings.AnimeByKitsu(*kitsuID)
 	}
-	if imdbID == nil && resolved.MALID != nil && p.AniList != nil {
-		imdbID = p.AniList.LookupIMDBByMAL(p.Context, *resolved.MALID)
+	if !found && resolved.MALID != nil {
+		entry, found = p.Mappings.AnimeByMAL(*resolved.MALID)
+	}
+	if found {
+		listIMDb, listTMDB, listKind := entry.RatingsIDs()
+		if imdbID == nil {
+			imdbID = listIMDb
+		}
+		tmdbID, tmdbKind = listTMDB, listKind
+	} else if imdbID == nil && resolved.MALID != nil && !p.Mappings.AnimeReady() {
+		imdbID = imdbForMAL(p.Context, p.idClients(), *resolved.MALID)
+	}
+	if imdbID == nil && tmdbID != 0 {
+		target, err := services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeTMDB,
+			services.FormatTMDbIDValue(tmdbID, tmdbKind, nil), services.IDClients{TMDB: p.TMDB})
+		if err == nil && target != nil {
+			slog.Debug("kitsu/mal ratings cross-ref", "id", p.IDType+"/"+p.IDValue, "tmdb_id", target.TMDbID)
+			return target, kitsuID
+		}
 	}
 	if imdbID == nil {
 		slog.Info("kitsu/mal title has no imdb match — rendering without ratings",
 			"id", p.IDType+"/"+p.IDValue,
 			"kitsu_id", derefUint(kitsuID),
 			"mal_id", derefUint(resolved.MALID),
-			"mapper_loaded", p.KitsuIMDbMapper.Loaded())
+			"anime_list_loaded", p.Mappings.AnimeReady())
 		return nil, kitsuID
 	}
 	target, err := services.ResolveIDCachedCtx(p.Context, p.Caches.IDs, services.IDTypeIMDB, *imdbID, services.IDClients{TMDB: p.TMDB})
@@ -729,8 +976,16 @@ func (p ServeParams) withTitleIdentity(resolved *services.ResolvedID) *services.
 	}
 	out := *resolved
 	if resolved.SourceProvider == "" {
-		if resolved.TMDbID != 0 || resolved.Episode != nil {
+		switch {
+		case resolved.TMDbID != 0 || resolved.Episode != nil:
 			out.TitleKey = "tmdb:" + services.FormatTMDbIDValue(resolved.TMDbID, resolved.MediaType, resolved.Episode)
+		case resolved.TVDBID != nil:
+			// A TVDB-only title (TMDB doesn't know it).
+			kind := "series"
+			if resolved.MediaType == services.MediaTypeMovie {
+				kind = "movie"
+			}
+			out.TitleKey = fmt.Sprintf("tvdb:%s-%d", kind, *resolved.TVDBID)
 		}
 		return &out
 	}
@@ -778,7 +1033,7 @@ func (p ServeParams) applyAnimeArtworkPreference(resolved *services.ResolvedID) 
 		}
 		kitsuID := resolved.KitsuID
 		if kitsuID == nil && resolved.MALID != nil {
-			kitsuID = p.Kitsu.AnimeIDByMALCtx(p.Context, *resolved.MALID)
+			kitsuID = kitsuForMAL(p.Context, p.Mappings, p.Kitsu, *resolved.MALID)
 		}
 		if kitsuID == nil {
 			slog.Info("prefer-kitsu artwork: no kitsu id for mal title, keeping mal artwork", "id", p.IDType+"/"+p.IDValue)
@@ -824,6 +1079,11 @@ func firstNonEmpty(preferred, fallback *string) *string {
 	return fallback
 }
 
+// idClients bundles the resolver clients of this request.
+func (p ServeParams) idClients() services.IDClients {
+	return services.IDClients{TMDB: p.TMDB, Kitsu: p.Kitsu, AniList: p.AniList, Mappings: p.Mappings, TVDB: p.TVDB}
+}
+
 // derefUint returns *v, or 0 for nil, so optional ids log as numbers
 // rather than pointer addresses.
 func derefUint(v *uint64) uint64 {
@@ -837,7 +1097,11 @@ func derefUint(v *uint64) uint64 {
 // preferences, and computes the cache key/path for the request's ID form.
 // It is the first half of the render pipeline, shared by ServeImage and the
 // background-refresh path.
-func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, err error) {
+//
+// available is the title's full set of rating sources (before preferences)
+// when ratings were fetched, nil otherwise; renderArtwork stores it for
+// serveColdCache.
+func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, available *string, err error) {
 	limit := ratingsLimitForKind(p.Kind, p.Settings, p.RatingsLimit)
 
 	var rawBadges []services.RatingBadge
@@ -849,6 +1113,10 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 	target := resolved
 	if resolved.SourceProvider != "" {
 		target = resolved.RatingsTarget
+	}
+	// A TVDB-only title without an IMDb id has nothing to fetch ratings by.
+	if target != nil && target.TMDbID == 0 && target.Episode == nil && (target.IMDbID == nil || *target.IMDbID == "") {
+		target = nil
 	}
 	if limit > 0 && target != nil {
 		// Shadowed on purpose: the ratings query below reads the
@@ -883,7 +1151,8 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 		rawBadges = fetchRatings(p.Context, p.Caches.Ratings,
 			services.RatingsClients{TMDB: p.TMDB, OMDB: p.OMDB, MDBList: p.MDBList, Trakt: p.Trakt},
 			services.RatingsQuery{ResolvedTMDbID: resolved.TMDbID, MediaType: mediaType, IMDbID: imdbID,
-				EpisodeShowTMDbID: epShowID, EpisodeSeason: epSeason, EpisodeEpisode: epEpisode},
+				EpisodeShowTMDbID: epShowID, EpisodeSeason: epSeason, EpisodeEpisode: epEpisode,
+				ReleaseDate: resolved.ReleaseDate},
 		)
 		slog.Debug("ratings fetched",
 			"kind", p.Kind,
@@ -891,8 +1160,13 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 			"badges", len(rawBadges),
 			"sources", badgeSourceString(rawBadges),
 		)
+		s := services.AvailableSourcesString(rawBadges)
+		available = &s
 	} else if limit > 0 {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "no imdb/tmdb match for kitsu/mal title")
+		// Nothing to fetch ratings by: known to have none (for serveColdCache).
+		none := ""
+		available = &none
 	} else {
 		slog.Debug("ratings skipped", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "ratings_limit=0")
 	}
@@ -903,13 +1177,16 @@ func (p ServeParams) prepareRender(resolved *services.ResolvedID) (badges []serv
 	cacheKey, cachePath, err = p.cacheKeyFor(p.IDType, p.IDValue, suffix)
 	releaseDate = resolved.ReleaseDate
 	imageTypeChar = ImageDbValue(p.Kind)
-	return badges, cacheKey, cachePath, releaseDate, imageTypeChar, err
+	return badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err
 }
 
 // renderSuffix builds the settings+ratings cache suffix for the given badges.
 // It is ID-independent, so it can be reused for alternate-ID cache keys.
 func (p ServeParams) renderSuffix(badges []services.RatingBadge) string {
-	ratingsSuffix := services.BadgesCacheSuffix(badges)
+	return p.renderSuffixFromRatings(services.BadgesCacheSuffix(badges))
+}
+
+func (p ServeParams) renderSuffixFromRatings(ratingsSuffix string) string {
 	return services.SettingsCacheSuffixWithRatings(p.Settings, p.Kind, p.ImageSizeStr, ratingsSuffix)
 }
 
@@ -928,14 +1205,69 @@ func (p ServeParams) cacheKeyFor(idType, idValue, suffix string) (cacheKey, cach
 // the result (in-memory + filesystem + metadata, plus cross-ID copies). It is
 // the coalescable unit: concurrent requests for the same cache key share one
 // run via the inflight set.
-func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, imageSize services.ImageSize) ([]byte, error) {
-	// Fetch the base artwork. Three paths, tried in order:
-	//   1. Direct URL (kitsu/mal resolved) — Kitsu/AniList returned their own
-	//      posterImage.original / coverImage.original URLs; fetch them as-is.
-	//   2. Fanart.tv (when ImageSource=="f") — TMDB id may be 0 on the kitsu/mal
-	//      path, so fanart is skipped automatically via the resolved.MediaType
-	//      guard inside fetchFanartArtworkCtx.
-	//   3. TMDB poster_path/backdrop_path (the existing default).
+func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []services.RatingBadge, cacheKey, cachePath string, releaseDate *string, imageTypeChar string, available *string, imageSize services.ImageSize) ([]byte, error) {
+	imageBytes, err := p.fetchBaseArtwork(resolved, imageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Render badges onto the artwork, at most RENDER_CONCURRENCY at a time
+	// (the slot is taken after the upstream fetch, so a slow download never
+	// holds one). Declined with 503 + Retry-After when the queue is full.
+	release, err := currentRenderSlots().acquire(p.Context)
+	if err != nil {
+		return nil, err
+	}
+	renderStart := time.Now()
+	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
+	release()
+	services.LogSlow("render", time.Since(renderStart).Milliseconds(), "kind", p.Kind, "cache_key", cacheKey)
+	if err != nil {
+		return nil, apperr.NewImageError(err)
+	}
+
+	// Persist: in-memory + filesystem + metadata DB.
+	if p.Caches.ImageMem != nil {
+		p.Caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
+	}
+	if !p.ExternalCacheOnly {
+		if err := services.WriteCache(cachePath, rendered); err != nil {
+			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)
+		}
+	}
+	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar, resolved.TitleKey, resolved.Title); err != nil {
+		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
+	}
+	// The sources this render's key was built from, so serveColdCache can
+	// rebuild the key without fetching ratings (requested id form only).
+	if available != nil && p.DB != nil {
+		if err := services.UpsertAvailableRatingsCtx(p.Context, p.DB, p.IDType+"/"+p.IDValue, *available, releaseDate); err != nil {
+			slog.Warn("failed to upsert available ratings", "id", p.IDType+"/"+p.IDValue, "error", err)
+		}
+	}
+	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
+		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+	}
+
+	// Cross-ID cache writes (fire-and-forget, logged on failure).
+	p.writeCrossIDCache(resolved, badges, rendered, available)
+
+	return rendered, nil
+}
+
+// fetchBaseArtwork downloads the artwork to render on, trying in order:
+//  1. the direct Kitsu/AniList URL of a Kitsu/MAL-resolved title;
+//  2. TMDB in the requested language (selectImageRanked tiers) — or
+//     Fanart.tv first when it is the configured image source;
+//  3. Fanart.tv whenever a Fanart client exists (after TMDB);
+//  4. TMDB's default poster_path / backdrop_path;
+//  5. TVDB's artwork (with a TVDB client).
+//
+// A TVDB-only title (TMDbID 0) skips the TMDB steps.
+//
+// A failed step falls through to the next one; only a failure of the last
+// step is returned. (nil, nil) never happens: no artwork is a 404.
+func (p ServeParams) fetchBaseArtwork(resolved *services.ResolvedID, imageSize services.ImageSize) ([]byte, error) {
 	var imageBytes []byte
 	if resolved.SourceProvider != "" {
 		var directURL *string
@@ -958,58 +1290,97 @@ func (p ServeParams) renderArtwork(resolved *services.ResolvedID, badges []servi
 			}
 		}
 	}
-	if imageBytes == nil && p.Settings.ImageSource.IsFanart() && p.Fanart != nil {
-		imageBytes = fetchFanartArtworkCtx(p.Context, p.Fanart, p.TMDB, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
+	if imageBytes != nil {
+		return imageBytes, nil
 	}
-	// Kitsu/MAL resolvers don't carry a TMDb id (AniList's externalLinks
-	// don't reliably expose IMDB either, and even when they do the
-	// translation produces an IMDB id without a corresponding TMDb id until
-	// TMDB /find runs). When we got here via Kitsu/MAL and the direct URL
-	// path produced nothing — e.g. logo/episode kinds, where Kitsu/MAL
-	// don't carry logo/episode artwork — calling TMDB /tv/0 or /movie/0
-	// is just going to surface a cryptic 404. Surface a clean error instead.
-	if imageBytes == nil && resolved.SourceProvider != "" && resolved.TMDbID == 0 {
+
+	fanartFirst := p.Settings.ImageSource.IsFanart() && p.Fanart != nil
+	tryFanart := func() []byte {
+		if p.Fanart == nil {
+			return nil
+		}
+		return fetchFanartArtworkCtx(p.Context, p.Fanart, p.TVDB, resolved, p.Kind, p.Settings, p.CacheDir, p.ExternalCacheOnly)
+	}
+	if fanartFirst {
+		if b := tryFanart(); b != nil {
+			return b, nil
+		}
+	}
+	// Kitsu/MAL resolvers don't carry a TMDb id. When the direct URL produced
+	// nothing — e.g. logo/episode kinds, which Kitsu/MAL don't carry —
+	// calling TMDB /tv/0 or /movie/0 would only surface a cryptic 404.
+	if resolved.SourceProvider != "" && resolved.TMDbID == 0 {
 		slog.Warn("no artwork for kitsu/mal-resolved title", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "reason", "kitsu/mal don't carry this kind of art and no TMDB id was resolved")
 		return nil, apperr.NewIDNotFound(fmt.Sprintf("no %s artwork available for %s/%s: Kitsu / MAL don't carry %s artwork — use an imdb / tmdb / tvdb key instead", p.Kind, p.IDType, p.IDValue, p.Kind))
 	}
-	if imageBytes == nil {
-		var err error
-		imageBytes, err = fetchTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, p.Settings, imageSize)
-		if err != nil {
-			return nil, err
+	if b := selectedTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, p.Settings, imageSize); b != nil {
+		return b, nil
+	}
+	if !fanartFirst {
+		if b := tryFanart(); b != nil {
+			return b, nil
 		}
 	}
-	if imageBytes == nil {
+	b, err := defaultTmdbArtworkCtx(p.Context, p.TMDB, p.CacheDir, p.ExternalCacheOnly, p.ImageStaleSecs, resolved, p.Kind, imageSize)
+	if b == nil {
+		if tb := p.tvdbArtwork(resolved); tb != nil {
+			return tb, nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
 		slog.Warn("no artwork available", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue)
 		return nil, apperr.NewIDNotFound("no " + p.Kind + " artwork available for this title")
 	}
+	return b, nil
+}
 
-	// Render badges onto the artwork.
-	rendered, err := GenerateImage(imageBytes, badges, p.Settings, p.Kind, p.Quality, &imageSize)
-	if err != nil {
-		return nil, apperr.NewImageError(err)
+// tvdbArtwork is the last artwork fallback: the TVDB record's artwork
+// (highest score in the request language, its Portuguese sibling, English).
+// nil without a TVDB client or id, or when TVDB has none.
+func (p ServeParams) tvdbArtwork(resolved *services.ResolvedID) []byte {
+	if p.TVDB == nil || p.Kind == "episode" {
+		return nil
 	}
-
-	// Persist: in-memory + filesystem + metadata DB.
-	if p.Caches.ImageMem != nil {
-		p.Caches.ImageMem.Set(cacheKey, rendered, int64(len(rendered)))
-	}
-	if !p.ExternalCacheOnly {
-		if err := services.WriteCache(cachePath, rendered); err != nil {
-			slog.Warn("failed to write image cache", "cache_key", cacheKey, "error", err)
+	var tvdbID *uint64
+	if resolved.MediaType == services.MediaTypeMovie {
+		tvdbID = resolved.TVDBID
+		if tvdbID == nil && resolved.IMDbID != nil {
+			if id, err := p.TVDB.RemoteIDCtx(p.Context, *resolved.IMDbID, services.MediaTypeMovie); err == nil && id != 0 {
+				tvdbID = &id
+			}
 		}
+	} else {
+		tvdbID = services.SeriesTVDBIDCtx(p.Context, resolved, p.TVDB)
 	}
-	if err := services.UpsertImageMetaCtx(p.Context, p.DB, cacheKey, releaseDate, imageTypeChar, resolved.TitleKey, resolved.Title); err != nil {
-		slog.Warn("failed to upsert image meta", "cache_key", cacheKey, "error", err)
+	if tvdbID == nil {
+		return nil
 	}
-	if err := services.TouchImageAccessCtx(p.Context, p.DB, cacheKey); err != nil {
-		slog.Warn("failed to touch image access", "cache_key", cacheKey, "error", err)
+	var rec *services.TVDBRecord
+	var err error
+	if resolved.MediaType == services.MediaTypeMovie {
+		rec, err = p.TVDB.MovieCtx(p.Context, *tvdbID)
+	} else {
+		rec, err = p.TVDB.SeriesCtx(p.Context, *tvdbID)
 	}
-
-	// Cross-ID cache writes (fire-and-forget, logged on failure).
-	p.writeCrossIDCache(resolved, badges, rendered, imageSize)
-
-	return rendered, nil
+	if err != nil {
+		slog.Info("TVDB artwork lookup failed", "kind", p.Kind, "tvdb_id", *tvdbID, "error", err)
+		return nil
+	}
+	url := services.SelectTVDBArtwork(rec, p.Kind, p.Settings.Lang, p.Settings.Textless && p.Kind == "poster")
+	if url == "" {
+		return nil
+	}
+	httpClient := p.TVDB.HTTP
+	b, err := fetchDirectImageBytesCtx(p.Context, httpClient, url)
+	if err != nil {
+		slog.Info("TVDB artwork download failed", "kind", p.Kind, "url", url, "error", err)
+		return nil
+	}
+	slog.Debug("artwork from TVDB", "kind", p.Kind, "id", p.IDType+"/"+p.IDValue, "tvdb_id", *tvdbID)
+	return b
 }
 
 // fetchDirectImageBytesCtx downloads a base artwork from a fully-qualified URL.
@@ -1043,30 +1414,54 @@ func fetchDirectImageBytesCtx(ctx context.Context, httpClient *http.Client, url 
 //
 // Runs with an independent background context so the work outlives the client
 // request that triggered it (this is server-side cache maintenance, not part
-// of the user's response).
-func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize) {
+// of the user's response). At most refreshSlotsMax run at once — a refresh
+// that finds no free slot is skipped (the next request for the stale entry
+// tries again) — and a key whose refresh failed is backed off
+// (refreshFailures) instead of being retried on every request.
+func (p ServeParams) refreshStale(resolved *services.ResolvedID, imageSize services.ImageSize, staleKey string) {
+	now := time.Now()
+	if refreshFailures.blocked(staleKey, now) {
+		return
+	}
+	release, ok := refreshSlots.tryAcquire()
+	if !ok {
+		slog.Debug("background refresh skipped: all refresh slots busy", "cache_key", staleKey)
+		return
+	}
+	defer release()
+
 	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
 	bgParams := p
 	bgParams.Context = ctx
-	bgParams.freshRatings = true
-	badges, cacheKey, cachePath, releaseDate, imageTypeChar, err := bgParams.prepareRender(resolved)
-	if err != nil {
-		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
+	if err := bgParams.rerender(resolved, imageSize); err != nil {
+		refreshFailures.failed(staleKey, time.Now())
 		return
 	}
+	refreshFailures.succeeded(staleKey)
+}
+
+// rerender renders resolved again with fresh ratings (the body of a
+// background refresh; the caller holds a refresh slot).
+func (p ServeParams) rerender(resolved *services.ResolvedID, imageSize services.ImageSize) error {
+	p.freshRatings = true
+	badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, err := p.prepareRender(resolved)
+	if err != nil {
+		slog.Debug("background refresh: ratings failed", "id", p.IDType+"/"+p.IDValue, "error", err)
+		return err
+	}
 	render := func() ([]byte, error) {
-		return bgParams.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, imageSize)
+		return p.renderArtwork(resolved, badges, cacheKey, cachePath, releaseDate, imageTypeChar, available, imageSize)
 	}
-	var renderErr error
 	if p.Inflight != nil {
-		_, renderErr = p.Inflight.RunCoalesced(cacheKey, render)
+		_, err = p.Inflight.RunCoalesced(cacheKey, render)
 	} else {
-		_, renderErr = render()
+		_, err = render()
 	}
-	if renderErr != nil {
-		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", renderErr)
+	if err != nil {
+		slog.Debug("background refresh failed", "kind", p.Kind, "cache_key", cacheKey, "error", err)
 	}
+	return err
 }
 
 func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary bool) string {
@@ -1095,91 +1490,105 @@ func cacheVariant(kind string, settings *services.RenderSettings, fanartPrimary 
 	return ""
 }
 
-// fetchTmdbArtworkCtx downloads the base artwork for the given kind from TMDB,
-// preferring the on-disk base cache. Returns nil bytes when no artwork exists.
-func fetchTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
-	tmdbSize := imageSize.TmdbSize()
-
-	var filePath string
-	if kind == "episode" {
+// selectedTmdbArtworkPath returns the TMDB image the settings ask for: the
+// episode still, the default poster for English posters with text, or the
+// best /images entry (selectImageRanked / SelectBackdrop). "" when there is
+// none or the /images list could not be fetched.
+func selectedTmdbArtworkPath(ctx context.Context, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings) string {
+	switch {
+	case kind == "episode":
 		if resolved.Episode != nil && resolved.Episode.StillPath != nil {
-			filePath = *resolved.Episode.StillPath
-		} else if resolved.PosterPath != nil {
-			filePath = *resolved.PosterPath
+			return *resolved.Episode.StillPath
 		}
-	} else if kind == "poster" && (settings.Lang == "en" && !settings.Textless) {
+		return ""
+	case kind == "poster" && settings.Lang == "en" && !settings.Textless:
 		if resolved.PosterPath != nil {
-			filePath = *resolved.PosterPath
+			return *resolved.PosterPath
 		}
-	} else {
-		mediaType := "tv"
-		if resolved.MediaType == services.MediaTypeMovie {
-			mediaType = "movie"
-		}
-		lang := settings.Lang
-		if kind == "backdrop" {
-			lang = ""
-		}
-		textless := settings.Textless && kind == "poster"
-		images, err := tmdb.GetImagesCtx(ctx, mediaType, resolved.TMDbID, lang)
-		if err != nil {
-			return nil, err
-		}
-		var candidates []services.TmdbImage
-		switch kind {
-		case "poster":
-			candidates = images.Posters
-		case "logo":
-			candidates = images.Logos
-		case "backdrop":
-			candidates = images.Backdrops
-		}
-		var selected *services.TmdbImage
-		if kind == "poster" {
-			selected = services.SelectPoster(candidates, lang, textless)
-		} else {
-			selected = services.SelectImage(candidates, lang, textless)
-		}
-		if selected != nil {
-			filePath = selected.FilePath
-		}
+		return ""
 	}
+	if resolved.TMDbID == 0 {
+		return ""
+	}
+	mediaType := "tv"
+	if resolved.MediaType == services.MediaTypeMovie {
+		mediaType = "movie"
+	}
+	images, err := tmdb.GetImagesCtx(ctx, mediaType, resolved.TMDbID, settings.Lang, resolved.OriginalLanguage)
+	if err != nil {
+		slog.Info("TMDB image list failed, trying the next artwork source", "kind", kind, "tmdb_id", resolved.TMDbID, "error", err)
+		return ""
+	}
+	var selected *services.TmdbImage
+	switch kind {
+	case "poster":
+		selected = services.SelectPoster(images.Posters, settings.Lang, resolved.OriginalLanguage, settings.Textless)
+	case "logo":
+		selected = services.SelectImage(images.Logos, settings.Lang, resolved.OriginalLanguage, false)
+	case "backdrop":
+		selected = services.SelectBackdrop(images.Backdrops, settings.Lang)
+	}
+	if selected == nil {
+		return ""
+	}
+	return selected.FilePath
+}
 
+// defaultTmdbArtworkPath is the last TMDB fallback: the title's own
+// poster_path (posters, episodes without a still) or backdrop_path.
+func defaultTmdbArtworkPath(resolved *services.ResolvedID, kind string) string {
+	var p *string
+	switch kind {
+	case "poster", "episode":
+		p = resolved.PosterPath
+	case "backdrop":
+		p = resolved.BackdropPath
+	}
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// selectedTmdbArtworkCtx downloads the selected TMDB artwork; nil when there
+// is none or the download failed (the caller moves on to the next source).
+func selectedTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) []byte {
+	filePath := selectedTmdbArtworkPath(ctx, tmdb, resolved, kind, settings)
+	if filePath == "" {
+		return nil
+	}
+	b, err := tmdb.FetchBaseImageCtx(ctx, cacheDir, filePath, imageSize.TmdbSize(), imageStaleSecs, externalCacheOnly)
+	if err != nil {
+		slog.Info("TMDB artwork download failed, trying the next artwork source", "kind", kind, "path", filePath, "error", err)
+		return nil
+	}
+	return b
+}
+
+// defaultTmdbArtworkCtx downloads defaultTmdbArtworkPath; (nil, nil) when the
+// title has none.
+func defaultTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, imageSize services.ImageSize) ([]byte, error) {
+	filePath := defaultTmdbArtworkPath(resolved, kind)
 	if filePath == "" {
 		return nil, nil
 	}
-
-	if externalCacheOnly {
-		return tmdb.FetchPosterBytesCtx(ctx, filePath, tmdbSize)
-	}
-
-	basePath, err := services.BasePosterPath(cacheDir, filePath, tmdbSize)
-	if err != nil {
-		return nil, err
-	}
-	if entry, err := services.ReadCache(basePath, imageStaleSecs); err == nil {
-		return entry.Bytes, nil
-	}
-	bytes, err := tmdb.FetchPosterBytesCtx(ctx, filePath, tmdbSize)
-	if err != nil {
-		return nil, err
-	}
-	if err := services.WriteCache(basePath, bytes); err != nil {
-		slog.Warn("failed to write base image cache", "path", basePath, "error", err)
-	}
-	return bytes, nil
+	return tmdb.FetchBaseImageCtx(ctx, cacheDir, filePath, imageSize.TmdbSize(), imageStaleSecs, externalCacheOnly)
 }
 
-// fetchTmdbArtwork downloads the base artwork for the given kind from TMDB,
-// preferring the on-disk base cache. Returns nil bytes when no artwork exists.
-func fetchTmdbArtwork(tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
-	return fetchTmdbArtworkCtx(context.Background(), tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize)
+// fetchTmdbArtworkCtx is the TMDB part of the chain on its own (selected
+// artwork, then the default): used where Fanart doesn't apply.
+func fetchTmdbArtworkCtx(ctx context.Context, tmdb *services.TmdbClient, cacheDir string, externalCacheOnly bool, imageStaleSecs uint64, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, imageSize services.ImageSize) ([]byte, error) {
+	if b := selectedTmdbArtworkCtx(ctx, tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, settings, imageSize); b != nil {
+		return b, nil
+	}
+	return defaultTmdbArtworkCtx(ctx, tmdb, cacheDir, externalCacheOnly, imageStaleSecs, resolved, kind, imageSize)
 }
 
-// fetchFanartArtworkCtx downloads the base artwork from fanart.tv when the
-// user's image source is fanart. Returns nil bytes when unavailable so the
-// caller falls through to TMDB.
-func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
+// fetchFanartArtworkCtx downloads the base artwork from fanart.tv. Movies are
+// looked up by TMDB id, series only by TVDB id (fanart.tv has no TMDB index
+// for TV) — a series without a known TVDB id is skipped. Returns nil when
+// unavailable so the caller moves on.
+func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, tvdbClient *services.TVDBClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
 	if kind == "episode" {
 		return nil
 	}
@@ -1188,13 +1597,17 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 	var err error
 	switch resolved.MediaType {
 	case services.MediaTypeMovie:
+		if resolved.TMDbID == 0 {
+			return nil
+		}
 		images, err = fanart.GetMovieImagesCtx(ctx, resolved.TMDbID)
 	default:
-		tvID := resolved.TMDbID
-		if resolved.TVDBID != nil && *resolved.TVDBID != 0 {
-			tvID = *resolved.TVDBID
+		tvdb := services.SeriesTVDBIDCtx(ctx, resolved, tvdbClient)
+		if tvdb == nil {
+			slog.Debug("fanart skipped: series has no TVDB id", "tmdb_id", resolved.TMDbID)
+			return nil
 		}
-		images, err = fanart.GetTVImagesCtx(ctx, tvID)
+		images, err = fanart.GetTVImagesCtx(ctx, *tvdb)
 	}
 	if err != nil || images == nil {
 		return nil
@@ -1209,11 +1622,12 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 	case "backdrop":
 		candidates = images.Backdrops
 	}
-	lang := settings.Lang
+	// Backdrops prefer textless ("00") and untagged art, like on TMDB.
+	lang, textless := settings.Lang, settings.Textless && kind == "poster"
 	if kind == "backdrop" {
-		lang = ""
+		lang, textless = "", true
 	}
-	selected, _, ok := services.SelectFanartImage(candidates, lang, settings.Textless && kind == "poster")
+	selected, _, ok := services.SelectFanartImage(candidates, lang, textless)
 	if !ok {
 		return nil
 	}
@@ -1221,6 +1635,7 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 	if !externalCacheOnly {
 		if basePath, err := services.BaseFanartPath(cacheDir, selected.ID, services.ImageExt(kind)); err == nil {
 			if entry, err := services.ReadCache(basePath, 0); err == nil {
+				services.NoteBaseAccess(basePath) // cache cap LRU order, as for TMDB base art
 				return entry.Bytes
 			}
 			if bytes, err := fanart.FetchPosterBytesCtx(ctx, selected.URL); err == nil {
@@ -1239,13 +1654,6 @@ func fetchFanartArtworkCtx(ctx context.Context, fanart *services.FanartClient, t
 		return nil
 	}
 	return bytes
-}
-
-// fetchFanartArtwork downloads the base artwork from fanart.tv when the
-// user's image source is fanart. Returns nil bytes when unavailable so the
-// caller falls through to TMDB.
-func fetchFanartArtwork(fanart *services.FanartClient, tmdb *services.TmdbClient, resolved *services.ResolvedID, kind string, settings *services.RenderSettings, cacheDir string, externalCacheOnly bool) []byte {
-	return fetchFanartArtworkCtx(context.Background(), fanart, tmdb, resolved, kind, settings, cacheDir, externalCacheOnly)
 }
 
 func derefStr(s *string) string {
@@ -1302,7 +1710,7 @@ func badgeSourceString(badges []services.RatingBadge) string {
 // fetched as-is; restricting them to https on these domains keeps a bad or
 // compromised upstream response from making the server fetch arbitrary
 // (e.g. internal) URLs. A miss is logged and the render falls back to TMDB.
-var directArtworkHosts = []string{"kitsu.app", "kitsu.io", "anilist.co", "anili.st"}
+var directArtworkHosts = []string{"kitsu.app", "kitsu.io", "anilist.co", "anili.st", "thetvdb.com"}
 
 func allowedDirectArtworkURL(raw string) bool {
 	u, err := url.Parse(raw)

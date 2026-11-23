@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	apperr "openposterdb/internal/errors"
@@ -76,12 +77,28 @@ var MALRetry = RetryConfig{
 	ServiceName: "anilist",
 }
 
+// RetryAfter parses a Retry-After header (delay in seconds or an HTTP date)
+// on a 429 or 503 response. ok is false when there is none.
+func RetryAfter(resp *http.Response) (time.Duration, bool) {
+	if resp == nil || (resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable) {
+		return 0, false
+	}
+	val := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if val == "" {
+		return 0, false
+	}
+	if secs, err := strconv.ParseUint(val, 10, 32); err == nil {
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(val); err == nil {
+		return max(time.Until(t), 0), true
+	}
+	return 0, false
+}
+
 func retryAfterDelay(resp *http.Response, config *RetryConfig, attempt uint32) time.Duration {
-	if val := resp.Header.Get("Retry-After"); val != "" {
-		if secs, err := strconv.ParseUint(val, 10, 64); err == nil {
-			capped := min(time.Duration(secs)*time.Second, config.MaxDelay)
-			return addJitter(capped)
-		}
+	if d, ok := RetryAfter(resp); ok {
+		return addJitter(min(d, config.MaxDelay))
 	}
 	return backoffDelay(config, attempt)
 }
@@ -141,8 +158,16 @@ func SendWithRetryCtx(ctx context.Context, config *RetryConfig, requestFn Reques
 			)
 			return resp, nil
 		}
+		// The provider asks for a longer pause than this policy waits:
+		// retrying now would only be refused again (and count against the
+		// key). Hand the response back so the caller can block the key.
+		if d, ok := RetryAfter(resp); ok && d > config.MaxDelay {
+			slog.Warn(fmt.Sprintf("%s %d with Retry-After beyond the retry policy, not retrying", config.ServiceName, status),
+				"retry_after_s", int64(d.Seconds()))
+			return resp, nil
+		}
 		var delay time.Duration
-		if status == http.StatusTooManyRequests {
+		if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
 			delay = retryAfterDelay(resp, config, attempt)
 		} else {
 			delay = backoffDelay(config, attempt)

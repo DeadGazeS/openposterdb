@@ -21,6 +21,7 @@ type InflightSet struct {
 	mu         sync.Mutex
 	m          map[string]*inflightEntry
 	totalCalls atomic.Int64 // diagnostic/test helper: counts RunCoalesced invocations (leaders + waiters)
+	waiting    atomic.Int64 // diagnostic/test helper: callers currently waiting on a leader
 }
 
 type inflightEntry struct {
@@ -47,6 +48,8 @@ func (s *InflightSet) RunCoalescedCtx(ctx context.Context, key string, fn func()
 	s.totalCalls.Add(1)
 	s.mu.Lock()
 	if e, ok := s.m[key]; ok {
+		s.waiting.Add(1)
+		defer s.waiting.Add(-1)
 		s.mu.Unlock()
 		select {
 		case <-e.ch:
@@ -86,6 +89,15 @@ func (s *InflightSet) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.m)
+}
+
+// Waiting returns how many callers are currently waiting on another caller's
+// run (diagnostic/test helper).
+func (s *InflightSet) Waiting() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.waiting.Load()
 }
 
 // TotalCalls returns the cumulative count of RunCoalesced invocations

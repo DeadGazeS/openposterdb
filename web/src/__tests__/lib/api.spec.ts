@@ -70,7 +70,7 @@ describe('api', () => {
   })
 
   it('401 handling: attempts refresh, retries request on success', async () => {
-    mockAuthStore.refresh.mockResolvedValue(true)
+    mockAuthStore.refresh.mockResolvedValue('refreshed')
     mockAuthStore.token = 'refreshed-token'
 
     const fetchMock = vi
@@ -85,8 +85,8 @@ describe('api', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('401 + failed refresh: calls logout', async () => {
-    mockAuthStore.refresh.mockResolvedValue(false)
+  it('401 + refresh rejected (401): calls logout', async () => {
+    mockAuthStore.refresh.mockResolvedValue('unauthorized')
 
     const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(401))
     vi.stubGlobal('fetch', fetchMock)
@@ -96,6 +96,22 @@ describe('api', () => {
     expect(mockAuthStore.refresh).toHaveBeenCalled()
     expect(mockAuthStore.logout).toHaveBeenCalled()
     expect(mockOnAuthFailure).toHaveBeenCalled()
+  })
+
+  // A refresh that failed on a 500/503/429 or a network error says nothing
+  // about the session: logging out would revoke a still-valid refresh token.
+  it('401 + refresh unavailable: keeps the session and returns the 401', async () => {
+    mockAuthStore.refresh.mockResolvedValue('unavailable')
+
+    const fetchMock = vi.fn().mockResolvedValue(makeFetchResponse(401))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await get('/api/protected')
+
+    expect(res.status).toBe(401)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockAuthStore.logout).not.toHaveBeenCalled()
+    expect(mockOnAuthFailure).not.toHaveBeenCalled()
   })
 
   it('non-401 error passes through without refresh', async () => {

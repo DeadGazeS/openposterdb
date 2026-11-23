@@ -118,19 +118,19 @@ func copyAPIKey(k *APIKey) *APIKey {
 }
 
 // globalsCached returns the cached raw + parsed global settings, reloading
-// them when stale. ok is false when the read failed (nothing is cached then;
+// them when stale. A failed read returns its error (nothing is cached then;
 // raw is nil and parsed holds the defaults).
-func (c *settingsCache) globalsCached(ctx context.Context, db *sql.DB) (raw map[string]string, parsed RenderSettings, ok bool) {
+func (c *settingsCache) globalsCached(ctx context.Context, db *sql.DB) (raw map[string]string, parsed RenderSettings, err error) {
 	gen := c.gen.Load()
 	c.mu.Lock()
 	g := c.globals
 	c.mu.Unlock()
 	if g != nil && g.gen == gen && time.Since(g.at) < settingsCacheTTL {
-		return g.raw, g.parsed, true
+		return g.raw, g.parsed, nil
 	}
 	m, err := GetGlobalSettingsCtx(ctx, db)
 	if err != nil {
-		return nil, DefaultRenderSettings(), false
+		return nil, DefaultRenderSettings(), err
 	}
 	g = &globalsEntry{raw: m, parsed: ParseGlobalRenderSettings(m), gen: gen, at: time.Now()}
 	c.mu.Lock()
@@ -138,41 +138,66 @@ func (c *settingsCache) globalsCached(ctx context.Context, db *sql.DB) (raw map[
 		c.globals = g
 	}
 	c.mu.Unlock()
-	return g.raw, g.parsed, true
+	return g.raw, g.parsed, nil
 }
 
 // GlobalRenderSettingsCachedCtx returns the parsed global render settings
 // (defaults when the read fails). The result is a value copy; its Colors map
 // is shared and must be treated as read-only (as everywhere else).
 func GlobalRenderSettingsCachedCtx(ctx context.Context, db *sql.DB) RenderSettings {
-	_, parsed, _ := settingsCacheFor(db).globalsCached(ctx, db)
-	return parsed
+	s, _ := GlobalRenderSettingsCachedErrCtx(ctx, db)
+	return s
+}
+
+// GlobalRenderSettingsCachedErrCtx is GlobalRenderSettingsCachedCtx that
+// reports a failed read (the settings are the defaults then).
+func GlobalRenderSettingsCachedErrCtx(ctx context.Context, db *sql.DB) (RenderSettings, error) {
+	_, parsed, err := settingsCacheFor(db).globalsCached(ctx, db)
+	return parsed, err
 }
 
 // GlobalSettingCachedCtx returns one raw global setting ("" when unset or on
 // a read error).
 func GlobalSettingCachedCtx(ctx context.Context, db *sql.DB, key string) string {
-	raw, _, _ := settingsCacheFor(db).globalsCached(ctx, db)
-	return raw[key]
+	v, _ := GlobalSettingCachedErrCtx(ctx, db, key)
+	return v
+}
+
+// GlobalSettingCachedErrCtx is GlobalSettingCachedCtx that reports a failed
+// read; an unset setting is "" without an error.
+func GlobalSettingCachedErrCtx(ctx context.Context, db *sql.DB, key string) (string, error) {
+	raw, _, err := settingsCacheFor(db).globalsCached(ctx, db)
+	return raw[key], err
 }
 
 // EffectiveRenderSettingsCachedCtx is GetEffectiveRenderSettingsCtx through
 // the cache. A result built while the per-key or global read failed is
 // returned but not cached.
 func EffectiveRenderSettingsCachedCtx(ctx context.Context, db *sql.DB, apiKeyID int64) RenderSettings {
+	s, _ := EffectiveRenderSettingsCachedErrCtx(ctx, db, apiKeyID)
+	return s
+}
+
+// EffectiveRenderSettingsCachedErrCtx is EffectiveRenderSettingsCachedCtx
+// that also reports a failed per-key or global read (the result is the
+// fallback then, never cached). A key without stored settings is no error.
+func EffectiveRenderSettingsCachedErrCtx(ctx context.Context, db *sql.DB, apiKeyID int64) (RenderSettings, error) {
 	c := settingsCacheFor(db)
 	gen := c.gen.Load()
 	key := strconv.FormatInt(apiKeyID, 10)
 	if v, ok := c.eff.Get(key); ok {
 		if e := v.(effEntry); e.gen == gen {
-			return e.s
+			return e.s, nil
 		}
 	}
-	_, globals, globalsOK := c.globalsCached(ctx, db)
+	_, globals, globalsErr := c.globalsCached(ctx, db)
 	perKey, err := GetAPIKeySettingsCtx(ctx, db, apiKeyID)
 	s := effectiveFromPerKey(ctx, db, apiKeyID, perKey, err, &globals)
-	if err == nil && globalsOK {
+	if err == nil {
+		err = globalsErr
+	}
+	if err == nil {
 		c.eff.Set(key, effEntry{s: s, gen: gen}, 1)
 	}
-	return s
+	return s, err
 }

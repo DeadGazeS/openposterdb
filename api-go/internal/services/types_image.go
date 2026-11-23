@@ -68,6 +68,22 @@ func ParseImageSize(s string) ImageSize {
 	}
 }
 
+// ValidateImageSize parses a ?imageSize= value strictly for an image kind:
+// unknown values are an error (ParseImageSize maps them to medium), and
+// "small" is only valid for backdrops and episodes (as in the Rust version).
+func ValidateImageSize(s, kind string) (ImageSize, error) {
+	switch s {
+	case "small", "medium", "large", "very-large", "verylarge":
+	default:
+		return "", fmt.Errorf("imageSize must be 'small', 'medium', 'large' or 'very-large'")
+	}
+	size := ParseImageSize(s)
+	if size == ImageSizeSmall && kind != "backdrop" && kind != "episode" {
+		return "", fmt.Errorf("imageSize 'small' is only valid for backdrops and episodes")
+	}
+	return size, nil
+}
+
 func (s ImageSize) PosterTargetWidth() uint32 {
 	switch s {
 	case ImageSizeMedium:

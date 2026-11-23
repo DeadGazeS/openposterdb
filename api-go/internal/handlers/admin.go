@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"openposterdb/internal/httpx"
+	"openposterdb/internal/image"
 	"openposterdb/internal/services"
 )
 
@@ -27,6 +28,7 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 		case http.MethodGet:
 			prefs, err := services.GetUserPrefsCtx(r.Context(), db, user.Username)
 			if err != nil {
+				slog.Error("loading user preferences failed", "user", user.Username, "error", err)
 				httpx.WriteError(w, 500, "Failed to load preferences")
 				return
 			}
@@ -39,11 +41,13 @@ func HandleUserPrefs(db *sql.DB) http.HandlerFunc {
 			}
 			prefs, err := services.GetUserPrefsCtx(r.Context(), db, user.Username)
 			if err != nil {
+				slog.Error("loading user preferences failed", "user", user.Username, "error", err)
 				httpx.WriteError(w, 500, "Failed to load preferences")
 				return
 			}
 			maps.Copy(prefs, updates)
 			if err := services.SetUserPrefsCtx(r.Context(), db, user.Username, prefs); err != nil {
+				slog.Error("saving user preferences failed", "user", user.Username, "error", err)
 				httpx.WriteError(w, 500, "Failed to save preferences")
 				return
 			}
@@ -161,6 +165,7 @@ func HandleGetSettings(db *sql.DB, freeKeyEnabled, freeKeyLocked, fanartAvailabl
 
 		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
+			slog.Error("loading global settings failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
@@ -196,6 +201,7 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 
 		globals, err := services.GetGlobalSettingsCtx(r.Context(), db)
 		if err != nil {
+			slog.Error("loading global settings for update failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
@@ -228,6 +234,7 @@ func HandleUpdateSettings(db *sql.DB, freeKeyLocked bool) http.HandlerFunc {
 		}
 
 		if err := services.SetGlobalSettingsBatchCtx(r.Context(), db, batch); err != nil {
+			slog.Error("saving global settings failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to save settings")
 			return
 		}
@@ -257,6 +264,7 @@ func HandleListImages(db *sql.DB, imageType string) http.HandlerFunc {
 
 		items, total, err := services.ListImageMetaByKindCtx(r.Context(), db, imageType, sortBy, sortDir, page, pageSize)
 		if err != nil {
+			slog.Error("list images failed", "kind", imageType, "error", err)
 			httpx.WriteError(w, 500, "Failed to list images")
 			return
 		}
@@ -298,6 +306,7 @@ func HandlePurgeAll(db *sql.DB, cacheDir string, externalCacheOnly bool, caches 
 		}
 
 		// Drop every in-memory entry so a purge is immediately visible.
+		image.ResetRenderFailures()
 		if caches != nil {
 			if caches.ImageMem != nil {
 				caches.ImageMem.Clear()

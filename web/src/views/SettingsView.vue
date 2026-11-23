@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Check, Loader2 } from 'lucide-vue-next'
+import { Check, Info, Loader2 } from 'lucide-vue-next'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useQuery } from '@tanstack/vue-query'
 import { useSavedFlash } from '@/composables/useSavedFlash'
 import { useRenderSettingsForm } from '@/composables/useRenderSettingsForm'
@@ -66,7 +67,16 @@ type ServiceKeyChip = { id?: string; masked: string; value?: string }
 function chipKey(c: ServiceKeyChip): string {
   return c.id ? `id:${c.id}` : `new:${c.value}`
 }
-type ServiceKeysResponse = { tmdb: ServiceKey; mdblist: ServiceKey; omdb: ServiceKey; fanart: ServiceKey; trakt: ServiceKey }
+// The source API key services, grouped by what they provide, in display order.
+const SERVICE_GROUPS = [
+  { label: 'Artwork', services: ['tmdb', 'tvdb', 'fanart'] },
+  { label: 'Ratings', services: ['mdblist', 'omdb', 'trakt'] },
+] as const
+const SERVICES = SERVICE_GROUPS.flatMap((g) => g.services)
+type Service = (typeof SERVICES)[number]
+type ServiceKeysResponse = Record<Service, ServiceKey>
+const emptyPerService = <T,>(v: () => T): Record<Service, T> =>
+  Object.fromEntries(SERVICES.map((s) => [s, v()])) as Record<Service, T>
 
 const freeApiKeyEnabled = ref(false)
 const freeKeyError = ref('')
@@ -111,20 +121,8 @@ async function copyServiceKey(svc: string, chip: ServiceKeyChip) {
 // Per-service key chips. Each chip is one key; the whole list is saved
 // (comma-joined, matching the backend's multi-key format) whenever a chip is
 // added or removed — there is no separate Save button.
-const serviceKeyChips = ref<Record<string, ServiceKeyChip[]>>({
-  tmdb: [],
-  mdblist: [],
-  omdb: [],
-  fanart: [],
-  trakt: [],
-})
-const serviceKeyDraft = ref<Record<string, string>>({
-  tmdb: '',
-  mdblist: '',
-  omdb: '',
-  fanart: '',
-  trakt: '',
-})
+const serviceKeyChips = ref<Record<string, ServiceKeyChip[]>>(emptyPerService<ServiceKeyChip[]>(() => []))
+const serviceKeyDraft = ref<Record<string, string>>(emptyPerService(() => ''))
 
 const {
   data: serviceKeys,
@@ -134,12 +132,19 @@ const {
   queryFn: async () => okOrThrow<ServiceKeysResponse>(await adminApi.getServiceKeys(), 'Failed to fetch service keys'),
 })
 
+// Services whose chips changed while another save was running: saved next,
+// and not re-seeded from the server meanwhile (that dropped the new chips).
+// Declared before the seeding watcher below: it runs immediately when the
+// key list is already cached (re-login without a reload) and read this set
+// while it was still uninitialised, leaving the chips empty.
+const pendingServiceSaves = new Set<string>()
+
 // Seed the chips from the server's real keys once loaded.
 watch(
   serviceKeys,
   (keys) => {
     if (!keys) return
-    for (const svc of ['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const) {
+    for (const svc of SERVICES) {
       const k = keys[svc]
       if (pendingServiceSaves.has(svc)) continue // unsaved chips: keep them
       if (k && !k.locked) serviceKeyChips.value[svc] = (k.keys ?? []).map((r) => ({ id: r.id, masked: r.masked }))
@@ -262,10 +267,6 @@ function removeServiceKey(svc: string, chip: ServiceKeyChip) {
   void saveServiceKeys(svc)
 }
 
-// Services whose chips changed while another save was running: saved next,
-// and not re-seeded from the server meanwhile (that dropped the new chips).
-const pendingServiceSaves = new Set<string>()
-
 async function saveServiceKeys(svc: string) {
   if (serviceKeysSaving.value) {
     pendingServiceSaves.add(svc)
@@ -303,6 +304,20 @@ const serviceLabels: Record<string, string> = {
   omdb: 'OMDb',
   fanart: 'Fanart.tv',
   trakt: 'Trakt',
+  tvdb: 'TheTVDB',
+}
+// Shown after the name, for a source that also covers the other group.
+const serviceLabelNotes: Partial<Record<string, string>> = {
+  tmdb: '+ TMDB ratings',
+}
+// Hover details per source.
+const serviceDetails: Record<string, string> = {
+  tmdb: 'Main source for posters, logos, backdrops and episode images, plus TMDB ratings. Strongly recommended.',
+  tvdb: "For titles requested by TVDB id that TMDB can't match, and a last artwork fallback. Useful if your media server uses TVDB ids.",
+  fanart: 'Extra artwork, especially textless posters, logos and backdrops.',
+  mdblist: 'One key for IMDb, Rotten Tomatoes, Metacritic, Trakt, Letterboxd, MAL, MDBList and Roger Ebert ratings. Recommended.',
+  omdb: 'IMDb, Rotten Tomatoes and Metacritic ratings when MDBList has none. Needed for IMDb episode ratings.',
+  trakt: 'Trakt ratings for movies, shows and episodes.',
 }
 
 const {
@@ -529,9 +544,28 @@ async function handleRefresh() {
             </p>
             <p v-if="serviceKeysError" class="text-sm text-destructive">{{ serviceKeysError }}</p>
 
-            <div v-for="service in (['tmdb', 'mdblist', 'omdb', 'fanart', 'trakt'] as const)" :key="service" class="space-y-2">
+            <TooltipProvider :delay-duration="150">
+            <section v-for="group in SERVICE_GROUPS" :key="group.label" class="space-y-3 pt-1" :data-testid="`service-group-${group.label.toLowerCase()}`">
+            <h4 class="text-sm font-semibold">{{ group.label }}</h4>
+            <div v-for="service in group.services" :key="service" class="space-y-2">
               <label :for="`key-${service}`" class="text-sm font-medium flex items-center gap-2">
-                {{ serviceLabels[service] }}
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 cursor-help"
+                      :aria-label="`More about ${serviceLabels[service]}`"
+                      :data-testid="`service-label-${service}`"
+                    >
+                      {{ serviceLabels[service] }}
+                      <span v-if="serviceLabelNotes[service]" class="text-xs font-normal text-muted-foreground">({{ serviceLabelNotes[service] }})</span>
+                      <Info class="size-3.5 text-muted-foreground" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-xs text-left" :data-testid="`service-details-${service}`">
+                    {{ serviceDetails[service] }}
+                  </TooltipContent>
+                </Tooltip>
                 <span v-if="serviceKeys?.[service]?.locked" class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">env</span>
                 <span v-if="serviceKeysSaving === service" class="text-xs text-muted-foreground">Saving…</span>
               </label>
@@ -576,6 +610,8 @@ async function handleRefresh() {
                 />
               </div>
             </div>
+            </section>
+            </TooltipProvider>
           </div>
         </TabsContent>
       </Tabs>

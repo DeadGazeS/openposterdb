@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -47,7 +48,7 @@ func upgradeTestDB(t *testing.T) *sql.DB {
 
 // TestRunUpgrades_CreatesUpgradesTable guards the bookkeeping table: a fresh
 // DB + RunUpgrades must create the upgrades table and insert one row per
-// v*** upgrade (v001, v002, v003, v004).
+// v*** upgrade (v001 … v005).
 func TestRunUpgrades_CreatesUpgradesTable(t *testing.T) {
 	db := upgradeTestDB(t)
 
@@ -67,6 +68,10 @@ func TestRunUpgrades_CreatesUpgradesTable(t *testing.T) {
 		"v002_backdrop_position_direction_cache",
 		"v003_badge_shape_background_cache",
 		"v004_badge_size_int_columns",
+		"v005_rust_render_cache",
+	}
+	if RenderEpoch > 0 {
+		want = append(want, "render_epoch_"+strconv.Itoa(RenderEpoch))
 	}
 	var got []string
 	for rows.Next() {
@@ -100,8 +105,8 @@ func TestRunUpgrades_Idempotent(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM upgrades").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Errorf("upgrades rows after rerun: got %d, want 4", count)
+	if count != upgradeCount() {
+		t.Errorf("upgrades rows after rerun: got %d, want %d", count, upgradeCount())
 	}
 }
 
@@ -234,21 +239,18 @@ func TestRenameFilesV001_MissingDir_NoError(t *testing.T) {
 	}
 }
 
-// TestUpgradeV002_DB_PtrAndDvSuffixes drives v002: rows with the literal
-// `.sv.l.` and `.lt.b.` substrings (backdrop only) must have `.ptr.` (or
-// `.dv.`) inserted before the matched fragment; other image types and
+// TestUpgradeV002_DB_PtrAndDvSuffixes drives v002 with real Rust-era backdrop
+// keys (`{ratings}.s{style}.l{label}.b{size}.z{size}`): `.ptr` goes before the
+// badge style and `.dv` after the label style, exactly as the Rust upgrade
+// (v002_backdrop_position_direction_cache.rs) did. Other image types and
 // already-migrated rows are untouched.
-//
-// The migration's `style + "l" + "."` pattern requires the literal `.sv.l.`
-// substring in the cache key (period-s-v-period-l-period), so we seed
-// matching patterns explicitly.
 func TestUpgradeV002_DB_PtrAndDvSuffixes(t *testing.T) {
 	db := upgradeTestDB(t)
 	if _, err := db.Exec(`INSERT INTO image_meta (cache_key, created_at, updated_at, image_type) VALUES
-		('a.sv.l.b.en.jpg', 1, 1, 'b'),
-		('b.lt.b.en.jpg', 1, 1, 'b'),
-		('c.ptr.sv.l.b.en.jpg', 1, 1, 'b'),
-		('d.sv.l.b.en.jpg', 1, 1, 'p')`); err != nil {
+		('imdb/tt1234567_b_f@mil.sv.lt.bm.zm', 1, 1, 'b'),
+		('imdb/tt7654321_b_t@ir.sh.li.bl.zl', 1, 1, 'b'),
+		('imdb/tt1111111_b_f@m.ptr.sd.lo.dv.bxs.zs', 1, 1, 'b'),
+		('imdb/tt2222222@mil.sv.lt.bm.zm', 1, 1, 'p')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,18 +271,44 @@ func TestUpgradeV002_DB_PtrAndDvSuffixes(t *testing.T) {
 		}
 		rows[ck] = it
 	}
-	// After v002 the migration inserts `.ptr.` (and `.dv.`) before the
-	// matched fragment, producing a `.ptr..sv.l.` double-dot in the cache
-	// key (the leading dot of the new `.ptr.` token sits next to the
-	// original `.sv.l.` separator).
-	for _, want := range []string{"a.ptr..sv.l.b.en.jpg", "b.lt.dv.b.en.jpg", "c.ptr.sv.l.b.en.jpg"} {
+	for _, want := range []string{
+		"imdb/tt1234567_b_f@mil.ptr.sv.lt.dv.bm.zm",
+		"imdb/tt7654321_b_t@ir.ptr.sh.li.dv.bl.zl",
+		"imdb/tt1111111_b_f@m.ptr.sd.lo.dv.bxs.zs",
+	} {
 		if _, ok := rows[want]; !ok {
 			t.Errorf("missing renamed row %q (rows=%v)", want, rows)
 		}
 	}
+	for k := range rows {
+		if strings.Contains(k, "..") {
+			t.Errorf("double dot in migrated key %q", k)
+		}
+	}
 	// The poster row must remain untouched.
-	if _, ok := rows["d.sv.l.b.en.jpg"]; !ok {
+	if _, ok := rows["imdb/tt2222222@mil.sv.lt.bm.zm"]; !ok {
 		t.Errorf("poster row was renamed (rows=%v)", rows)
+	}
+}
+
+// TestUpgradeV002_DBMatchesFilesystem: the DB step and the file rename must
+// produce the same name for the same key.
+func TestUpgradeV002_DBMatchesFilesystem(t *testing.T) {
+	db := upgradeTestDB(t)
+	name := "tt1234567_b_f@mil.sv.lt.bxl.zvl"
+	if _, err := db.Exec(`INSERT INTO image_meta (cache_key, created_at, updated_at, image_type) VALUES (?, 1, 1, 'b')`, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := upgradeV002Ctx(context.Background(), db, t.TempDir(), true); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow("SELECT cache_key FROM image_meta").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	fsName := migrateNameV002(name + ".jpg")
+	if fsName == nil || *fsName != got+".jpg" {
+		t.Errorf("DB %q vs file %v", got, fsName)
 	}
 }
 
@@ -453,20 +481,9 @@ func TestRunUpgrades_ExternalCacheOnly(t *testing.T) {
 	}
 }
 
-// TestStringInt guards the int-to-single-digit helper used to compose
-// SQLite substr() expressions (it intentionally only handles 0-9 because
-// that's the range the migration uses).
-func TestStringInt(t *testing.T) {
-	for i := 0; i <= 9; i++ {
-		if got := stringInt(i); got != string(rune('0'+i)) {
-			t.Errorf("stringInt(%d) = %q, want %q", i, got, string(rune('0'+i)))
-		}
-	}
-}
-
 // TestRunUpgrades_ConcurrentCallersRunFnOnce guards the run-once contract
 // under concurrency: 5 goroutines all calling RunUpgrades must observe
-// each v*** migration run at most once (and end up with exactly 4 rows in
+// each v*** migration run at most once (and end up with exactly 5 rows in
 // the upgrades table).
 //
 // The shared DB is opened with shared cache + a single connection so all
@@ -505,8 +522,8 @@ func TestRunUpgrades_ConcurrentCallersRunFnOnce(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM upgrades").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Errorf("upgrades rows after concurrent runs: got %d, want 4", count)
+	if count != upgradeCount() {
+		t.Errorf("upgrades rows after concurrent runs: got %d, want %d", count, upgradeCount())
 	}
 }
 
@@ -562,8 +579,8 @@ func TestUpgradeV004_CreatesMissingColumns(t *testing.T) {
 
 // TestUpgradeV004_ConvertsLegacyTextColumns covers databases from before the
 // percent-scale rework: TEXT enum columns ('s'/'m'/'l') are dropped and
-// recreated as INTEGER, values replaced by the 100% default (same convention
-// as the badge_background migration).
+// recreated as INTEGER, and the Rust size names are carried over as percents
+// of the kind's default scale (PercentFromLegacySize).
 func TestUpgradeV004_ConvertsLegacyTextColumns(t *testing.T) {
 	db := v004TestDB(t, `CREATE TABLE api_key_settings (
 		api_key_id INTEGER PRIMARY KEY,
@@ -589,15 +606,16 @@ func TestUpgradeV004_ConvertsLegacyTextColumns(t *testing.T) {
 			t.Errorf("%s_badge_size: got type %q, want INTEGER", kind, got)
 		}
 	}
-	// Legacy enum values are gone; the row carries the percent default and —
-	// critically — scans into a Go int without a conversion error (TEXT 'm'
-	// would fail the services SELECT).
-	var poster, episode int
-	if err := db.QueryRow(`SELECT poster_badge_size, episode_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&poster, &episode); err != nil {
+	// The values scan into a Go int (TEXT 'm' would fail the services
+	// SELECT) and keep the size the user picked in the Rust UI:
+	// poster xl = 1.7/1.2 → 142 %, episode s = 0.95/1.45 → 66 %, the
+	// untouched defaults (poster m, episode l) → 100 %.
+	var poster, logo, episode int
+	if err := db.QueryRow(`SELECT poster_badge_size, logo_badge_size, episode_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&poster, &logo, &episode); err != nil {
 		t.Fatal(err)
 	}
-	if poster != 100 || episode != 100 {
-		t.Errorf("converted values: got poster=%d episode=%d, want 100/100", poster, episode)
+	if poster != 142 || logo != 100 || episode != 66 {
+		t.Errorf("converted values: got poster=%d logo=%d episode=%d, want 142/100/66", poster, logo, episode)
 	}
 }
 
@@ -627,4 +645,64 @@ func TestUpgradeV004_PreservesIntegerValues(t *testing.T) {
 	if poster != 130 || logo != 120 || backdrop != 110 || episode != 90 {
 		t.Errorf("values changed: got %d/%d/%d/%d, want 130/120/110/90", poster, logo, backdrop, episode)
 	}
+}
+
+// TestUpgradeV004_FailureKeepsLegacyColumn: the retype is one transaction, so
+// a failure after the DROP (here the UPDATE writing the converted size back)
+// leaves the TEXT column and the Rust-era value in place for the next boot.
+func TestUpgradeV004_FailureKeepsLegacyColumn(t *testing.T) {
+	db := v004TestDB(t, `CREATE TABLE api_key_settings (
+		api_key_id INTEGER PRIMARY KEY,
+		poster_badge_size TEXT NOT NULL DEFAULT 'm'
+	)`)
+	if _, err := db.Exec(`INSERT INTO api_key_settings (api_key_id, poster_badge_size) VALUES (1, 'xl')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER fail_update BEFORE UPDATE ON api_key_settings
+		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := upgradeV004Ctx(context.Background(), db); err == nil {
+		t.Fatal("want the injected failure")
+	}
+
+	cols, err := tableColumnTypes(context.Background(), db, "api_key_settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cols["poster_badge_size"]; got != "TEXT" {
+		t.Errorf("poster_badge_size type after a failed upgrade: %q, want TEXT", got)
+	}
+	var v string
+	if err := db.QueryRow(`SELECT CAST(poster_badge_size AS TEXT) FROM api_key_settings WHERE api_key_id = 1`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != "xl" {
+		t.Errorf("poster_badge_size after a failed upgrade: %q, want xl", v)
+	}
+
+	// With the cause gone, the next run converts it.
+	if _, err := db.Exec(`DROP TRIGGER fail_update`); err != nil {
+		t.Fatal(err)
+	}
+	if err := upgradeV004Ctx(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var pct int
+	if err := db.QueryRow(`SELECT poster_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&pct); err != nil {
+		t.Fatal(err)
+	}
+	if pct != 142 {
+		t.Errorf("poster_badge_size after the retry: %d, want 142", pct)
+	}
+}
+
+// upgradeCount is the number of upgrades rows a full RunUpgrades records:
+// v001…v005 plus the render-epoch sweep when the epoch is above 0.
+func upgradeCount() int {
+	if RenderEpoch > 0 {
+		return 6
+	}
+	return 5
 }

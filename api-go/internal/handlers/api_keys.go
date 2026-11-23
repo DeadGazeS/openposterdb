@@ -24,6 +24,7 @@ func HandleListKeys(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 
 		keys, err := services.ListAPIKeysCtx(r.Context(), db)
 		if err != nil {
+			slog.Error("list keys failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to list keys")
 			return
 		}
@@ -79,13 +80,31 @@ func HandleCreateKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 		raw, hash, prefix := services.GenerateAPIKey()
 		encrypted, err := services.EncryptAPIKey(raw, secretsKey)
 		if err != nil {
+			slog.Error("create key: encrypting the key failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to encrypt key")
 			return
 		}
 
-		var createdBy int64 = 1
+		// The key belongs to the admin creating it (it used to be hard-coded
+		// to user 1). A session whose user was deleted can't create keys.
+		user := GetAuthUser(r)
+		if user == nil {
+			httpx.WriteError(w, 401, "Unauthorized")
+			return
+		}
+		createdBy, _, _, err := services.FindAdminUserByUsernameCtx(r.Context(), db, user.Username)
+		if err != nil && err != sql.ErrNoRows {
+			slog.Error("create key: looking up the admin user failed", "error", err)
+			httpx.WriteError(w, 500, "Failed to create key")
+			return
+		}
+		if err != nil || createdBy == 0 {
+			httpx.WriteError(w, 401, "Unauthorized")
+			return
+		}
 		id, err := services.CreateAPIKeyCtx(r.Context(), db, body.Name, hash, prefix, encrypted, createdBy)
 		if err != nil {
+			slog.Error("create key: insert failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to create key")
 			return
 		}
@@ -114,6 +133,7 @@ func HandleDeleteKey(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err := services.DeleteAPIKeyCtx(r.Context(), db, id); err != nil {
+			slog.Error("delete key failed", "id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to delete key")
 			return
 		}
@@ -137,10 +157,8 @@ func HandleGetKeySettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 			return
 		}
 
-		idStr := r.PathValue("id")
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			httpx.WriteError(w, 400, "invalid id")
+		id, ok := existingKeyID(w, r, db)
+		if !ok {
 			return
 		}
 
@@ -148,6 +166,47 @@ func HandleGetKeySettings(db *sql.DB, fanartAvailable bool) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(perKeySettingsResponse{settings, fanartAvailable})
 	}
+}
+
+// existingKeyID reads the {id} path value and checks the key exists:
+// 400 for a malformed id, 404 for an unknown key (the settings routes used to
+// answer an unknown key with the global defaults, or create a row for it).
+func existingKeyID(w http.ResponseWriter, r *http.Request, db *sql.DB) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpx.WriteError(w, 400, "invalid id")
+		return 0, false
+	}
+	exists, err := services.APIKeyExistsCachedCtx(r.Context(), db, id)
+	if err != nil {
+		slog.Error("api key lookup failed", "id", id, "error", err)
+		httpx.WriteError(w, 500, "Internal server error")
+		return 0, false
+	}
+	if !exists {
+		httpx.WriteError(w, 404, "API key not found")
+		return 0, false
+	}
+	return id, true
+}
+
+// validateKeySettingsEnums rejects unknown values in the enum fields the
+// request sends (the stored row may predate a value's removal, so only sent
+// fields are checked). validateAndNormalizeKeySettings would otherwise turn
+// them into the default without telling the client.
+func validateKeySettingsEnums(body *keySettingsUpdate) error {
+	v := reflect.ValueOf(&body.Body).Elem()
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		tag := strings.Split(t.Field(i).Tag.Get("json"), ",")[0]
+		if !body.present[tag] || t.Field(i).Type.Kind() != reflect.String {
+			continue
+		}
+		if err := services.ValidateSettingEnum(tag, v.Field(i).String()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // validateKeySettingsLayouts validates the four per-key layout fields. Each
@@ -291,8 +350,9 @@ func validateAndNormalizeKeySettings(s *services.APIKeySettings) error {
 	if err := services.ValidateRatingsExclude(s.RatingsExclude); err != nil {
 		return err
 	}
-	// Unknown / empty values normalise to "id" (match the ID) so the stored
-	// column always holds one of the three known values.
+	// A sent unknown value was already rejected (validateKeySettingsEnums);
+	// a stored one that predates that normalises to "id" (match the ID) so
+	// the column always holds one of the three known values.
 	s.AnimeArtwork = string(services.ParseAnimeArtwork(s.AnimeArtwork))
 	for _, v := range []struct {
 		name string
@@ -384,10 +444,8 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		idStr := r.PathValue("id")
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			httpx.WriteError(w, 400, "invalid id")
+		id, ok := existingKeyID(w, r, db)
+		if !ok {
 			return
 		}
 
@@ -396,8 +454,13 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
+		if err := validateKeySettingsEnums(&body); err != nil {
+			httpx.WriteError(w, 400, err.Error())
+			return
+		}
 		base, err := loadKeySettingsBase(r.Context(), db, id)
 		if err != nil {
+			slog.Error("HandleUpdateKeySettings: loading settings failed", "api_key_id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
@@ -408,13 +471,9 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err := services.UpsertAPIKeySettingsCtx(r.Context(), db, &merged); err != nil {
-			// Log the actual DB error server-side and surface a useful message
-			// to the client so the admin per-key edit form shows something
-			// diagnostic instead of the generic "Failed to update settings".
-			// Safe to expose on a self-hosted admin surface — same origin,
-			// same operator.
-			slog.Warn("HandleUpdateKeySettings: upsert failed", "api_key_id", id, "err", err)
-			httpx.WriteError(w, 500, fmt.Sprintf("Failed to update settings: %v", err))
+			// The DB error stays in the log.
+			slog.Error("HandleUpdateKeySettings: upsert failed", "api_key_id", id, "err", err)
+			httpx.WriteError(w, 500, "Failed to update settings")
 			return
 		}
 
@@ -429,14 +488,13 @@ func HandleResetKeySettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		idStr := r.PathValue("id")
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			httpx.WriteError(w, 400, "invalid id")
+		id, ok := existingKeyID(w, r, db)
+		if !ok {
 			return
 		}
 
 		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, id); err != nil {
+			slog.Error("HandleResetKeySettings: delete failed", "api_key_id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
@@ -521,8 +579,13 @@ func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 			httpx.WriteError(w, 400, "invalid JSON")
 			return
 		}
+		if err := validateKeySettingsEnums(&body); err != nil {
+			httpx.WriteError(w, 400, err.Error())
+			return
+		}
 		base, err := loadKeySettingsBase(r.Context(), db, apiUser.KeyID)
 		if err != nil {
+			slog.Error("HandleUpdateSelfSettings: loading settings failed", "api_key_id", apiUser.KeyID, "error", err)
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
@@ -533,13 +596,10 @@ func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err := services.UpsertAPIKeySettingsCtx(r.Context(), db, &merged); err != nil {
-			// Log the actual DB error server-side and surface a useful message
-			// to the client so the per-key form shows something diagnostic in
-			// formRef.error instead of the generic "Failed to update settings".
-			// The wrapped detail is safe to expose on a self-hosted admin
-			// surface — same origin, same operator.
-			slog.Warn("HandleUpdateSelfSettings: upsert failed", "api_key_id", apiUser.KeyID, "err", err)
-			httpx.WriteError(w, 500, fmt.Sprintf("Failed to update settings: %v", err))
+			// The DB error stays in the log (this route is reachable with
+			// just an API key).
+			slog.Error("HandleUpdateSelfSettings: upsert failed", "api_key_id", apiUser.KeyID, "err", err)
+			httpx.WriteError(w, 500, "Failed to update settings")
 			return
 		}
 
@@ -561,6 +621,7 @@ func HandleResetSelfSettings(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, apiUser.KeyID); err != nil {
+			slog.Error("HandleResetSelfSettings: delete failed", "api_key_id", apiUser.KeyID, "error", err)
 			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
@@ -584,6 +645,7 @@ func HandleRevealKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 		}
 		k, err := services.FindAPIKeyByIDCtx(r.Context(), db, id)
 		if err != nil {
+			slog.Error("reveal key: lookup failed", "id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to load key")
 			return
 		}

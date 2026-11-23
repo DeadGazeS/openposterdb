@@ -648,13 +648,15 @@ func TestRenderSettingFieldsSpecIsComplete(t *testing.T) {
 // 405) so clients that probe poster URLs (AIOStreams' poster redirect API)
 // don't fall back to unrated artwork. POST is still rejected.
 func TestHandleImage_HeadAllowed(t *testing.T) {
-	h := HandleImage(func() ImageDeps { return ImageDeps{} }, func() bool { return false })
+	h := HandleImage(func() ImageDeps { return ImageDeps{} }, func() (bool, error) { return false, nil })
 	for _, tc := range []struct {
 		method string
 		want   int
 	}{
-		{"GET", http.StatusServiceUnavailable},
-		{"HEAD", http.StatusServiceUnavailable},
+		// No mux, so no path values: GET and HEAD both get past the method
+		// check and stop at the same 400; only POST is a 405.
+		{"GET", http.StatusBadRequest},
+		{"HEAD", http.StatusBadRequest},
 		{"POST", http.StatusMethodNotAllowed},
 	} {
 		req := httptest.NewRequest(tc.method, "/key/imdb/poster-default/tt0000001.jpg", nil)
@@ -699,7 +701,7 @@ func TestHandleImage_KitsuMALClientsWired(t *testing.T) {
 		Kitsu:   services.NewKitsuClient(httpClient),
 		AniList: services.NewAniListClient(httpClient),
 	}
-	h := HandleImage(func() ImageDeps { return deps }, func() bool { return true })
+	h := HandleImage(func() ImageDeps { return deps }, func() (bool, error) { return true, nil })
 	for _, path := range []string{
 		"/" + freeAPIKey + "/kitsu/poster-default/999999.jpg",
 		"/" + freeAPIKey + "/mal/poster-default/999999.jpg",

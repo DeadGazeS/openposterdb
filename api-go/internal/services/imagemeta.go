@@ -98,14 +98,14 @@ func ListImageMetaByKind(db *sql.DB, imageType, sortBy, sortDir string, page, pa
 
 // --- Global settings ---
 
+// ReadAvailableRatingsCtx returns the stored rating sources of idKey.
+// sql.ErrNoRows when the title has no row: unknown sources, unlike a row
+// with empty sources (a title known to have no ratings).
 func ReadAvailableRatingsCtx(ctx context.Context, db *sql.DB, idKey string) (sources string, updatedAt int64, releaseDate *string, err error) {
 	err = db.QueryRowContext(ctx,
 		"SELECT sources, updated_at, release_date FROM available_ratings WHERE id_key = ?",
 		idKey,
 	).Scan(&sources, &updatedAt, &releaseDate)
-	if err == sql.ErrNoRows {
-		return "", 0, nil, nil
-	}
 	return
 }
 

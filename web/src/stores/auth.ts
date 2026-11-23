@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/lib/auth-api'
 import type { FreeKeyDefaults } from '@/lib/settings'
+import { authFailure, type AuthResult, type RefreshResult } from '@/lib/auth-result'
 
 export const useAuthStore = defineStore('auth', () => {
   // The admin access token lives in memory only (it used to sit in
@@ -66,10 +67,21 @@ export const useAuthStore = defineStore('auth', () => {
 
   // restoreSession runs once per page load: with no token in memory it asks
   // the server for one using the refresh cookie (if the browser has one).
+  // Only a definite answer (a token or a 401) settles it; after a server
+  // error, busy server or network error the next navigation asks again, and
+  // the refresh cookie is left alone.
   let sessionRestore: Promise<boolean> | null = null
   function restoreSession(): Promise<boolean> {
     if (!sessionRestore) {
-      sessionRestore = token.value ? Promise.resolve(true) : refresh()
+      if (token.value) {
+        sessionRestore = Promise.resolve(true)
+      } else {
+        const attempt = refresh().then((outcome) => {
+          if (outcome === 'unavailable' && sessionRestore === attempt) sessionRestore = null
+          return outcome === 'refreshed'
+        })
+        sessionRestore = attempt
+      }
     }
     return sessionRestore
   }
@@ -85,30 +97,44 @@ export const useAuthStore = defineStore('auth', () => {
     return data.setup_required
   }
 
-  async function setup(username: string, password: string): Promise<boolean> {
-    const res = await authApi.setup(username, password)
-    if (!res.ok) return false
+  // send runs a credential request: a network failure becomes a 'network'
+  // result, a non-ok response is classified by status (see authFailure).
+  async function send(
+    request: () => Promise<Response>,
+  ): Promise<{ res: Response; failure?: undefined } | { res?: undefined; failure: AuthResult }> {
+    let res: Response
+    try {
+      res = await request()
+    } catch {
+      return { failure: { ok: false, reason: 'network' } }
+    }
+    return res.ok ? { res } : { failure: await authFailure(res) }
+  }
+
+  async function setup(username: string, password: string): Promise<AuthResult> {
+    const { res, failure } = await send(() => authApi.setup(username, password))
+    if (!res) return failure
     const data = await res.json()
     setToken(data.token)
     setupRequired.value = false
-    return true
+    return { ok: true }
   }
 
-  async function login(username: string, password: string): Promise<boolean> {
-    const res = await authApi.login(username, password)
-    if (!res.ok) return false
+  async function login(username: string, password: string): Promise<AuthResult> {
+    const { res, failure } = await send(() => authApi.login(username, password))
+    if (!res) return failure
     const data = await res.json()
     setToken(data.token)
-    return true
+    return { ok: true }
   }
 
-  async function loginWithApiKey(key: string): Promise<boolean> {
-    const res = await authApi.keyLogin(key)
-    if (!res.ok) return false
+  async function loginWithApiKey(key: string): Promise<AuthResult> {
+    const { res, failure } = await send(() => authApi.keyLogin(key))
+    if (!res) return failure
     const data = await res.json()
     apiKeyToken.value = data.token
     apiKeyInfo.value = { name: data.name, key_prefix: data.key_prefix }
-    return true
+    return { ok: true }
   }
 
   function logoutApiKey() {
@@ -119,19 +145,22 @@ export const useAuthStore = defineStore('auth', () => {
   // One refresh at a time: several requests hitting 401 together each used to
   // start their own refresh with the same cookie; the server rotates it on
   // the first, so the others failed and logged the user out.
-  let refreshInFlight: Promise<boolean> | null = null
+  // Only a 401 means the refresh cookie is gone or invalid; any other failure
+  // (500, 503, 429, network) is 'unavailable' and must not end the session.
+  let refreshInFlight: Promise<RefreshResult> | null = null
 
-  function refresh(): Promise<boolean> {
+  function refresh(): Promise<RefreshResult> {
     if (!refreshInFlight) {
-      refreshInFlight = (async () => {
+      refreshInFlight = (async (): Promise<RefreshResult> => {
         try {
           const res = await authApi.refresh()
-          if (!res.ok) return false
+          if (res.status === 401) return 'unauthorized'
+          if (!res.ok) return 'unavailable'
           const data = await res.json()
           setToken(data.token)
-          return true
+          return 'refreshed'
         } catch {
-          return false
+          return 'unavailable'
         } finally {
           refreshInFlight = null
         }
