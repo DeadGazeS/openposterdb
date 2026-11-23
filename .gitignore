@@ -13,3 +13,4 @@ test-report/
 # scripts/*.tsv — IMDB datasets downloaded by seed.sh; explicitly
 # not committed (per scripts/README.md guidance).
 scripts/*.tsv
+api-go/coverage.out
