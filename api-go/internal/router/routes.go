@@ -517,8 +517,8 @@ func (r *Router) registerImageRoutes() {
 	r.mux.Handle("/c/{hash}/{rest...}", cdnRateLimit(http.HandlerFunc(cdnHandler)))
 
 	// Image/isValid routes via catch-all
-	imageHandler := imageRateLimit(handlers.HandleImage(s.imageDeps, s.isFreeAPIKeyEnabled))
-	isValidHandler := isValidRateLimit(handlers.HandleIsValid(s.DB, s.isFreeAPIKeyEnabled, r.lastUsed()))
+	imageHandler := imageRateLimit(handlers.HandleImage(s.imageDeps, s.freeAPIKeyEnabled))
+	isValidHandler := isValidRateLimit(handlers.HandleIsValid(s.DB, s.freeAPIKeyEnabled, r.lastUsed()))
 	r.mux.Handle("/{apiKey}/{rest...}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.PathValue("rest") == "isValid" {
 			isValidHandler.ServeHTTP(w, req)

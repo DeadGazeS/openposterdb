@@ -19,7 +19,7 @@ func TestHandleImage_ImageSizeValidation(t *testing.T) {
 	}
 	deps := ImageDeps{DB: db, Config: &ImageServeConfig{}} // no TMDB client
 	mux := http.NewServeMux()
-	mux.Handle("/{apiKey}/{rest...}", HandleImage(func() ImageDeps { return deps }, func() bool { return false }))
+	mux.Handle("/{apiKey}/{rest...}", HandleImage(func() ImageDeps { return deps }, func() (bool, error) { return false, nil }))
 
 	for _, tc := range []struct {
 		path string

@@ -57,7 +57,7 @@ func BenchmarkHandleImage_WarmHit(b *testing.B) {
 		},
 		TMDB: services.NewTmdbClient("test-key", &http.Client{Transport: cdnTmdbStub{}}),
 	}
-	h := HandleImage(func() ImageDeps { return deps }, func() bool { return false })
+	h := HandleImage(func() ImageDeps { return deps }, func() (bool, error) { return false, nil })
 	path := "/" + raw + "/imdb/poster-default/tt0111161.jpg"
 	do := func() int {
 		req := httptest.NewRequest(http.MethodGet, path, nil)

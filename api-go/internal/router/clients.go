@@ -106,12 +106,16 @@ func (s *AppState) SetupTrakt(keys []string) {
 
 // setTVDB keeps the current TVDB client when the key is unchanged (its login
 // token stays valid for a month), else builds a new one; "" disables TVDB.
+// A kept client forgets a remembered login failure, so re-saving the key
+// retries the login at once.
 func (s *AppState) setTVDB(key string) {
 	switch {
 	case key == "":
 		s.TVDB = nil
 	case s.TVDB == nil || !s.TVDB.HasKey(key):
 		s.TVDB = services.NewTVDBClient(key, s.HTTPClient)
+	default:
+		s.TVDB.ResetLoginFailure()
 	}
 }
 
@@ -169,10 +173,18 @@ func (s *AppState) hashes() handlers.CDNLookup {
 }
 
 func (s *AppState) isFreeAPIKeyEnabled() bool {
+	enabled, _ := s.freeAPIKeyEnabled()
+	return enabled
+}
+
+// freeAPIKeyEnabled is isFreeAPIKeyEnabled that reports a failed read of the
+// stored flag, so the image routes answer 500 instead of "disabled".
+func (s *AppState) freeAPIKeyEnabled() (bool, error) {
 	if s.Config.FreeKeyEnabled != nil {
-		return *s.Config.FreeKeyEnabled
+		return *s.Config.FreeKeyEnabled, nil
 	}
-	return services.GlobalSettingCachedCtx(context.Background(), s.DB, "free_api_key_enabled") == "true"
+	v, err := services.GlobalSettingCachedErrCtx(context.Background(), s.DB, "free_api_key_enabled")
+	return v == "true", err
 }
 
 func (s *AppState) imageServeConfig() *handlers.ImageServeConfig {

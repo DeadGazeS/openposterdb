@@ -75,7 +75,7 @@ func TestCDNRedirect_EndToEnd(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 
 	req := httptest.NewRequest(http.MethodGet, "/"+apiKey+"/imdb/poster-default/tt0111161.jpg?imageSize=large", nil)
 	rec := httptest.NewRecorder()
@@ -109,7 +109,7 @@ func TestCDNRedirect_EndToEnd(t *testing.T) {
 // for any string.
 func TestHandleIsValid_UnknownKeyRejected(t *testing.T) {
 	deps, apiKey := newCDNFlowDeps(t)
-	h := HandleIsValid(deps.DB, func() bool { return false }, nil)
+	h := HandleIsValid(deps.DB, func() (bool, error) { return false, nil }, nil)
 	for key, want := range map[string]int{
 		apiKey:              http.StatusOK,
 		"not-a-real-key-42": http.StatusUnauthorized,
@@ -142,7 +142,7 @@ func TestCDNRoute_NoUpstreamWorkWithoutKey(t *testing.T) {
 	get := func() ImageDeps { return deps }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+apiKey+"/imdb/poster-default/tt0111161.jpg", nil))
@@ -167,7 +167,7 @@ func TestCDNRoute_ServesTheAuthedRender(t *testing.T) {
 	get := func() ImageDeps { return deps }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/c/{hash}/{rest...}", HandleCDNImage(get, deps.CDNHashes))
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 	path := "/" + apiKey + "/imdb/poster-default/tt0111161.jpg?ratings_limit=0"
 
 	deps.Config.EnableCDNRedirects = false
@@ -197,7 +197,7 @@ func TestImageRoute_RejectsInvalidIDForm(t *testing.T) {
 	deps.TMDB = services.NewTmdbClient("test-key", &http.Client{Transport: countingCDNStub{&calls}})
 	get := func() ImageDeps { return deps }
 	mux := http.NewServeMux()
-	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() bool { return false }))
+	mux.HandleFunc("/{apiKey}/{rest...}", HandleImage(get, func() (bool, error) { return false, nil }))
 
 	for _, p := range []string{"tvdb/poster-default/foo-2.jpg", "imdb/poster-default/abc.jpg", "imdb/poster-default/81189.jpg", "tmdb/poster-default/550.jpg", "mal/poster-default/x1.jpg"} {
 		rec := httptest.NewRecorder()

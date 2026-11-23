@@ -24,6 +24,7 @@ func HandleListKeys(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 
 		keys, err := services.ListAPIKeysCtx(r.Context(), db)
 		if err != nil {
+			slog.Error("list keys failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to list keys")
 			return
 		}
@@ -79,6 +80,7 @@ func HandleCreateKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 		raw, hash, prefix := services.GenerateAPIKey()
 		encrypted, err := services.EncryptAPIKey(raw, secretsKey)
 		if err != nil {
+			slog.Error("create key: encrypting the key failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to encrypt key")
 			return
 		}
@@ -102,6 +104,7 @@ func HandleCreateKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 		}
 		id, err := services.CreateAPIKeyCtx(r.Context(), db, body.Name, hash, prefix, encrypted, createdBy)
 		if err != nil {
+			slog.Error("create key: insert failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to create key")
 			return
 		}
@@ -130,6 +133,7 @@ func HandleDeleteKey(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err := services.DeleteAPIKeyCtx(r.Context(), db, id); err != nil {
+			slog.Error("delete key failed", "id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to delete key")
 			return
 		}
@@ -456,6 +460,7 @@ func HandleUpdateKeySettings(db *sql.DB) http.HandlerFunc {
 		}
 		base, err := loadKeySettingsBase(r.Context(), db, id)
 		if err != nil {
+			slog.Error("HandleUpdateKeySettings: loading settings failed", "api_key_id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
@@ -489,6 +494,7 @@ func HandleResetKeySettings(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, id); err != nil {
+			slog.Error("HandleResetKeySettings: delete failed", "api_key_id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
@@ -579,6 +585,7 @@ func HandleUpdateSelfSettings(db *sql.DB) http.HandlerFunc {
 		}
 		base, err := loadKeySettingsBase(r.Context(), db, apiUser.KeyID)
 		if err != nil {
+			slog.Error("HandleUpdateSelfSettings: loading settings failed", "api_key_id", apiUser.KeyID, "error", err)
 			httpx.WriteError(w, 500, "Failed to load settings")
 			return
 		}
@@ -614,6 +621,7 @@ func HandleResetSelfSettings(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err := services.DeleteAPIKeySettingsCtx(r.Context(), db, apiUser.KeyID); err != nil {
+			slog.Error("HandleResetSelfSettings: delete failed", "api_key_id", apiUser.KeyID, "error", err)
 			httpx.WriteError(w, 500, "Failed to reset settings")
 			return
 		}
@@ -637,6 +645,7 @@ func HandleRevealKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 		}
 		k, err := services.FindAPIKeyByIDCtx(r.Context(), db, id)
 		if err != nil {
+			slog.Error("reveal key: lookup failed", "id", id, "error", err)
 			httpx.WriteError(w, 500, "Failed to load key")
 			return
 		}

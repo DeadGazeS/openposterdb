@@ -25,7 +25,7 @@ func TestHandleImage_RecordsKeyUse(t *testing.T) {
 	deps.Config.EnableCDNRedirects = false
 	rec := &recorderStub{}
 	deps.LastUsed = rec
-	h := HandleImage(func() ImageDeps { return deps }, func() bool { return false })
+	h := HandleImage(func() ImageDeps { return deps }, func() (bool, error) { return false, nil })
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{apiKey}/{rest...}", h)
 

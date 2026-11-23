@@ -89,6 +89,14 @@ func NewTVDBClient(apiKey string, httpClient *http.Client) *TVDBClient {
 // HasKey reports whether the client uses this API key.
 func (c *TVDBClient) HasKey(key string) bool { return c != nil && c.apiKey == key }
 
+// ResetLoginFailure forgets a remembered failed login, so the next request
+// logs in again (the admin re-saved the key).
+func (c *TVDBClient) ResetLoginFailure() {
+	c.mu.Lock()
+	c.loginErr, c.loginErrUntil = nil, time.Time{}
+	c.mu.Unlock()
+}
+
 // TVDBArtwork is one entry of an extended record's artworks.
 type TVDBArtwork struct {
 	ID       uint64  `json:"id"`

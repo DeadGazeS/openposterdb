@@ -20,7 +20,7 @@ func TestHandleImage_KeyLookupDBError_500(t *testing.T) {
 	db.Close()
 	deps := ImageDeps{DB: db, Config: &ImageServeConfig{}}
 	mux := http.NewServeMux()
-	mux.Handle("/{apiKey}/{rest...}", HandleImage(func() ImageDeps { return deps }, func() bool { return false }))
+	mux.Handle("/{apiKey}/{rest...}", HandleImage(func() ImageDeps { return deps }, func() (bool, error) { return false, nil }))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+raw+"/imdb/poster-default/tt0111161.jpg", nil))
 	if rec.Code != 500 || !bytes.Contains(rec.Body.Bytes(), []byte("Internal server error")) {
@@ -33,7 +33,7 @@ func TestHandleIsValid_KeyLookupDBError_500(t *testing.T) {
 	raw, _, _ := services.GenerateAPIKey()
 	db.Close()
 	mux := http.NewServeMux()
-	mux.Handle("/{apiKey}/isValid", HandleIsValid(db, func() bool { return false }, nil))
+	mux.Handle("/{apiKey}/isValid", HandleIsValid(db, func() (bool, error) { return false, nil }, nil))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+raw+"/isValid", nil))
 	if rec.Code != 500 {
@@ -42,7 +42,7 @@ func TestHandleIsValid_KeyLookupDBError_500(t *testing.T) {
 	// An unknown key on a working database stays 401.
 	db2 := newHandlersTestDB(t)
 	mux = http.NewServeMux()
-	mux.Handle("/{apiKey}/isValid", HandleIsValid(db2, func() bool { return false }, nil))
+	mux.Handle("/{apiKey}/isValid", HandleIsValid(db2, func() (bool, error) { return false, nil }, nil))
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+raw+"/isValid", nil))
 	if rec.Code != 401 {

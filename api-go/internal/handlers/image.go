@@ -70,7 +70,7 @@ type ImageDeps struct {
 // rotation in the admin UI reaches in-flight requests on the next call
 // (without the resolver the handler closure captures one snapshot and never
 // sees the new clients — bug fixed 2026-08-06).
-func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.HandlerFunc {
+func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled FreeKeyCheck) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// HEAD is accepted so clients that probe a poster URL before using it
 		// (e.g. AIOStreams' poster redirect API) get the same status as GET;
@@ -138,16 +138,21 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 		query := parseImageQuery(r)
 
 		// Validate API key and resolve settings
-		if apiKey == freeAPIKey && !isFreeAPIKeyEnabled() {
-			httpx.WriteError(w, 403, "free api key is disabled")
+		if apiKey == freeAPIKey && !checkFreeKey(w, isFreeAPIKeyEnabled, "image") {
 			return
 		}
 
 		var settings *services.RenderSettings
 		// Cached lookups (services/settingscache.go): invalidated by every
-		// settings/key write, so a cache hit needs no DB round-trip here.
+		// settings/key write, so a cache hit needs no DB round-trip here. A
+		// failed settings read is a 500, never a render with the defaults.
 		if apiKey == freeAPIKey {
-			s := services.GlobalRenderSettingsCachedCtx(r.Context(), d.DB)
+			s, err := services.GlobalRenderSettingsCachedErrCtx(r.Context(), d.DB)
+			if err != nil {
+				slog.Error("image: global settings read failed", "error", err)
+				httpx.WriteError(w, 500, "Internal server error")
+				return
+			}
 			settings = &s
 		} else {
 			keyHash := services.HashAPIKey(apiKey)
@@ -162,7 +167,12 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 				return
 			}
 			recordKey(d.LastUsed, k.ID)
-			s := services.EffectiveRenderSettingsCachedCtx(r.Context(), d.DB, k.ID)
+			s, err := services.EffectiveRenderSettingsCachedErrCtx(r.Context(), d.DB, k.ID)
+			if err != nil {
+				slog.Error("image: key settings read failed", "api_key_id", k.ID, "error", err)
+				httpx.WriteError(w, 500, "Internal server error")
+				return
+			}
 			settings = &s
 		}
 
@@ -293,10 +303,31 @@ func etagMatches(header, etag string) bool {
 	return false
 }
 
+// FreeKeyCheck reports whether the free API key is enabled; an error means
+// the flag could not be read.
+type FreeKeyCheck func() (bool, error)
+
+// checkFreeKey answers a free-key request that may not proceed: 403 when the
+// key is disabled, 500 when the flag could not be read. It reports whether
+// the request may go on.
+func checkFreeKey(w http.ResponseWriter, enabled FreeKeyCheck, route string) bool {
+	ok, err := enabled()
+	if err != nil {
+		slog.Error(route+": free api key flag read failed", "error", err)
+		httpx.WriteError(w, 500, "Internal server error")
+		return false
+	}
+	if !ok {
+		httpx.WriteError(w, 403, "free api key is disabled")
+		return false
+	}
+	return true
+}
+
 // HandleIsValid answers /{apiKey}/isValid. HEAD is accepted like on the image
 // routes (clients probe with it), and a valid key's use is recorded for the
 // admin "last used" column like an image request.
-func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool, lastUsed KeyRecorder) http.HandlerFunc {
+func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled FreeKeyCheck, lastUsed KeyRecorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			httpx.WriteError(w, 405, "Method not allowed")
@@ -310,8 +341,7 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool, lastUsed KeyReco
 		}
 
 		if apiKey == freeAPIKey {
-			if !isFreeAPIKeyEnabled() {
-				httpx.WriteJSON(w, 401, map[string]interface{}{"error": "Invalid or missing API key"})
+			if !checkFreeKey(w, isFreeAPIKeyEnabled, "isValid") {
 				return
 			}
 			httpx.WriteJSON(w, 200, map[string]interface{}{"valid": true})

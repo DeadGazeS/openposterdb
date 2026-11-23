@@ -54,6 +54,7 @@ func HandleExportSettings(db *sql.DB, keys *services.ServiceKeyManager) http.Han
 
 		payload, err := services.BuildExportPayloadCtx(r.Context(), db, keys, opts.IncludeServiceKeys, opts.IncludeAPIKeys)
 		if err != nil {
+			slog.Error("building the settings export failed", "error", err)
 			httpx.WriteError(w, 500, "Failed to export settings")
 			return
 		}

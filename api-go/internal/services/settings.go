@@ -665,6 +665,18 @@ func ValidateRenderSettings(s *RenderSettings) error {
 			return err
 		}
 	}
+	// Enum fields (image_source, poster_fit, *_badge_style, …): unknown
+	// values are rejected as on the per-key route, not stored and then
+	// silently normalised on read.
+	sv := reflect.ValueOf(s).Elem()
+	for _, spec := range RenderSettingFields {
+		if spec.GoType != fieldTypeString {
+			continue
+		}
+		if err := ValidateSettingEnum(spec.JSONName, sv.FieldByName(spec.GoName).String()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -648,7 +648,7 @@ func TestRenderSettingFieldsSpecIsComplete(t *testing.T) {
 // 405) so clients that probe poster URLs (AIOStreams' poster redirect API)
 // don't fall back to unrated artwork. POST is still rejected.
 func TestHandleImage_HeadAllowed(t *testing.T) {
-	h := HandleImage(func() ImageDeps { return ImageDeps{} }, func() bool { return false })
+	h := HandleImage(func() ImageDeps { return ImageDeps{} }, func() (bool, error) { return false, nil })
 	for _, tc := range []struct {
 		method string
 		want   int
@@ -701,7 +701,7 @@ func TestHandleImage_KitsuMALClientsWired(t *testing.T) {
 		Kitsu:   services.NewKitsuClient(httpClient),
 		AniList: services.NewAniListClient(httpClient),
 	}
-	h := HandleImage(func() ImageDeps { return deps }, func() bool { return true })
+	h := HandleImage(func() ImageDeps { return deps }, func() (bool, error) { return true, nil })
 	for _, path := range []string{
 		"/" + freeAPIKey + "/kitsu/poster-default/999999.jpg",
 		"/" + freeAPIKey + "/mal/poster-default/999999.jpg",
