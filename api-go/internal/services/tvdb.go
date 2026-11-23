@@ -37,6 +37,14 @@ const (
 	tvdbMaxBackoff = 30 * time.Second
 )
 
+// tvdbLoginRetryAfter / tvdbLoginRejectedRetryAfter: how long a failed login
+// is remembered (its error returned without a new POST /login). A rejected
+// key (401/403) won't fix itself soon, so it waits longer.
+const (
+	tvdbLoginRetryAfter         = 60 * time.Second
+	tvdbLoginRejectedRetryAfter = 5 * time.Minute
+)
+
 // TVDB artwork type ids.
 const (
 	tvdbArtSeriesPoster     = 2
@@ -56,6 +64,9 @@ type TVDBClient struct {
 	token    string
 	tokenExp time.Time
 	login    flightGroup[string]
+	// loginErr is the last failed login, returned until loginErrUntil.
+	loginErr      error
+	loginErrUntil time.Time
 
 	records *MemCache // "series/<id>" / "movie/<id>" → *TVDBRecord; "remote/<kind>/<id>" → uint64 (0 = none)
 	// backoff is how long a 429 waits per attempt; tests shorten it.
@@ -150,44 +161,70 @@ func (e *tvdbExtended) record(isMovie bool) *TVDBRecord {
 
 // token returns a valid login token. Concurrent callers share one login; a
 // failed login is an error (never a not-found), so callers degrade instead
-// of caching a miss.
+// of caching a miss. A failed login is remembered for tvdbLoginRetryAfter
+// (tvdbLoginRejectedRetryAfter for a rejected key), so requests in that
+// window get its error without another POST /login.
 func (c *TVDBClient) tokenCtx(ctx context.Context) (string, error) {
-	c.mu.Lock()
-	if c.token != "" && time.Now().Before(c.tokenExp) {
-		t := c.token
-		c.mu.Unlock()
-		return t, nil
+	if t, ok, err := c.cachedToken(); ok {
+		return t, err
 	}
-	c.mu.Unlock()
 	return c.login.do(ctx, "login", func(fctx context.Context) (string, error) {
-		c.mu.Lock()
-		if c.token != "" && time.Now().Before(c.tokenExp) {
-			t := c.token
-			c.mu.Unlock()
-			return t, nil
+		if t, ok, err := c.cachedToken(); ok {
+			return t, err
 		}
-		c.mu.Unlock()
-		body, _ := json.Marshal(map[string]string{"apikey": c.apiKey})
-		status, respBody, err := c.send(fctx, http.MethodPost, "/login", body, "")
+		token, retryAfter, err := c.doLogin(fctx)
+		c.mu.Lock()
 		if err != nil {
-			return "", apperr.NewOther("TVDB login failed: " + err.Error())
+			c.loginErr, c.loginErrUntil = err, time.Now().Add(retryAfter)
+		} else {
+			c.token, c.tokenExp = token, time.Now().Add(tvdbTokenTTL)
+			c.loginErr, c.loginErrUntil = nil, time.Time{}
 		}
-		if status != http.StatusOK {
-			return "", apperr.NewOther(fmt.Sprintf("TVDB login returned %d: %s", status, errSnippet(respBody)))
-		}
-		var out struct {
-			Data struct {
-				Token string `json:"token"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(respBody, &out); err != nil || out.Data.Token == "" {
-			return "", apperr.NewOther("TVDB login returned no token")
-		}
-		c.mu.Lock()
-		c.token, c.tokenExp = out.Data.Token, time.Now().Add(tvdbTokenTTL)
 		c.mu.Unlock()
-		return out.Data.Token, nil
+		return token, err
 	})
+}
+
+// cachedToken returns the current token, or the remembered login failure
+// while its window lasts; ok is false when a login is needed.
+func (c *TVDBClient) cachedToken() (token string, ok bool, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if c.token != "" && now.Before(c.tokenExp) {
+		return c.token, true, nil
+	}
+	if c.loginErr != nil && now.Before(c.loginErrUntil) {
+		return "", true, c.loginErr
+	}
+	return "", false, nil
+}
+
+// doLogin performs one POST /login. On failure it also returns how long the
+// failure should be remembered. A network error stays the cause, so the API
+// answers 502/504 instead of 500.
+func (c *TVDBClient) doLogin(ctx context.Context) (string, time.Duration, error) {
+	body, _ := json.Marshal(map[string]string{"apikey": c.apiKey})
+	status, respBody, err := c.send(ctx, http.MethodPost, "/login", body, "")
+	if err != nil {
+		return "", tvdbLoginRetryAfter, &apperr.AppError{Status: http.StatusInternalServerError, Message: "TVDB login failed", Err: err}
+	}
+	if status != http.StatusOK {
+		retryAfter := tvdbLoginRetryAfter
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			retryAfter = tvdbLoginRejectedRetryAfter
+		}
+		return "", retryAfter, apperr.NewOther(fmt.Sprintf("TVDB login returned %d: %s", status, errSnippet(respBody)))
+	}
+	var out struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil || out.Data.Token == "" {
+		return "", tvdbLoginRetryAfter, apperr.NewOther("TVDB login returned no token")
+	}
+	return out.Data.Token, 0, nil
 }
 
 func (c *TVDBClient) dropToken(token string) {
