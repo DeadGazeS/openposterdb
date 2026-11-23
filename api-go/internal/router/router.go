@@ -129,7 +129,7 @@ func isHex(s string) bool {
 }
 
 func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return handlers.RequireAuth(r.jwtSecret())(next).ServeHTTP
+	return handlers.RequireAuth(r.jwtSecret(), r.state.DB)(next).ServeHTTP
 }
 
 func (r *Router) jwtSecret() []byte {

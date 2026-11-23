@@ -116,7 +116,7 @@ func TestLoginFailed_LogsIPAndHashedUsername(t *testing.T) {
 	if strings.Count(out, "client_ip=203.0.113.9") != 2 {
 		t.Errorf("client IP missing: %s", out)
 	}
-	if !strings.Contains(out, "username_hash="+services.KeyHash("my-secret-typo")) || strings.Contains(out, "my-secret-typo") {
+	if !strings.Contains(out, "username_hash="+usernameLogHash(testJWTSecret, "my-secret-typo")) || strings.Contains(out, "my-secret-typo") {
 		t.Errorf("username not hashed: %s", out)
 	}
 }

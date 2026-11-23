@@ -64,6 +64,13 @@ const (
 	isValidBurst     = 30
 )
 
+// The session refresh gets its own per-IP bucket: the SPA refreshes on every
+// page load, which must not use up the login/setup attempts.
+const (
+	refreshPerMinute = 60
+	refreshBurst     = 20
+)
+
 // newRateLimiter allows perMinute requests a minute, the whole minute's
 // quota at once.
 func newRateLimiter(perMinute uint64) *rateLimiter {

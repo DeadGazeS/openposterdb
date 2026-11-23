@@ -62,14 +62,25 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 
 ### Errors
 
-Image and key-validation errors are JSON (`{"error": "..."}`). The key and the request are checked before the server configuration, so an unknown key is a `401` and a bad request a `400` even without provider keys.
+Image and key-validation errors are JSON (`{"error": "..."}`). An image request is checked in this order, and the first failing check answers:
 
-- `401 Unauthorized`: unknown API key (any key, also one that isn't 64 hex characters); `403 Forbidden`: the free key is disabled
+1. the rate limit (`429`)
+2. the path: its shape, the image kind, the ID value and whether the ID type takes that ID form (`400`)
+3. the API key: the free key while disabled (`403`), an unknown key (`401`)
+4. `imageSize` (`400`)
+5. the server configuration: no TMDB key (`503`)
+
+So a malformed path is a `400` even with an unknown key, and an unknown key a `401` even without provider keys.
+
 - `400 Bad Request`: invalid path, an ID form the ID type doesn't take (e.g. `imdb/81189`), or an invalid `imageSize`
-- `503 Service Unavailable`: no TMDB key configured, or the render queue is full (with `Retry-After`)
+- `401 Unauthorized`: unknown API key (any key, also one that isn't 64 hex characters); `403 Forbidden`: the free key is disabled
 - `404 Not Found`: no artwork for the title
-- `502 Bad Gateway` / `504 Gateway Timeout`: a provider is unreachable / didn't answer in time
 - `429 Too Many Requests`: rate limit (with `Retry-After`)
+- `500 Internal Server Error`: a failure of the server itself (e.g. its database); the body says only `Internal server error`, the details go to the server log
+- `502 Bad Gateway` / `504 Gateway Timeout`: a provider is unreachable / didn't answer in time
+- `503 Service Unavailable`: no TMDB key configured (no `Retry-After`: retrying won't help until an admin adds one), or the server is busy, e.g. the render queue is full (with `Retry-After`; retry after that many seconds)
+
+The management endpoints use the same codes. A login or setup that finds every password-hashing slot taken for 5 seconds is a `503` with `Retry-After`, not a `401`.
 
 ## Common parameters
 

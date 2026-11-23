@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -98,6 +100,33 @@ func FindAdminUserByIDCtx(ctx context.Context, db *sql.DB, id int64) (username s
 
 func FindAdminUserByID(db *sql.DB, id int64) (username string, passwordHash string, err error) {
 	return FindAdminUserByIDCtx(context.Background(), db, id)
+}
+
+// adminExistsTTL bounds how long a deleted admin user's sessions keep
+// passing AdminUserExistsCachedCtx. Admin users are never deleted by the
+// app itself, only outside it (SQLite shell, restored backup).
+const adminExistsTTL = 60 * time.Second
+
+var adminExistsCaches sync.Map // *sql.DB -> *MemCache (username -> true)
+
+// AdminUserExistsCachedCtx reports whether an admin user with this name
+// exists. Hits are cached for adminExistsTTL; misses and read errors are not
+// (a new admin is seen at once).
+func AdminUserExistsCachedCtx(ctx context.Context, db *sql.DB, username string) (bool, error) {
+	v, _ := adminExistsCaches.LoadOrStore(db, NewMemCache(0, 1_000, adminExistsTTL, 0))
+	c := v.(*MemCache)
+	if _, ok := c.Get(username); ok {
+		return true, nil
+	}
+	_, _, _, err := FindAdminUserByUsernameCtx(ctx, db, username)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	c.Set(username, true, 1)
+	return true, nil
 }
 
 // --- Refresh token CRUD ---
@@ -213,15 +242,32 @@ func VerifyPasswordCtx(ctx context.Context, password, storedHash string) (bool, 
 // (a client that went away no longer holds a place in the queue).
 var passwordHashSlots = make(chan struct{}, 4)
 
+// passwordSlotWait bounds the wait for a hashing slot, so a saturated server
+// answers a busy 503 while the client is still there to read it.
+const passwordSlotWait = 5 * time.Second
+
+// passwordSlotWaitFor is passwordSlotWait; tests shorten it.
+var passwordSlotWaitFor = passwordSlotWait
+
+// ErrPasswordHashBusy: no hashing slot freed up within passwordSlotWait.
+var ErrPasswordHashBusy = errors.New("no password-hashing slot available")
+
+// newSlotWaitTimer: argon2IDKeyParams' "time" parameter shadows the package.
+func newSlotWaitTimer() *time.Timer { return time.NewTimer(passwordSlotWaitFor) }
+
 func argon2IDKey(ctx context.Context, password, salt []byte) ([]byte, error) {
 	return argon2IDKeyParams(ctx, password, salt, 1, 64*1024, 4, 32)
 }
 
 func argon2IDKeyParams(ctx context.Context, password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
+	wait := newSlotWaitTimer()
+	defer wait.Stop()
 	select {
 	case passwordHashSlots <- struct{}{}:
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-wait.C:
+		return nil, ErrPasswordHashBusy
 	}
 	defer func() { <-passwordHashSlots }()
 	return argon2.IDKey(password, salt, time, memory, threads, keyLen), nil

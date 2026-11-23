@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -48,7 +49,17 @@ func WriteAuthResponse(w http.ResponseWriter, status int, resp any, cookies []*h
 // isHashWaitEnded reports a password check that never ran because the
 // request's context ended while waiting for a hashing slot.
 func isHashWaitEnded(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, services.ErrPasswordHashBusy)
+}
+
+// usernameLogHash is the username as written to the failed-login log: an
+// HMAC-SHA256 keyed with a server secret, truncated like services.KeyHash. An
+// unkeyed hash of a username can be reversed with a dictionary.
+func usernameLogHash(secret []byte, username string) string {
+	m := hmac.New(sha256.New, secret)
+	m.Write([]byte(username))
+	return hex.EncodeToString(m.Sum(nil))[:len(services.KeyHash(""))]
 }
 
 // loginBusy is the answer to a login whose password check never ran: the
@@ -212,6 +223,9 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 	}
 
 	passwordHash, err := hashPassword(ctx, password)
+	if isHashWaitEnded(err) {
+		return loginBusy(ctx, err)
+	}
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
 		return 500, map[string]string{"error": "Account operation failed"}, nil
@@ -230,6 +244,7 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 
 	accessToken, rawRefresh, err := IssueTokenPairCtx(ctx, db, jwtSecret, userID, username)
 	if err != nil {
+		slog.Error("setup: issuing the session tokens failed", "user_id", userID, "error", err)
 		return 500, map[string]string{"error": "Authentication failed"}, nil
 	}
 
@@ -251,7 +266,7 @@ func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 		if _, verr := verifyPassword(ctx, password, dummyHash); isHashWaitEnded(verr) {
 			return loginBusy(ctx, verr)
 		}
-		slog.Warn("Login failed: unknown username", "client_ip", ClientIPFromContext(ctx), "username_hash", services.KeyHash(username))
+		slog.Warn("Login failed: unknown username", "client_ip", ClientIPFromContext(ctx), "username_hash", usernameLogHash(jwtSecret, username))
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 
@@ -259,8 +274,13 @@ func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 	if isHashWaitEnded(err) {
 		return loginBusy(ctx, err)
 	}
-	if err != nil || !ok {
-		slog.Warn("Login failed: incorrect password", "client_ip", ClientIPFromContext(ctx), "username_hash", services.KeyHash(username))
+	if err != nil {
+		// Only a stored hash we can't parse gets here: our failure.
+		slog.Error("login: the stored password hash is malformed", "user_id", userID, "error", err)
+		return 500, map[string]string{"error": "Authentication failed"}, nil
+	}
+	if !ok {
+		slog.Warn("Login failed: incorrect password", "client_ip", ClientIPFromContext(ctx), "username_hash", usernameLogHash(jwtSecret, username))
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 
@@ -281,6 +301,7 @@ func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 
 	accessToken, rawRefresh, err := IssueTokenPairCtx(ctx, db, jwtSecret, userID, username)
 	if err != nil {
+		slog.Error("login: issuing the session tokens failed", "user_id", userID, "error", err)
 		return 500, map[string]string{"error": "Authentication failed"}, nil
 	}
 
@@ -295,8 +316,14 @@ func RefreshHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCoo
 	}
 
 	tokenHash := HashRefreshToken(refreshToken)
+	// Database failures are a 500: a 401 logs the admin out, e.g. whenever
+	// SQLite is briefly locked.
 	stored, err := services.FindRefreshTokenByHashCtx(ctx, db, tokenHash)
-	if err != nil || stored == nil {
+	if err != nil {
+		slog.Error("refresh: looking up the refresh token failed", "error", err)
+		return 500, map[string]string{"error": "Internal server error"}, nil
+	}
+	if stored == nil {
 		return 401, nil, nil
 	}
 
@@ -321,19 +348,29 @@ func RefreshHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCoo
 	}
 
 	username, _, err := services.FindAdminUserByIDCtx(ctx, db, stored.UserID)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 401, nil, nil
+	}
+	if err != nil {
+		slog.Error("refresh: looking up the admin user failed", "user_id", stored.UserID, "error", err)
+		return 500, map[string]string{"error": "Internal server error"}, nil
 	}
 
 	// Consume first: only one of several concurrent refreshes with the same
 	// token wins (the old order issued a pair for each, then deleted).
-	if consumed, err := services.ConsumeRefreshTokenCtx(ctx, db, stored.ID); err != nil || !consumed {
+	consumed, err := services.ConsumeRefreshTokenCtx(ctx, db, stored.ID)
+	if err != nil {
+		slog.Error("refresh: consuming the refresh token failed", "user_id", stored.UserID, "error", err)
+		return 500, map[string]string{"error": "Internal server error"}, nil
+	}
+	if !consumed {
 		return 401, nil, nil
 	}
 
 	accessToken, rawRefresh, err := IssueTokenPairCtx(ctx, db, jwtSecret, stored.UserID, username)
 	if err != nil {
-		return 500, nil, nil
+		slog.Error("refresh: issuing the session tokens failed", "user_id", stored.UserID, "error", err)
+		return 500, map[string]string{"error": "Internal server error"}, nil
 	}
 
 	return 200, map[string]string{"token": accessToken}, []*http.Cookie{

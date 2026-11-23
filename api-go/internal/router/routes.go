@@ -59,22 +59,30 @@ func (r *Router) registerAPINotFound() {
 func (r *Router) registerOpenAPIRoute() {
 	openapiHandler := http.HandlerFunc(handlers.HandleOpenAPISpec)
 	if r.state.Config.DisablePublicPages {
-		r.mux.Handle("/api/openapi.json", handlers.RequireAnyAuth(r.jwtSecret())(openapiHandler))
+		r.mux.Handle("/api/openapi.json", handlers.RequireAnyAuth(r.jwtSecret(), r.state.DB)(openapiHandler))
 		return
 	}
 	r.mux.Handle("/api/openapi.json", openapiHandler)
 }
 
 func (r *Router) registerAuthRoutes() {
-	// Per-IP limit on the credential endpoints (login/setup/key-login and the
-	// refresh-token exchange): they were unthrottled, allowing unlimited
-	// password / token guessing.
+	// Per-IP limit on the credential endpoints (login/setup/key-login): they
+	// were unthrottled, allowing unlimited password guessing.
 	authLimiter := newRateLimiter(r.state.Config.RateLimitAuthRPM)
 	authLimiter.clientIP = r.trust.clientIP
+	// The session refresh has its own, larger bucket (see refreshPerMinute);
+	// RATE_LIMIT_AUTH_RPM=0 turns it off as well.
+	var refreshRPM uint64 = refreshPerMinute
+	if r.state.Config.RateLimitAuthRPM == 0 {
+		refreshRPM = 0
+	}
+	refreshLimiter := newRateLimiterBurst(refreshRPM, refreshBurst)
+	refreshLimiter.clientIP = r.trust.clientIP
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		for range ticker.C {
 			authLimiter.SweepIdle()
+			refreshLimiter.SweepIdle()
 		}
 	}()
 	authRateLimit := RateLimit(authLimiter)
@@ -119,7 +127,7 @@ func (r *Router) registerAuthRoutes() {
 		handlers.WriteAuthResponse(w, status, resp, cookies)
 	})
 
-	throttled("/api/auth/refresh", func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/auth/refresh", RateLimit(refreshLimiter)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			httpx.WriteError(w, 405, "Method not allowed")
 			return
@@ -134,7 +142,7 @@ func (r *Router) registerAuthRoutes() {
 			http.SetCookie(w, c)
 		}
 		httpx.WriteJSON(w, status, resp)
-	})
+	})))
 
 	// Logout. The refresh cookie is path-scoped to /api/auth/refresh, so the
 	// browser only sends it to paths under that prefix: the SPA logs out via
@@ -180,7 +188,7 @@ func (r *Router) registerAuthRoutes() {
 func (r *Router) registerKeyRoutes() {
 	s := r.state
 
-	r.mux.Handle("/api/keys", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/keys", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleListKeys(s.DB, s.SecretsKey)(w, req)
@@ -191,13 +199,13 @@ func (r *Router) registerKeyRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/keys/{id}", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/keys/{id}", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		handlers.HandleDeleteKey(s.DB)(w, req)
 	})))
 
-	r.mux.Handle("/api/keys/{id}/reveal", handlers.RequireAuth(r.jwtSecret())(handlers.HandleRevealKey(s.DB, s.SecretsKey)))
+	r.mux.Handle("/api/keys/{id}/reveal", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(handlers.HandleRevealKey(s.DB, s.SecretsKey)))
 
-	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/keys/{id}/settings", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleGetKeySettings(s.DB, s.fanartAvailable())(w, req)
@@ -233,11 +241,11 @@ func (r *Router) registerKeyRoutes() {
 func (r *Router) registerAdminRoutes() {
 	s := r.state
 
-	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret())(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
+	r.mux.Handle("/api/admin/stats", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(handlers.HandleStats(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
 
 	// Per-admin-user UI preferences (sidebar disclaimer state etc.).
-	r.mux.Handle("/api/admin/prefs", handlers.RequireAuth(r.jwtSecret())(handlers.HandleUserPrefs(s.DB)))
-	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret())(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.Handle("/api/admin/prefs", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(handlers.HandleUserPrefs(s.DB)))
+	r.mux.Handle("/api/admin/settings", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodGet:
 			handlers.HandleGetSettings(s.DB, s.isFreeAPIKeyEnabled(), s.Config.FreeKeyEnabled != nil, s.fanartAvailable())(w, req)
@@ -248,7 +256,7 @@ func (r *Router) registerAdminRoutes() {
 		}
 	})))
 
-	r.mux.Handle("/api/admin/cache/purge", handlers.RequireAuth(r.jwtSecret())(
+	r.mux.Handle("/api/admin/cache/purge", handlers.RequireAuth(r.jwtSecret(), r.state.DB)(
 		handlers.HandlePurgeAll(s.DB, s.Config.CacheDir, s.Config.ExternalCacheOnly, s.Caches)))
 
 	r.mux.HandleFunc("/api/admin/settings/services", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
@@ -334,6 +342,7 @@ func (r *Router) registerAdminRoutes() {
 				return
 			}
 			if err := services.SetGlobalSettingCtx(req.Context(), s.DB, trustedProxiesSetting, raw); err != nil {
+				slog.Error("saving the trusted proxies setting failed", "error", err)
 				httpx.WriteError(w, 500, "Failed to save")
 				return
 			}

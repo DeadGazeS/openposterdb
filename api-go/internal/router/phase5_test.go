@@ -96,11 +96,16 @@ func TestUnknownKey_JSON401WithSPA(t *testing.T) {
 // With public pages disabled the OpenAPI document needs a login, and an
 // API-key session counts (it used to take an admin login only).
 func TestOpenAPI_DisablePublicPages_AnyLogin(t *testing.T) {
-	r, _ := phase5Router(t, func(c *config.Config) { c.DisablePublicPages = true })
+	r, s := phase5Router(t, func(c *config.Config) { c.DisablePublicPages = true })
 	if rec := serve(r, "GET", "/api/openapi.json", "", nil); rec.Code != 401 {
 		t.Errorf("anonymous: %d, want 401", rec.Code)
 	}
-	keyToken, _ := handlers.CreateAPIKeyToken(7, phase5Secret)
+	_, hash, prefix := services.GenerateAPIKey()
+	keyID, err := services.CreateAPIKey(s.DB, "k", hash, prefix, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyToken, _ := handlers.CreateAPIKeyToken(keyID, phase5Secret)
 	if rec := serve(r, "GET", "/api/openapi.json", "", map[string]string{"Authorization": "Bearer " + keyToken}); rec.Code != 200 {
 		t.Errorf("API-key session: %d, want 200", rec.Code)
 	}
@@ -108,17 +113,51 @@ func TestOpenAPI_DisablePublicPages_AnyLogin(t *testing.T) {
 	if rec := serve(r, "GET", "/api/openapi.json", "", map[string]string{"Authorization": "Bearer " + adminToken}); rec.Code != 200 {
 		t.Errorf("admin: %d, want 200", rec.Code)
 	}
+	// Sessions of a deleted key or admin user no longer count.
+	ghostToken, _ := handlers.CreateToken("ghost", phase5Secret)
+	if rec := serve(r, "GET", "/api/openapi.json", "", map[string]string{"Authorization": "Bearer " + ghostToken}); rec.Code != 401 {
+		t.Errorf("deleted admin: %d, want 401", rec.Code)
+	}
+	if err := services.DeleteAPIKey(s.DB, keyID); err != nil {
+		t.Fatal(err)
+	}
+	if rec := serve(r, "GET", "/api/openapi.json", "", map[string]string{"Authorization": "Bearer " + keyToken}); rec.Code != 401 {
+		t.Errorf("deleted key: %d, want 401", rec.Code)
+	}
 }
 
-// The refresh-token exchange shares the credential endpoints' throttle.
-func TestRefresh_Throttled(t *testing.T) {
+// The refresh-token exchange has its own per-IP bucket (the SPA refreshes on
+// every page load): it neither uses up nor is blocked by login's.
+func TestRefresh_OwnThrottle(t *testing.T) {
 	r, _ := phase5Router(t, func(c *config.Config) { c.RateLimitAuthRPM = 2 })
+	for i := range refreshBurst {
+		if code := serve(r, "POST", "/api/auth/refresh", "", nil).Code; code == 429 {
+			t.Fatalf("refresh %d throttled, want a burst of %d", i+1, refreshBurst)
+		}
+	}
+	if code := serve(r, "POST", "/api/auth/refresh", "", nil).Code; code != 429 {
+		t.Errorf("refresh past the burst: %d, want 429", code)
+	}
+	// Login's bucket is untouched by the refreshes and keeps its own limit.
 	var codes []int
 	for range 3 {
-		codes = append(codes, serve(r, "POST", "/api/auth/refresh", "", nil).Code)
+		codes = append(codes, serve(r, "POST", "/api/auth/login", `{}`, nil).Code)
 	}
 	if codes[0] == 429 || codes[2] != 429 {
-		t.Errorf("statuses %v, want the third throttled", codes)
+		t.Errorf("login statuses %v, want the third throttled", codes)
+	}
+	if refreshPerMinute < 60 {
+		t.Errorf("refreshPerMinute %d, want at least 60", refreshPerMinute)
+	}
+}
+
+// RATE_LIMIT_AUTH_RPM=0 turns the refresh limit off too.
+func TestRefresh_ThrottleOffWithAuthLimit(t *testing.T) {
+	r, _ := phase5Router(t, func(c *config.Config) { c.RateLimitAuthRPM = 0 })
+	for i := range refreshBurst + 5 {
+		if code := serve(r, "POST", "/api/auth/refresh", "", nil).Code; code == 429 {
+			t.Fatalf("refresh %d throttled with the auth limits off", i+1)
+		}
 	}
 }
 
