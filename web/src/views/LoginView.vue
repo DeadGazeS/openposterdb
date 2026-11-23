@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import FreeApiKeyCard from '@/components/FreeApiKeyCard.vue'
+import { commonAuthMessage } from '@/lib/auth-result'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -37,18 +38,20 @@ async function handleLogin() {
   loading.value = true
   try {
     if (mode.value === 'admin') {
-      const ok = await auth.login(username.value, password.value)
-      if (ok) {
+      const result = await auth.login(username.value, password.value)
+      if (result.ok) {
         router.push('/admin')
       } else {
-        error.value = 'Invalid username or password'
+        error.value = commonAuthMessage(result) ?? 'Invalid username or password'
       }
     } else {
-      const ok = await auth.loginWithApiKey(apiKeyInput.value)
-      if (ok) {
+      const result = await auth.loginWithApiKey(apiKeyInput.value)
+      if (result.ok) {
         router.push('/individual-image-settings')
+      } else if (result.reason === 'forbidden') {
+        error.value = 'This API key is disabled.'
       } else {
-        error.value = 'Invalid API key'
+        error.value = commonAuthMessage(result) ?? 'Invalid API key'
       }
     }
   } catch {

@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { commonAuthMessage } from '@/lib/auth-result'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -27,11 +28,16 @@ async function handleSetup() {
   }
   loading.value = true
   try {
-    const ok = await auth.setup(username.value, password.value)
-    if (ok) {
+    const result = await auth.setup(username.value, password.value)
+    if (result.ok) {
       router.push('/admin')
+    } else if (result.reason === 'invalid') {
+      // The backend's validation text (fixed strings, no user input echoed).
+      error.value = result.message ?? 'Invalid username or password.'
+    } else if (result.reason === 'forbidden') {
+      error.value = 'Setup is already complete: an admin account exists. Sign in instead.'
     } else {
-      error.value = 'Setup failed. An admin account may already exist.'
+      error.value = commonAuthMessage(result) ?? 'Setup failed'
     }
   } catch {
     error.value = 'Setup failed'
