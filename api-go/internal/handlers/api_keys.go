@@ -91,6 +91,11 @@ func HandleCreateKey(db *sql.DB, secretsKey []byte) http.HandlerFunc {
 			return
 		}
 		createdBy, _, _, err := services.FindAdminUserByUsernameCtx(r.Context(), db, user.Username)
+		if err != nil && err != sql.ErrNoRows {
+			slog.Error("create key: looking up the admin user failed", "error", err)
+			httpx.WriteError(w, 500, "Failed to create key")
+			return
+		}
 		if err != nil || createdBy == 0 {
 			httpx.WriteError(w, 401, "Unauthorized")
 			return
@@ -341,8 +346,9 @@ func validateAndNormalizeKeySettings(s *services.APIKeySettings) error {
 	if err := services.ValidateRatingsExclude(s.RatingsExclude); err != nil {
 		return err
 	}
-	// Unknown / empty values normalise to "id" (match the ID) so the stored
-	// column always holds one of the three known values.
+	// A sent unknown value was already rejected (validateKeySettingsEnums);
+	// a stored one that predates that normalises to "id" (match the ID) so
+	// the column always holds one of the three known values.
 	s.AnimeArtwork = string(services.ParseAnimeArtwork(s.AnimeArtwork))
 	for _, v := range []struct {
 		name string

@@ -18,6 +18,7 @@ var settingEnums = map[string][]string{
 	"_badge_direction": {"d", "h", "v"},
 	"image_source":     {"t", "f"},
 	"poster_fit":       {"native", "cover", "pad", "blur"},
+	"anime_artwork":    {"id", "kitsu", "mal"},
 }
 
 // ValidateSettingEnum checks an enum-valued settings field (by JSON name).

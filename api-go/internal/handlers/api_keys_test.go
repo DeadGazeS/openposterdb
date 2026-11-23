@@ -690,9 +690,21 @@ func TestKeySettingsUpdateMerge_AnimeArtworkPreserveOnOmit(t *testing.T) {
 	if got := mergeKeySettingsUpdate(base, &body2).AnimeArtwork; got != "mal" {
 		t.Errorf("explicit anime_artwork: got %q, want mal", got)
 	}
+	// A request with an unknown value is rejected (400) like the other enum
+	// settings, not silently turned into "id".
+	for v, wantErr := range map[string]bool{"bogus": true, "": true, "id": false, "kitsu": false, "mal": false} {
+		var b keySettingsUpdate
+		if err := json.Unmarshal([]byte(`{"anime_artwork":"`+v+`"}`), &b); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateKeySettingsEnums(&b); (err != nil) != wantErr {
+			t.Errorf("anime_artwork=%q: err %v, want error %v", v, err, wantErr)
+		}
+	}
+	// A stored value that predates validation still normalises to "id".
 	s := &services.APIKeySettings{AnimeArtwork: "bogus", Lang: "en", RatingsOrder: "imdb", RatingsLimit: 3}
 	_ = validateAndNormalizeKeySettings(s)
 	if s.AnimeArtwork != "id" {
-		t.Errorf("unknown anime_artwork normalised to %q, want id", s.AnimeArtwork)
+		t.Errorf("stored unknown anime_artwork normalised to %q, want id", s.AnimeArtwork)
 	}
 }

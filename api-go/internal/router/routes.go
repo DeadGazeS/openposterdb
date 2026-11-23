@@ -100,10 +100,7 @@ func (r *Router) registerAuthRoutes() {
 		_ = httpx.DecodeJSON(req, &body)
 
 		status, resp, cookies := handlers.SetupHandler(req.Context(), s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
-		for _, c := range cookies {
-			http.SetCookie(w, c)
-		}
-		httpx.WriteJSON(w, status, resp)
+		handlers.WriteAuthResponse(w, status, resp, cookies)
 	})
 
 	throttled("/api/auth/login", func(w http.ResponseWriter, req *http.Request) {
@@ -119,10 +116,7 @@ func (r *Router) registerAuthRoutes() {
 
 		ctx := handlers.WithClientIP(req.Context(), r.trust.clientIP(req)) // for the failed-login log
 		status, resp, cookies := handlers.LoginHandler(ctx, s.DB, r.jwtSecret(), s.SecureCookies, body.Username, body.Password)
-		for _, c := range cookies {
-			http.SetCookie(w, c)
-		}
-		httpx.WriteJSON(w, status, resp)
+		handlers.WriteAuthResponse(w, status, resp, cookies)
 	})
 
 	throttled("/api/auth/refresh", func(w http.ResponseWriter, req *http.Request) {
@@ -488,19 +482,21 @@ func (r *Router) registerImageRoutes() {
 	// and browser don't share a bucket with another key behind the same NAT),
 	// with a burst of imageBurst so a library scan's first page of posters
 	// goes through at once; isValid gets its own, smaller bucket; /c/ URLs
-	// carry no key and are counted per IP. Constructed once per Router; the
-	// janitor sweeps idle entries every minute.
-	keyAndIP := func(req *http.Request) string {
-		return apiKeyPrefix(req.PathValue("apiKey")) + ":" + r.trust.clientIP(req)
-	}
+	// carry no key and are counted per IP. The key is not validated yet, so
+	// one IP gets at most maxKeyBucketsPerIP key buckets (random keys can't
+	// fill the table). Constructed once per Router; the janitor sweeps idle
+	// entries every minute.
+	keyPrefix := func(req *http.Request) string { return apiKeyPrefix(req.PathValue("apiKey")) }
 	imageLimiter := newRateLimiterBurst(s.Config.RateLimitRPM, imageBurst)
-	imageLimiter.clientIP = keyAndIP
+	imageLimiter.clientIP = r.trust.clientIP
+	imageLimiter.subKey = keyPrefix
 	var isValidRPM uint64 = isValidPerMinute
 	if s.Config.RateLimitRPM == 0 {
 		isValidRPM = 0 // RATE_LIMIT_RPM=0 turns the image-route limits off
 	}
 	isValidLimiter := newRateLimiterBurst(isValidRPM, isValidBurst)
-	isValidLimiter.clientIP = keyAndIP
+	isValidLimiter.clientIP = r.trust.clientIP
+	isValidLimiter.subKey = keyPrefix
 	cdnLimiter := newRateLimiterBurst(s.Config.RateLimitCDNRPM, imageBurst)
 	cdnLimiter.clientIP = r.trust.clientIP
 	go func() {

@@ -14,10 +14,49 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	apperr "openposterdb/internal/errors"
+	"openposterdb/internal/httpx"
 	"openposterdb/internal/services"
 )
 
 var dummyHash = hashPasswordDummy()
+
+// hashPassword / verifyPassword are the argon2id calls, replaceable in tests.
+var (
+	hashPassword   = services.HashPasswordCtx
+	verifyPassword = services.VerifyPasswordCtx
+)
+
+// loginBusyRetryAfter is the Retry-After (seconds) of a login declined because
+// no password-hashing slot freed up in time.
+const loginBusyRetryAfter = 5
+
+// WriteAuthResponse writes a setup/login result: its cookies, then the body as
+// JSON. An error body (e.g. the busy 503) goes through httpx.WriteAppError so
+// it carries its Retry-After.
+func WriteAuthResponse(w http.ResponseWriter, status int, resp any, cookies []*http.Cookie) {
+	for _, c := range cookies {
+		http.SetCookie(w, c)
+	}
+	if err, ok := resp.(error); ok {
+		httpx.WriteAppError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, status, resp)
+}
+
+// isHashWaitEnded reports a password check that never ran because the
+// request's context ended while waiting for a hashing slot.
+func isHashWaitEnded(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// loginBusy is the answer to a login whose password check never ran: the
+// server is at its hashing capacity, not a wrong password.
+func loginBusy(ctx context.Context, err error) (int, any, []*http.Cookie) {
+	slog.Warn("Login declined: no password-hashing slot", "client_ip", ClientIPFromContext(ctx), "error", err)
+	return http.StatusServiceUnavailable, apperr.NewBusy("server busy, retry shortly", loginBusyRetryAfter), nil
+}
 
 type clientIPKey struct{}
 
@@ -172,10 +211,10 @@ func SetupHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 		return 400, map[string]string{"error": err.Error()}, nil
 	}
 
-	passwordHash, err := services.HashPasswordCtx(ctx, password)
+	passwordHash, err := hashPassword(ctx, password)
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
-		return 400, map[string]string{"error": "Account operation failed"}, nil
+		return 500, map[string]string{"error": "Account operation failed"}, nil
 	}
 
 	userID, err := services.CreateFirstAdminUserCtx(ctx, db, username, passwordHash)
@@ -204,13 +243,22 @@ func LoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, secureCooki
 	// Failed logins carry the (trusted-proxy resolved) client IP and a hash of
 	// the attempted username: enough to spot a guessing run in the log
 	// without writing typed passwords-as-usernames into it.
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		slog.Error("login: looking up the admin user failed", "error", err)
+		return 500, map[string]string{"error": "Authentication failed"}, nil
+	}
 	if err != nil || returnedUsername == "" {
-		services.VerifyPasswordCtx(ctx, password, dummyHash)
+		if _, verr := verifyPassword(ctx, password, dummyHash); isHashWaitEnded(verr) {
+			return loginBusy(ctx, verr)
+		}
 		slog.Warn("Login failed: unknown username", "client_ip", ClientIPFromContext(ctx), "username_hash", services.KeyHash(username))
 		return 401, map[string]string{"error": "Unauthorized"}, nil
 	}
 
-	ok, err := services.VerifyPasswordCtx(ctx, password, passwordHash)
+	ok, err := verifyPassword(ctx, password, passwordHash)
+	if isHashWaitEnded(err) {
+		return loginBusy(ctx, err)
+	}
 	if err != nil || !ok {
 		slog.Warn("Login failed: incorrect password", "client_ip", ClientIPFromContext(ctx), "username_hash", services.KeyHash(username))
 		return 401, map[string]string{"error": "Unauthorized"}, nil
@@ -309,13 +357,18 @@ func LogoutHandler(ctx context.Context, db *sql.DB, username string) error {
 func KeyLoginHandler(ctx context.Context, db *sql.DB, jwtSecret []byte, apiKey string) (int, any) {
 	keyHash := services.HashAPIKey(apiKey)
 	k, err := services.FindAPIKeyByHashCtx(ctx, db, keyHash)
-	if err != nil || k == nil {
+	if err != nil {
+		slog.Error("key login: looking up the api key failed", "error", err)
+		return 500, map[string]string{"error": "Internal server error"}
+	}
+	if k == nil {
 		return 401, map[string]string{"error": "Unauthorized"}
 	}
 
 	token, err := CreateAPIKeyToken(k.ID, jwtSecret)
 	if err != nil {
-		return 400, map[string]string{"error": "Authentication failed"}
+		slog.Error("key login: issuing the token failed", "error", err)
+		return 500, map[string]string{"error": "Internal server error"}
 	}
 
 	return 200, map[string]any{

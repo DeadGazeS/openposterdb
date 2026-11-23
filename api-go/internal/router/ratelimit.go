@@ -12,6 +12,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"openposterdb/internal/config"
+	"openposterdb/internal/httpx"
 )
 
 // rlEntry pairs a token-bucket limiter with the last time it was touched.
@@ -20,6 +21,7 @@ import (
 type rlEntry struct {
 	lim      *rate.Limiter
 	lastSeen atomic.Int64 // unix nanos
+	subIP    string       // the IP of a sub-key bucket ("" for a per-IP one)
 }
 
 // rateLimiter holds per-IP token-bucket limiters. Created lazily on first
@@ -27,18 +29,32 @@ type rlEntry struct {
 type rateLimiter struct {
 	perMinute   uint64
 	burst       int
-	limiters    sync.Map // map[string]*rlEntry
+	limiters    sync.Map // map[string | subKeyBucket]*rlEntry
 	count       atomic.Int64
 	idleTimeout time.Duration
 	overflow    *rate.Limiter // shared bucket once maxLimiterEntries is reached
 	// clientIP keys the buckets; the Router sets it to its live
 	// trusted-proxy resolver (Settings → General → Config / TRUSTED_PROXIES).
 	clientIP func(*http.Request) string
+	// subKey, when set, splits an IP's bucket by a request value (the API
+	// key prefix on the image routes), up to maxKeyBucketsPerIP per IP.
+	subKey    func(*http.Request) string
+	mu        sync.Mutex     // guards keysPerIP and sub-key bucket creation
+	keysPerIP map[string]int // sub-key buckets per IP
 }
+
+// subKeyBucket keys a sub-key bucket; plain per-IP buckets are keyed by the
+// IP string, so the two can't collide.
+type subKeyBucket struct{ sub, ip string }
 
 // maxLimiterEntries bounds the per-IP map; beyond it new IPs share one
 // bucket until idle entries are swept.
 const maxLimiterEntries = 100_000
+
+// maxKeyBucketsPerIP caps the sub-key buckets one IP can create, so a client
+// sending random API keys can't fill the table (and push every other client
+// into the overflow bucket); further keys from that IP share its own bucket.
+const maxKeyBucketsPerIP = 8
 
 // Rust image-route limits: 300 requests a minute with a burst of 240 per
 // API-key prefix + IP; isValid 10 a second with a burst of 30.
@@ -95,6 +111,45 @@ func (r *rateLimiter) limiter(ip string) *rate.Limiter {
 	return ae.lim
 }
 
+// requestLimiter returns the bucket for a request: per IP, or per sub-key +
+// IP when subKey is set. An IP past maxKeyBucketsPerIP sub-key buckets gets
+// its own per-IP bucket for any further key.
+func (r *rateLimiter) requestLimiter(req *http.Request) *rate.Limiter {
+	ip := r.clientIP(req)
+	if r.subKey == nil {
+		return r.limiter(ip)
+	}
+	key := subKeyBucket{sub: r.subKey(req), ip: ip}
+	now := time.Now().UnixNano()
+	if v, ok := r.limiters.Load(key); ok {
+		e := v.(*rlEntry)
+		e.lastSeen.Store(now)
+		return e.lim
+	}
+	if r.count.Load() >= maxLimiterEntries {
+		return r.overflow
+	}
+	r.mu.Lock()
+	if r.keysPerIP[ip] >= maxKeyBucketsPerIP {
+		r.mu.Unlock()
+		return r.limiter(ip)
+	}
+	e := &rlEntry{lim: rate.NewLimiter(rate.Limit(float64(r.perMinute)/60.0), max(r.burst, 1)), subIP: ip}
+	e.lastSeen.Store(now)
+	actual, loaded := r.limiters.LoadOrStore(key, e)
+	if !loaded {
+		r.count.Add(1)
+		if r.keysPerIP == nil {
+			r.keysPerIP = make(map[string]int)
+		}
+		r.keysPerIP[ip]++
+	}
+	r.mu.Unlock()
+	ae := actual.(*rlEntry)
+	ae.lastSeen.Store(now)
+	return ae.lim
+}
+
 // SweepIdle evicts per-IP entries whose lastSeen is older than the idle
 // timeout. Returns the number of entries removed. Safe to call concurrently.
 func (r *rateLimiter) SweepIdle() int {
@@ -103,6 +158,18 @@ func (r *rateLimiter) SweepIdle() int {
 	r.limiters.Range(func(key, value any) bool {
 		e := value.(*rlEntry)
 		if e.lastSeen.Load() < cutoff {
+			if e.subIP != "" {
+				r.mu.Lock()
+				if _, ok := r.limiters.LoadAndDelete(key); ok {
+					if r.keysPerIP[e.subIP]--; r.keysPerIP[e.subIP] <= 0 {
+						delete(r.keysPerIP, e.subIP)
+					}
+					r.count.Add(-1)
+					removed++
+				}
+				r.mu.Unlock()
+				return true
+			}
 			r.limiters.Delete(key)
 			r.count.Add(-1)
 			removed++
@@ -173,18 +240,17 @@ func RateLimit(rl *rateLimiter) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := rl.clientIP(r)
-			lim := rl.limiter(ip)
+			lim := rl.requestLimiter(r)
 			r2 := lim.Reserve()
 			if !r2.OK() {
 				// Should not happen with a non-zero rate; defensively 429.
-				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				httpx.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
 			}
 			if delay := r2.Delay(); delay > 0 {
 				r2.Cancel()
 				w.Header().Set("Retry-After", formatRetryAfter(delay))
-				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				httpx.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
 			}
 			next.ServeHTTP(w, r)

@@ -152,7 +152,12 @@ func HandleImage(deps func() ImageDeps, isFreeAPIKeyEnabled func() bool) http.Ha
 		} else {
 			keyHash := services.HashAPIKey(apiKey)
 			k, err := services.FindAPIKeyByHashCachedCtx(r.Context(), d.DB, keyHash)
-			if err != nil || k == nil {
+			if err != nil {
+				slog.Error("image: api key lookup failed", "error", err)
+				httpx.WriteAppError(w, err)
+				return
+			}
+			if k == nil {
 				httpx.WriteError(w, 401, "invalid api key")
 				return
 			}
@@ -315,7 +320,12 @@ func HandleIsValid(db *sql.DB, isFreeAPIKeyEnabled func() bool, lastUsed KeyReco
 
 		keyHash := services.HashAPIKey(apiKey)
 		k, err := services.FindAPIKeyByHashCachedCtx(r.Context(), db, keyHash)
-		if err != nil || k == nil {
+		if err != nil {
+			slog.Error("isValid: api key lookup failed", "error", err)
+			httpx.WriteAppError(w, err)
+			return
+		}
+		if k == nil {
 			httpx.WriteJSON(w, 401, map[string]interface{}{"error": "Invalid or missing API key"})
 			return
 		}
