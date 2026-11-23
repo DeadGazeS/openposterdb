@@ -647,6 +647,57 @@ func TestUpgradeV004_PreservesIntegerValues(t *testing.T) {
 	}
 }
 
+// TestUpgradeV004_FailureKeepsLegacyColumn: the retype is one transaction, so
+// a failure after the DROP (here the UPDATE writing the converted size back)
+// leaves the TEXT column and the Rust-era value in place for the next boot.
+func TestUpgradeV004_FailureKeepsLegacyColumn(t *testing.T) {
+	db := v004TestDB(t, `CREATE TABLE api_key_settings (
+		api_key_id INTEGER PRIMARY KEY,
+		poster_badge_size TEXT NOT NULL DEFAULT 'm'
+	)`)
+	if _, err := db.Exec(`INSERT INTO api_key_settings (api_key_id, poster_badge_size) VALUES (1, 'xl')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER fail_update BEFORE UPDATE ON api_key_settings
+		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := upgradeV004Ctx(context.Background(), db); err == nil {
+		t.Fatal("want the injected failure")
+	}
+
+	cols, err := tableColumnTypes(context.Background(), db, "api_key_settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cols["poster_badge_size"]; got != "TEXT" {
+		t.Errorf("poster_badge_size type after a failed upgrade: %q, want TEXT", got)
+	}
+	var v string
+	if err := db.QueryRow(`SELECT CAST(poster_badge_size AS TEXT) FROM api_key_settings WHERE api_key_id = 1`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != "xl" {
+		t.Errorf("poster_badge_size after a failed upgrade: %q, want xl", v)
+	}
+
+	// With the cause gone, the next run converts it.
+	if _, err := db.Exec(`DROP TRIGGER fail_update`); err != nil {
+		t.Fatal(err)
+	}
+	if err := upgradeV004Ctx(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var pct int
+	if err := db.QueryRow(`SELECT poster_badge_size FROM api_key_settings WHERE api_key_id = 1`).Scan(&pct); err != nil {
+		t.Fatal(err)
+	}
+	if pct != 142 {
+		t.Errorf("poster_badge_size after the retry: %d, want 142", pct)
+	}
+}
+
 // upgradeCount is the number of upgrades rows a full RunUpgrades records:
 // v001…v005 plus the render-epoch sweep when the epoch is above 0.
 func upgradeCount() int {

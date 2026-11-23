@@ -490,7 +490,23 @@ func migrateNameV003(name string) *string {
 //   - present as TEXT  → DROP + re-ADD; Rust-era size names ("xs".."xl") are
 //     read first and written back as percents (PercentFromLegacySize)
 //   - present INTEGER  → no-op
+//
+// It all runs in one transaction (SQLite DDL is transactional): a crash or
+// error after a DROP rolls back to the TEXT column and its Rust-era values,
+// and the upgrade, not yet recorded, runs again on the next boot.
 func upgradeV004Ctx(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upgradeV004Tx(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func upgradeV004Tx(ctx context.Context, db dbtx) error {
 	cols, err := tableColumnTypes(ctx, db, "api_key_settings")
 	if err != nil {
 		return err
@@ -542,7 +558,7 @@ func upgradeV004Ctx(ctx context.Context, db *sql.DB) error {
 
 // readLegacyBadgeSizes returns the non-default percent for every row whose
 // TEXT badge_size column holds a Rust-era size name.
-func readLegacyBadgeSizes(ctx context.Context, db *sql.DB, kind, column string) (map[int64]ScalePercent, error) {
+func readLegacyBadgeSizes(ctx context.Context, db dbtx, kind, column string) (map[int64]ScalePercent, error) {
 	rows, err := db.QueryContext(ctx, "SELECT api_key_id, CAST("+column+" AS TEXT) FROM api_key_settings")
 	if err != nil {
 		return nil, err
@@ -565,7 +581,7 @@ func readLegacyBadgeSizes(ctx context.Context, db *sql.DB, kind, column string) 
 // tableColumnTypes returns the declared column types of the given table as
 // reported by PRAGMA table_info, keyed by column name. Callers pass a fixed
 // table name — the PRAGMA form does not support bound parameters.
-func tableColumnTypes(ctx context.Context, db *sql.DB, table string) (map[string]string, error) {
+func tableColumnTypes(ctx context.Context, db dbtx, table string) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return nil, err
