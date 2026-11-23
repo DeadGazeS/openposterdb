@@ -71,6 +71,9 @@ type AnimeIDs struct {
 	// MultiPart: Fribb collapses multi-part films into one entry, so its
 	// IMDb/TMDB ids name several titles and none can stand for the entry.
 	MultiPart bool
+	// SharedIMDb: other entries list the same IMDb id (seasons of one show,
+	// or a film carrying its franchise show's id).
+	SharedIMDb bool
 }
 
 // IDMappings holds the offline indexes. Safe for concurrent use; lookups
@@ -716,6 +719,11 @@ func parseFribb(data []byte) (*animeIndex, error) {
 	if len(idx.entries) == 0 {
 		return nil, errors.New("anime list has no entries")
 	}
+	for i := range idx.entries {
+		if a := &idx.entries[i]; a.IMDb != "" {
+			a.SharedIMDb = len(idx.byIMDb[a.IMDb]) > 1
+		}
+	}
 	return idx, nil
 }
 
@@ -791,9 +799,23 @@ func (m *IDMappings) animeIdx() *animeIndex {
 // anime entry stands for, for ratings. Multi-part entries yield nothing (no
 // single title); a TMDB id is only used when its namespace (movie / tv) is
 // known or follows from the entry's type.
+//
+// A film entry often carries its franchise show's ids, so for a film the
+// entry's own type decides: a TMDB id from the tv space and an IMDb id other
+// entries share are refused (as aiometadata's filmIdsFor does).
 func (a AnimeIDs) RatingsIDs() (imdbID *string, tmdbID uint64, mediaType MediaType) {
 	if a.MultiPart {
 		return nil, 0, MediaTypeTV
+	}
+	if a.Type != "" && !animeSeriesLike[a.Type] {
+		if a.IMDb != "" && !a.SharedIMDb {
+			v := a.IMDb
+			imdbID = &v
+		}
+		if a.TMDB != 0 && a.TMDBType != "tv" {
+			tmdbID = a.TMDB
+		}
+		return imdbID, tmdbID, MediaTypeMovie
 	}
 	if a.IMDb != "" {
 		v := a.IMDb

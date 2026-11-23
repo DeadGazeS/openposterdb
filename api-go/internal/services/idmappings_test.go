@@ -104,6 +104,42 @@ func TestIDMappings_AnimeList(t *testing.T) {
 	}
 }
 
+// An anime film's entry often carries its franchise show's ids: a TMDB id
+// from the tv space and the show's IMDb id, shared with the show's entries.
+// Neither stands for the film (mirrors aiometadata's filmIdsFor).
+func TestIDMappings_AnimeFilmRefusesFranchiseIDs(t *testing.T) {
+	const list = `[
+ {"mal_id":1,"kitsu_id":11,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"TV"},
+ {"mal_id":2,"kitsu_id":12,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"MOVIE"},
+ {"mal_id":3,"kitsu_id":13,"imdb_id":"tt0100003","themoviedb_id":700,"themoviedb_type":"movie","type":"MOVIE"},
+ {"mal_id":4,"kitsu_id":14,"imdb_id":"tt0100001","themoviedb_id":500,"themoviedb_type":"tv","type":"OVA"}
+]`
+	m := NewIDMappings(nil, "")
+	if err := m.LoadAnimeList([]byte(list)); err != nil {
+		t.Fatal(err)
+	}
+	film, _ := m.AnimeByMAL(2)
+	if imdb, tmdb, kind := film.RatingsIDs(); imdb != nil || tmdb != 0 || kind != MediaTypeMovie {
+		t.Errorf("film with the show's ids: imdb %v tmdb %d kind %v, want nothing (movie)", imdb, tmdb, kind)
+	}
+	if imdb := m.IMDbForKitsu(12); imdb != nil {
+		t.Errorf("film kitsu 12 → %v, want nil (IMDb id shared with the show)", *imdb)
+	}
+	own, _ := m.AnimeByMAL(3)
+	if imdb, tmdb, kind := own.RatingsIDs(); imdb == nil || *imdb != "tt0100003" || tmdb != 700 || kind != MediaTypeMovie {
+		t.Errorf("film with its own ids: %v %d %v", imdb, tmdb, kind)
+	}
+	// Series-like entries keep the shared show ids.
+	show, _ := m.AnimeByMAL(1)
+	if imdb, tmdb, kind := show.RatingsIDs(); imdb == nil || tmdb != 500 || kind != MediaTypeTV {
+		t.Errorf("show: %v %d %v", imdb, tmdb, kind)
+	}
+	ova, _ := m.AnimeByMAL(4)
+	if imdb, tmdb, kind := ova.RatingsIDs(); imdb == nil || tmdb != 500 || kind != MediaTypeTV {
+		t.Errorf("ova: %v %d %v", imdb, tmdb, kind)
+	}
+}
+
 // Downloads go through an ETag check, a broken file never replaces the last
 // good snapshot, and a 304 reuses the snapshot.
 func TestIDMappings_RefreshSnapshotAndETag(t *testing.T) {
