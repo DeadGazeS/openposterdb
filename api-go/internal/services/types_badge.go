@@ -106,6 +106,26 @@ const (
 	BadgeDirectionDefault    BadgeDirection = "d"
 )
 
+// ParseBadgeStyleOr parses a stored badge style; an unknown value gives def
+// (the kind's default), not BadgeStyleDefault, which is a real style.
+func ParseBadgeStyleOr(s string, def BadgeStyle) BadgeStyle {
+	switch s {
+	case "lr", "h", "rl", "tb", "v", "bt", "d":
+		return ParseBadgeStyle(s)
+	}
+	return def
+}
+
+// ParseBadgeDirectionOr parses a stored badge direction; an unknown value
+// gives def (the kind's default).
+func ParseBadgeDirectionOr(s string, def BadgeDirection) BadgeDirection {
+	switch s {
+	case "h", "v", "d":
+		return ParseBadgeDirection(s)
+	}
+	return def
+}
+
 func ParseBadgeDirection(s string) BadgeDirection {
 	switch s {
 	case "h":
